@@ -2,7 +2,7 @@
  * Responsive grid, mobile-first.
  *  ≥ 1200px: three columns (sidebar · main · inspector).
  *  900–1199px: two columns (sidebar · main), inspector docks below.
- *  < 900px: single column, sidebar collapses into a drawer-style top accordion.
+ *  < 900px: single column, sidebar collapses with max-height to keep main visible.
  * Every pane uses min-width:0 and overflow:auto so content never breaks the layout.
  */
 
@@ -36,6 +36,24 @@
   }
 }
 
+/* skip link for keyboard users — invisible until focused */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  padding: 6px 12px;
+  background: var(--in);
+  color: var(--in-ink);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 10px;
+}
+
 /* top bar */
 .top {
   grid-area: top;
@@ -53,6 +71,7 @@
   font-weight: 600;
   font-size: 15px;
   letter-spacing: -0.01em;
+  flex: 0 0 auto;
 }
 
 .brand-mark {
@@ -70,7 +89,7 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-left: auto;
+  flex: 1 1 auto;
 }
 
 .pill {
@@ -90,25 +109,90 @@
   border-color: rgba(255, 179, 107, 0.35);
 }
 
-.pill-live i {
+.pill-live .dot-indicator {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--dim);
 }
 
-.pill-live-live i {
+.pill-live-live .dot-indicator {
   background: var(--ok);
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-.pill-live-reconnecting i {
+.pill-live-reconnecting .dot-indicator {
   background: var(--warn);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill-live-live .dot-indicator {
+    animation: none;
+  }
+}
+
+.dot-indicator {
+  display: inline-block;
 }
 
 @keyframes pulse {
   50% {
     opacity: 0.35;
+  }
+}
+
+/* top-bar actions */
+.actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.action:hover,
+.action:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-2);
+}
+
+.action[aria-pressed="true"] {
+  color: var(--fg);
+  background: var(--panel-2);
+  border-color: var(--line-2);
+}
+
+.action .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+
+.action .dot.on {
+  background: var(--err);
+  animation: blink 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action .dot.on {
+    animation: none;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
   }
 }
 
@@ -140,6 +224,15 @@
   .side {
     max-height: none;
   }
+  .insp {
+    max-height: 30vh;
+  }
+}
+
+@media (min-width: 1200px) {
+  .insp {
+    max-height: none;
+  }
 }
 
 /* sections inside the sidebar */
@@ -153,9 +246,11 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 12px 14px 6px;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
+  font-weight: 400;
 }
 
 .count {

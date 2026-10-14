@@ -36,8 +36,10 @@ Then run next dev and open /__hoplens.
 
 ### `hoplens init`
 
-Patches `next.config.*` with `withHoplens()` and adds the `@hoplens/next/node`
-import to the `instrumentation` `register()` hook. Creates either file if
+Patches `next.config.*` with `withHoplens()` (from `hoplens/next`) and adds
+the `hoplens/node` dev-only import to the `instrumentation` `register()`
+hook — both routed through the `hoplens` meta so a single `npm i -D hoplens`
+is all a user needs. Creates either file if
 missing. Preserves user code in both; adds `async` to a sync `register()`
 only when it needs to.
 
@@ -73,7 +75,7 @@ Example output on a healthy project:
 
   Wiring
   ✓ next.config.ts uses withHoplens
-  ✓ src/instrumentation.ts loads @hoplens/next/node
+  ✓ src/instrumentation.ts loads the Hoplens runtime
 
   Integrations
   • OpenTelemetry not detected — Hoplens runs standalone
@@ -95,4 +97,4 @@ npx hoplens remove             # undo init
 npx hoplens remove --dry-run   # preview the undo without writing
 ```
 
-Then `npm rm hoplens @hoplens/next` to drop the dependency.
+Then `npm rm hoplens` to drop the dependency.

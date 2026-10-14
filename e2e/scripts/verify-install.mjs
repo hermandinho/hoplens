@@ -124,11 +124,15 @@ run("npx", ["hoplens", "init"], scratchDir);
 const nextCfg = path.join(scratchDir, "next.config.ts");
 const instr = path.join(scratchDir, "instrumentation.ts");
 if (!fs.existsSync(nextCfg)) fail("init didn't create next.config.ts");
-if (!fs.readFileSync(nextCfg, "utf8").includes("withHoplens")) fail("next.config.ts missing withHoplens");
+const nextCfgSrc = fs.readFileSync(nextCfg, "utf8");
+if (!nextCfgSrc.includes("withHoplens")) fail("next.config.ts missing withHoplens");
+if (!nextCfgSrc.includes('from "hoplens/next"'))
+  fail("next.config.ts should import from hoplens/next (meta subpath), not @hoplens/next");
 if (!fs.existsSync(instr)) fail("init didn't create instrumentation.ts");
-if (!fs.readFileSync(instr, "utf8").includes("@hoplens/next/node"))
-  fail("instrumentation.ts missing @hoplens/next/node");
-ok("init produced the expected files");
+const instrSrc = fs.readFileSync(instr, "utf8");
+if (!instrSrc.includes('"hoplens/node"'))
+  fail("instrumentation.ts should import hoplens/node (meta subpath), not @hoplens/next/node");
+ok("init produced files that use the meta subpaths (single-install contract)");
 
 step("npx hoplens doctor");
 run("npx", ["hoplens", "doctor"], scratchDir);

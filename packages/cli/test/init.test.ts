@@ -21,12 +21,12 @@ describe("hoplens init", () => {
 
     expect(fx.exists("next.config.ts")).toBe(true);
     expect(fx.read("next.config.ts")).toMatch(/withHoplens/);
-    expect(fx.read("next.config.ts")).toMatch(/import \{ withHoplens \} from "@hoplens\/next"/);
+    expect(fx.read("next.config.ts")).toMatch(/import \{ withHoplens \} from "hoplens\/next"/);
 
     expect(fx.exists("instrumentation.ts")).toBe(true);
     const ins = fx.read("instrumentation.ts");
     expect(ins).toMatch(/export async function register/);
-    expect(ins).toMatch(/@hoplens\/next\/node/);
+    expect(ins).toMatch(/hoplens\/node/);
     expect(ins).toMatch(/NODE_ENV === "development"/);
   });
 
@@ -39,7 +39,7 @@ describe("hoplens init", () => {
     await withCwd(fx.dir, () => init([]));
 
     const out = fx.read("next.config.ts");
-    expect(out).toContain(`import { withHoplens } from "@hoplens/next"`);
+    expect(out).toContain(`import { withHoplens } from "hoplens/next"`);
     expect(out).toContain("export default withHoplens(nextConfig)");
     // user content is preserved
     expect(out).toContain("reactStrictMode: true");
@@ -54,7 +54,7 @@ describe("hoplens init", () => {
     await withCwd(fx.dir, () => init([]));
 
     const out = fx.read("next.config.js");
-    expect(out).toContain(`const { withHoplens } = require("@hoplens/next")`);
+    expect(out).toContain(`const { withHoplens } = require("hoplens/next")`);
     expect(out).toContain("module.exports = withHoplens(nextConfig)");
   });
 
@@ -68,7 +68,7 @@ describe("hoplens init", () => {
 
     const out = fx.read("instrumentation.ts");
     expect(out).toContain("await setupOtel();");
-    expect(out).toContain("@hoplens/next/node");
+    expect(out).toContain("hoplens/node");
     expect(out).toContain(`NODE_ENV === "development"`);
   });
 

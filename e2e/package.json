@@ -1,0 +1,10 @@
+{
+  "name": "hoplens-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright suite driving real next dev servers — placeholder.",
+  "scripts": {
+    "test": "echo 'e2e suite placeholder'",
+    "typecheck": "echo 'no ts yet'"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "hoplens-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "hoplens.dev landing + docs — placeholder.",
+  "scripts": {
+    "build": "echo 'web app placeholder'",
+    "typecheck": "echo 'no ts in web app yet'",
+    "test": "echo 'no tests in web app yet'"
+  }
+}

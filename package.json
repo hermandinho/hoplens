@@ -16,12 +16,14 @@
     "format": "biome format --write .",
     "clean": "pnpm -r --parallel exec rimraf dist .next",
     "changeset": "changeset",
-    "release": "changeset publish"
+    "version": "changeset version",
+    "release": "pnpm -r --filter=\"./packages/*\" run build && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@changesets/cli": "^2.27.11",
     "@types/node": "^22.10.5",
+    "fast-check": "~4.10.2",
     "rimraf": "^6.0.1",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",

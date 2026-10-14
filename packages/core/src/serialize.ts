@@ -26,7 +26,7 @@ export function preview(value: unknown, r: Redactor, depth = 0, seen = new WeakS
   const t = typeof value;
   if (t === "string") {
     const s = value as string;
-    return s.length > MAX_STRING ? s.slice(0, MAX_STRING) + `… (+${s.length - MAX_STRING} chars)` : s;
+    return s.length > MAX_STRING ? `${s.slice(0, MAX_STRING)}… (+${s.length - MAX_STRING} chars)` : s;
   }
   if (t === "number" || t === "boolean") return value;
   if (t === "bigint") return `${value}n`;
@@ -34,11 +34,13 @@ export function preview(value: unknown, r: Redactor, depth = 0, seen = new WeakS
   if (t === "symbol") return String(value);
   const obj = value as any;
   if (seen.has(obj)) return "[Circular]";
-  if (depth >= MAX_DEPTH) return Array.isArray(obj) ? `[Array(${obj.length})]` : `[${obj.constructor?.name ?? "Object"}]`;
+  if (depth >= MAX_DEPTH)
+    return Array.isArray(obj) ? `[Array(${obj.length})]` : `[${obj.constructor?.name ?? "Object"}]`;
   seen.add(obj);
-  if (obj instanceof Date) return isNaN(obj.getTime()) ? "Invalid Date" : obj.toISOString();
+  if (obj instanceof Date) return Number.isNaN(obj.getTime()) ? "Invalid Date" : obj.toISOString();
   if (obj instanceof Error) return { name: obj.name, message: obj.message };
-  if (obj instanceof Map) return preview(Object.fromEntries(Array.from(obj.entries()).slice(0, MAX_KEYS)), r, depth, seen);
+  if (obj instanceof Map)
+    return preview(Object.fromEntries(Array.from(obj.entries()).slice(0, MAX_KEYS)), r, depth, seen);
   if (obj instanceof Set) return preview(Array.from(obj).slice(0, MAX_ITEMS), r, depth, seen);
   if (typeof URL !== "undefined" && obj instanceof URL) return obj.href;
   if (typeof Request !== "undefined" && obj instanceof Request) return `[Request ${obj.method} ${obj.url}]`;
@@ -46,7 +48,8 @@ export function preview(value: unknown, r: Redactor, depth = 0, seen = new WeakS
   if (typeof Headers !== "undefined" && obj instanceof Headers) {
     return preview(Object.fromEntries((obj as any).entries()), r, depth, seen);
   }
-  if (ArrayBuffer.isView(obj) || obj instanceof ArrayBuffer) return `[${obj.constructor?.name} ${obj.byteLength} bytes]`;
+  if (ArrayBuffer.isView(obj) || obj instanceof ArrayBuffer)
+    return `[${obj.constructor?.name} ${obj.byteLength} bytes]`;
   if (typeof obj.then === "function") return "[Promise]";
   if (Array.isArray(obj)) {
     const out = obj.slice(0, MAX_ITEMS).map((v) => preview(v, r, depth + 1, seen));

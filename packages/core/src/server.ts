@@ -1,25 +1,43 @@
-import fs from "node:fs";
-import path from "node:path";
-import type http from "node:http";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import type http from "node:http";
+import path from "node:path";
 import type { Runtime } from "./runtime";
-import { summarize } from "./store";
 import { preview } from "./serialize";
+import { summarize } from "./store";
 import type { TraceRecord } from "./types";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-const UI_SEARCH_ROOTS = [
-  path.join(__dirname, "..", "ui"),
-  path.join(__dirname, "..", "..", "ui"),
-  path.join(__dirname, "..", "..", "@hoplens", "ui"),
-];
-
 let uiCache: { mtimeMs: number; html: string } | null = null;
+let uiPathCache: string | null = null;
+
+function resolveUiPath(): string | null {
+  if (uiPathCache && fs.existsSync(uiPathCache)) return uiPathCache;
+  // Adapters (e.g. @hoplens/next) resolve the UI path at config-eval time and set this env var,
+  // because bundlers (Turbopack) rewrite __dirname / require.resolve to sentinels like `/ROOT/`
+  // and `[project]` which don't survive path.join at runtime.
+  const fromEnv = process.env.HOPLENS_UI_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) return (uiPathCache = fromEnv);
+  // Non-bundled callers (plain Node, Nest, Express later) can still rely on require.resolve.
+  try {
+    const uiRoot = path.dirname(require.resolve("@hoplens/ui/package.json"));
+    const candidates = [path.join(uiRoot, "dist", "index.html"), path.join(uiRoot, "index.html")];
+    for (const f of candidates) if (fs.existsSync(f)) return (uiPathCache = f);
+  } catch {
+    /* fall through to the error page */
+  }
+  return null;
+}
+
 function uiHtml(): string {
-  const file = UI_SEARCH_ROOTS.map((d) => path.join(d, "index.html")).find((f) => fs.existsSync(f));
-  if (!file) return "<!doctype html><title>Hoplens</title><p>UI bundle missing. Reinstall @hoplens/core.</p>";
+  const file = resolveUiPath();
+  if (!file) {
+    return "<!doctype html><title>Hoplens</title><p>UI bundle missing. Reinstall @hoplens/core, or build @hoplens/ui.</p>";
+  }
   const stat = fs.statSync(file);
-  if (!uiCache || uiCache.mtimeMs !== stat.mtimeMs) uiCache = { mtimeMs: stat.mtimeMs, html: fs.readFileSync(file, "utf8") };
+  if (!uiCache || uiCache.mtimeMs !== stat.mtimeMs) {
+    uiCache = { mtimeMs: stat.mtimeMs, html: fs.readFileSync(file, "utf8") };
+  }
   return uiCache.html;
 }
 
@@ -46,12 +64,10 @@ const routes: Route[] = [];
 function addRoute(method: Route["method"], pattern: string, handler: Handler) {
   const paramNames: string[] = [];
   const re = new RegExp(
-    "^" +
-      pattern.replace(/:([a-zA-Z_][\w]*)/g, (_m, name: string) => {
-        paramNames.push(name);
-        return "([^/]+)";
-      }) +
-      "$",
+    `^${pattern.replace(/:([a-zA-Z_][\w]*)/g, (_m, name: string) => {
+      paramNames.push(name);
+      return "([^/]+)";
+    })}$`,
   );
   routes.push({ method, pattern: re, paramNames, handler });
 }
@@ -105,7 +121,9 @@ addRoute("GET", "/api/meta", ({ rt, res }) => {
   let appName: string | undefined;
   try {
     appName = JSON.parse(fs.readFileSync(path.join(rt.root, "package.json"), "utf8")).name;
-    nextVersion = JSON.parse(fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8")).version;
+    nextVersion = JSON.parse(
+      fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8"),
+    ).version;
   } catch {
     /* optional */
   }
@@ -120,7 +138,10 @@ addRoute("GET", "/api/meta", ({ rt, res }) => {
     configured: rt.options.configured,
     autoTrace: rt.options.autoTrace ?? true,
     profiles: Object.fromEntries(
-      Object.entries(rt.options.profiles ?? {}).map(([k, v]) => [k, { description: v.description, headers: Object.keys(v.headers ?? {}) }]),
+      Object.entries(rt.options.profiles ?? {}).map(([k, v]) => [
+        k,
+        { description: v.description, headers: Object.keys(v.headers ?? {}) },
+      ]),
     ),
   });
 });
@@ -161,7 +182,9 @@ addRoute("GET", "/api/traces/:id/request", ({ rt, params, res }) => {
   ]) {
     delete headers[h];
   }
-  const body = internal?.rawBody ?? (t.request.body?.json !== undefined ? JSON.stringify(t.request.body.json, null, 2) : t.request.body?.text);
+  const body =
+    internal?.rawBody ??
+    (t.request.body?.json !== undefined ? JSON.stringify(t.request.body.json, null, 2) : t.request.body?.text);
   json(res, 200, { method: t.method, url: t.url, headers, body });
 });
 
@@ -183,7 +206,7 @@ addRoute("GET", "/api/events", ({ rt, req, res }) => {
     connection: "keep-alive",
     "x-accel-buffering": "no",
   });
-  res.write(`event: hello\ndata: {}\n\n`);
+  res.write("event: hello\ndata: {}\n\n");
   const send = (event: string) => (t?: TraceRecord) =>
     res.write(`event: ${event}\ndata: ${JSON.stringify(t ? summarize(t) : {})}\n\n`);
   const onStart = send("start");
@@ -212,7 +235,9 @@ addRoute("POST", "/api/run", async ({ rt, req, res }) => {
 
 export async function handleUi(rt: Runtime, req: http.IncomingMessage, res: http.ServerResponse) {
   if (!rt.options.allowRemote && !LOOPBACK.has(req.socket.remoteAddress ?? "")) {
-    return json(res, 403, { error: "Hoplens only answers requests from this machine. Set allowRemote: true to change that." });
+    return json(res, 403, {
+      error: "Hoplens only answers requests from this machine. Set allowRemote: true to change that.",
+    });
   }
   const url = new URL(req.url ?? "/", "http://local");
   const pathname = url.pathname.replace(/^\/__hoplens/, "") || "/";
@@ -241,11 +266,13 @@ async function run(rt: Runtime, input: RunInput, res: http.ServerResponse) {
   const profile = input.profile ? rt.options.profiles?.[input.profile] : undefined;
   if (input.profile && !profile) return json(res, 400, { error: `Unknown profile "${input.profile}"` });
   for (const [k, v] of Object.entries(profile?.headers ?? {})) headers[k.toLowerCase()] = interpolate(v);
-  for (const [k, v] of Object.entries(input.headers ?? {})) if (k.trim()) headers[k.trim().toLowerCase()] = interpolate(String(v));
+  for (const [k, v] of Object.entries(input.headers ?? {}))
+    if (k.trim()) headers[k.trim().toLowerCase()] = interpolate(String(v));
   headers["x-hoplens-run"] = runId;
   const method = (input.method || "GET").toUpperCase();
   const hasBody = input.body !== undefined && input.body !== "" && method !== "GET" && method !== "HEAD";
-  if (hasBody && !headers["content-type"]) headers["content-type"] = /^\s*[[{]/.test(input.body!) ? "application/json" : "text/plain";
+  if (hasBody && !headers["content-type"])
+    headers["content-type"] = /^\s*[[{]/.test(input.body!) ? "application/json" : "text/plain";
 
   const done = new Promise<TraceRecord | undefined>((resolve) => {
     const timer = setTimeout(() => {
@@ -281,10 +308,14 @@ async function run(rt: Runtime, input: RunInput, res: http.ServerResponse) {
     const internal = rt.store.internal(trace);
     if (internal && hasBody) internal.rawBody = input.body;
     if (trace.request.body === undefined && hasBody) {
-      trace.request.body = { contentType: headers["content-type"], size: Buffer.byteLength(input.body!), text: input.body!.slice(0, 20000) };
+      trace.request.body = {
+        contentType: headers["content-type"],
+        size: Buffer.byteLength(input.body!),
+        text: input.body!.slice(0, 20000),
+      };
       try {
         trace.request.body.json = preview(JSON.parse(input.body!), rt.redactor);
-        delete trace.request.body.text;
+        trace.request.body.text = undefined;
       } catch {
         /* keep text */
       }

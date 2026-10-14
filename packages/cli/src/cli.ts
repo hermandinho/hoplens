@@ -1,32 +1,98 @@
-import { init } from "./commands/init";
+import path from "node:path";
 import { doctor } from "./commands/doctor";
+import { init } from "./commands/init";
 import { remove } from "./commands/remove";
-import { c } from "./style";
+import { c, fail } from "./style";
+import { readJson } from "./util";
 
-type Command = (args: string[]) => void | Promise<void>;
-
-const commands: Record<string, Command> = {
-  init,
-  doctor,
-  remove,
+type Command = {
+  run: (args: string[]) => void | Promise<void>;
+  summary: string;
+  help: string;
 };
 
-async function main() {
-  const [cmd = "help", ...rest] = process.argv.slice(2);
-  const run = commands[cmd];
-  if (run) return run(rest);
-  console.log(`
-${c.magenta("◆ Hoplens")} for Node.js backends
+const VERSION = readJson(path.join(__dirname, "..", "package.json"))?.version ?? "0.0.0";
 
-  ${c.bold("npx hoplens init")}      wire Hoplens into next.config and instrumentation
-  ${c.bold("npx hoplens doctor")}    check that everything is in place
-  ${c.bold("npx hoplens remove")}    unwire Hoplens from this project
+const commands: Record<string, Command> = {
+  init: {
+    run: init,
+    summary: "wire Hoplens into next.config and instrumentation",
+    help: `Usage: hoplens init [--dry-run]
+
+  Patches next.config.* with withHoplens() and adds @hoplens/next/node to
+  the instrumentation register() hook. Idempotent and safe to re-run.
+
+  --dry-run    Print the proposed edits without touching any file.`,
+  },
+  doctor: {
+    run: doctor,
+    summary: "check that everything is wired correctly",
+    help: `Usage: hoplens doctor
+
+  Non-destructive health check across Environment / Install / Wiring /
+  Integrations. Exits 1 if Hoplens isn't ready to run; 0 otherwise.`,
+  },
+  remove: {
+    run: remove,
+    summary: "unwire Hoplens from this project (reverse of init)",
+    help: `Usage: hoplens remove [--dry-run]
+
+  Unwraps withHoplens(...) in next.config and strips the Hoplens block
+  from instrumentation.register(). Deletes files that init created when
+  nothing user-authored remains. Idempotent.
+
+  --dry-run    Print the proposed edits without touching any file.`,
+  },
+};
+
+function topLevelHelp() {
+  const names = Object.keys(commands);
+  const width = Math.max(...names.map((n) => n.length));
+  const list = names.map((n) => `  ${c.bold(n.padEnd(width))}   ${commands[n]!.summary}`).join("\n");
+  console.log(`
+${c.magenta("◆ Hoplens")} ${c.dim(`v${VERSION}`)}  for Node.js backends
+
+Usage: ${c.bold("hoplens")} <command> [options]
+
+Commands:
+${list}
+
+Global flags:
+  ${c.bold("-h, --help")}      Show this message (or ${c.bold("hoplens <cmd> --help")})
+  ${c.bold("-v, --version")}   Print version and exit
 
 Then run ${c.bold("next dev")} and open ${c.bold("/__hoplens")}.
 `);
 }
 
+async function main() {
+  const argv = process.argv.slice(2);
+  const first = argv[0];
+
+  if (!first || first === "help" || first === "--help" || first === "-h") {
+    topLevelHelp();
+    return;
+  }
+  if (first === "--version" || first === "-v") {
+    console.log(VERSION);
+    return;
+  }
+
+  const cmd = commands[first];
+  if (!cmd) {
+    fail(`Unknown command: ${c.bold(first)}. Run ${c.bold("hoplens --help")} for the list.`);
+    return;
+  }
+
+  const rest = argv.slice(1);
+  if (rest.includes("--help") || rest.includes("-h")) {
+    console.log(`\n${cmd.help}\n`);
+    return;
+  }
+  return cmd.run(rest);
+}
+
 main().catch((err) => {
-  console.error(err instanceof Error ? err.stack ?? err.message : err);
+  console.error(err instanceof Error ? (err.stack ?? err.message) : err);
   process.exitCode = 1;
 });

@@ -2,7 +2,16 @@
   "name": "@hoplens/schema",
   "version": "0.1.0",
   "description": "Static Zod schema reader for Hoplens. Interprets z.* calls from source without executing code.",
+  "keywords": ["hoplens", "zod", "schema", "static-analysis", "typescript"],
   "license": "MIT",
+  "author": "Hoplens contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hermandinho/hoplens.git",
+    "directory": "packages/schema"
+  },
+  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/schema#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -19,7 +28,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

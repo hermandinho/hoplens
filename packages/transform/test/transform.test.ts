@@ -27,8 +27,12 @@ describe("transform", () => {
     expect(shouldTrace(path.join(root, "src/app/api/x/route.ts"), "", { root })).toBe(false);
     expect(shouldTrace(path.join(root, "src/proxy.ts"), "", { root })).toBe(false);
     expect(shouldTrace(path.join(root, "src/lib/a.ts"), '"use client";\nexport function a() {}', { root })).toBe(false);
-    expect(shouldTrace(path.join(root, "src/lib/a.ts"), "// hi\n'use server'\nexport async function a() {}", { root })).toBe(false);
-    expect(shouldTrace(path.join(root, "src/lib/a.ts"), "export function a() {}", { root, include: ["src/services/**"] })).toBe(false);
+    expect(
+      shouldTrace(path.join(root, "src/lib/a.ts"), "// hi\n'use server'\nexport async function a() {}", { root }),
+    ).toBe(false);
+    expect(
+      shouldTrace(path.join(root, "src/lib/a.ts"), "export function a() {}", { root, include: ["src/services/**"] }),
+    ).toBe(false);
   });
 
   test("glob matching", () => {

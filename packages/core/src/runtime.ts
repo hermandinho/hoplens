@@ -1,20 +1,13 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import {
-  installBodyHooks,
-  installConsoleHook,
-  installHttpHook,
-  installOtel,
-  makeWrap,
-  markOwnServer,
-} from "./capture";
+import { installBodyHooks, installConsoleHook, installHttpHook, installOtel, makeWrap, markOwnServer } from "./capture";
 import { HoplensError } from "./errors";
-import { createLogger, type Logger } from "./logger";
+import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
-import { makeRedactor, type Redactor } from "./serialize";
-import { setDistDir } from "./sourcemap";
+import { type Redactor, makeRedactor } from "./serialize";
 import { handleUi } from "./server";
+import { setDistDir } from "./sourcemap";
 import { TraceStore } from "./store";
 import type { Discovery, DiscoverySource, HttpTap, ProxyInfo, RouteInfo } from "./types";
 
@@ -121,7 +114,10 @@ export class Runtime {
   routeInfo(nextRoute: string, method: string): { file: string; line: number } | undefined {
     const route: RouteInfo | undefined = this.discover().routes.find((r) => r.nextRoute === nextRoute);
     if (!route) return undefined;
-    const m = route.methods.find((x) => x.method === method) ?? route.methods.find((x) => x.method === "ANY") ?? route.methods[0];
+    const m =
+      route.methods.find((x) => x.method === method) ??
+      route.methods.find((x) => x.method === "ANY") ??
+      route.methods[0];
     return { file: route.file, line: m?.line ?? 1 };
   }
 

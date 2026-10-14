@@ -47,6 +47,19 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     };
     process.env.HOPLENS_ENABLED = "1";
     process.env.HOPLENS_OPTIONS = JSON.stringify(resolved);
+    // Turbopack rewrites __dirname and require.resolve to abstract sentinels at bundle time, even
+    // for serverExternalPackages. Resolve the UI HTML path here (Node, pre-bundle) and pass it
+    // through to the runtime via env.
+    try {
+      const uiPkg = createRequire(path.join(resolved.root, "package.json")).resolve("@hoplens/ui/package.json");
+      const uiRoot = path.dirname(uiPkg);
+      const uiFile = [path.join(uiRoot, "dist", "index.html"), path.join(uiRoot, "index.html")].find((f) =>
+        fs.existsSync(f),
+      );
+      if (uiFile) process.env.HOPLENS_UI_PATH = uiFile;
+    } catch {
+      /* runtime falls back to a built-in error page */
+    }
     // Next 15 starts the server process before evaluating this config, so env vars never reach it.
     // We leave the options on disk as well.
     try {
@@ -79,8 +92,8 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     if (autoTrace !== false) {
       const loaderOptions = {
         root: resolved.root,
-        include: typeof autoTrace === "object" ? autoTrace.include ?? [] : [],
-        exclude: typeof autoTrace === "object" ? autoTrace.exclude ?? [] : [],
+        include: typeof autoTrace === "object" ? (autoTrace.include ?? []) : [],
+        exclude: typeof autoTrace === "object" ? (autoTrace.exclude ?? []) : [],
       };
       // Turbopack runs webpack loaders reliably from Next.js 16. On 15.x, Turbopack fails with
       // an internal TP1006 error — users must `next dev --webpack` for function hops.

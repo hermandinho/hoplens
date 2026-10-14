@@ -14,6 +14,14 @@
     "observability"
   ],
   "license": "MIT",
+  "author": "Hoplens contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hermandinho/hoplens.git",
+    "directory": "packages/meta"
+  },
+  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "homepage": "https://github.com/hermandinho/hoplens#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

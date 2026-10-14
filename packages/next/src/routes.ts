@@ -1,14 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadTypeScript } from "@hoplens/transform/ts";
-import {
-  describeShape,
-  exampleOf,
-  interpretSchema,
-  type Resolver,
-  type Shape,
-} from "@hoplens/schema";
 import type { Discovery, DiscoverySource, MethodInfo, ProxyInfo, RouteInfo, SchemaInfo } from "@hoplens/core";
+import { type Resolver, type Shape, describeShape, exampleOf, interpretSchema } from "@hoplens/schema";
+import { loadTypeScript } from "@hoplens/transform/ts";
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 
@@ -106,14 +100,20 @@ export class NextDiscoverySource implements DiscoverySource {
         pattern.push(seg);
       }
     }
-    const routePath = this.basePath + "/" + pattern.join("/");
-    const nextRoute = "/" + visible.join("/");
+    const routePath = `${this.basePath}/${pattern.join("/")}`;
+    const nextRoute = `/${visible.join("/")}`;
     const deps = new Set<string>();
-    const methods = ts ? this.methodsWithTs(ts, file, src, router, deps) : this.methodsWithRegex(src, router);
+    let methods: MethodInfo[];
+    try {
+      methods = ts ? this.methodsWithTs(ts, file, src, router, deps) : this.methodsWithRegex(src, router);
+    } catch {
+      // Pathological sources can overflow TypeScript's parser; the regex fallback is bounded.
+      methods = this.methodsWithRegex(src, router);
+    }
     const route: RouteInfo & { __deps?: string[] } = {
       id: rel(this.root, file),
       router,
-      path: routePath === this.basePath + "/" ? this.basePath || "/" : routePath,
+      path: routePath === `${this.basePath}/` ? this.basePath || "/" : routePath,
       nextRoute: nextRoute === "/" ? "/" : nextRoute,
       file: rel(this.root, file),
       params,
@@ -139,7 +139,8 @@ export class NextDiscoverySource implements DiscoverySource {
         `export\\s+(?:async\\s+)?(?:function\\s+${m}\\b|const\\s+${m}\\b)|export\\s*\\{[^}]*\\b${m}\\b[^}]*\\}`,
       );
       const idx = src.search(re);
-      if (idx >= 0) out.push({ method: m, line: lineOfIndex(src, idx), schemas: [], readsBody: m !== "GET" && m !== "HEAD" });
+      if (idx >= 0)
+        out.push({ method: m, line: lineOfIndex(src, idx), schemas: [], readsBody: m !== "GET" && m !== "HEAD" });
     }
     return out;
   }
@@ -155,17 +156,22 @@ export class NextDiscoverySource implements DiscoverySource {
       if (ts.isFunctionDeclaration(st) && st.name) {
         locals.set(st.name.text, st);
         if (isExported(st)) exported.set(st.name.text, st);
-        if (isExported(st) && st.modifiers?.some((m: any) => m.kind === ts.SyntaxKind.DefaultKeyword)) exported.set("default", st);
+        if (isExported(st) && st.modifiers?.some((m: any) => m.kind === ts.SyntaxKind.DefaultKeyword))
+          exported.set("default", st);
       } else if (ts.isVariableStatement(st)) {
         for (const d of st.declarationList.declarations) {
           if (!ts.isIdentifier(d.name)) continue;
           locals.set(d.name.text, d.initializer ?? d);
           if (isExported(st)) exported.set(d.name.text, d.initializer ?? d);
         }
-      } else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause) && !st.moduleSpecifier) {
+      } else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause)) {
         for (const el of st.exportClause.elements) {
           const local = (el.propertyName ?? el.name).text;
-          exported.set(el.name.text, { __alias: local, node: el });
+          if (st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)) {
+            exported.set(el.name.text, { __reexport: local, spec: st.moduleSpecifier.text, node: el });
+          } else {
+            exported.set(el.name.text, { __alias: local, node: el });
+          }
         }
       } else if (ts.isExportAssignment(st) && !st.isExportEquals) {
         exported.set("default", st.expression);
@@ -174,6 +180,19 @@ export class NextDiscoverySource implements DiscoverySource {
     const fnOf = (n: any): any => {
       if (!n) return null;
       if (n.__alias) return fnOf(locals.get(n.__alias)) ?? n.node;
+      if (n.__reexport) {
+        const target = this.loadModule(ts, n.spec, sf.fileName, deps);
+        if (!target) return n.node;
+        for (const st of target.statements) {
+          if (ts.isFunctionDeclaration(st) && st.name?.text === n.__reexport) return st;
+          if (ts.isVariableStatement(st)) {
+            for (const d of st.declarationList.declarations) {
+              if (ts.isIdentifier(d.name) && d.name.text === n.__reexport) return d.initializer ?? d;
+            }
+          }
+        }
+        return n.node;
+      }
       return n;
     };
 
@@ -205,7 +224,11 @@ export class NextDiscoverySource implements DiscoverySource {
       }
       ts.forEachChild(n, visitVars);
     };
-    visitVars(fn);
+    try {
+      visitVars(fn);
+    } catch {
+      // Pathological ASTs can overflow the recursive visitor; local var tracking just degrades.
+    }
     const classify = (text: string, hops = 0): SchemaInfo["target"] | null => {
       if (/\.json\s*\(|\breq\.body\b|\brequest\.body\b/.test(text)) return "body";
       if (/\.formData\s*\(/.test(text)) return "form";
@@ -257,18 +280,23 @@ export class NextDiscoverySource implements DiscoverySource {
       }
       ts.forEachChild(n, visit);
     };
-    visit(fn);
+    try {
+      visit(fn);
+    } catch {
+      // Pathological ASTs (e.g. extreme assignment chains) can overflow the recursive visitor.
+      // Scanner must still succeed; the route just gets no detected schemas.
+    }
     return found;
   }
 
   private resolver(ts: any, deps: Set<string>): Resolver {
-    const self = this;
     const findInFile = (name: string, sf: any, depth: number): { node: any; sf: any; name: string } | null => {
       if (depth > 6) return null;
       for (const st of sf.statements) {
         if (ts.isVariableStatement(st)) {
           for (const d of st.declarationList.declarations) {
-            if (ts.isIdentifier(d.name) && d.name.text === name && d.initializer) return { node: d.initializer, sf, name };
+            if (ts.isIdentifier(d.name) && d.name.text === name && d.initializer)
+              return { node: d.initializer, sf, name };
           }
         } else if ((ts.isEnumDeclaration(st) || ts.isFunctionDeclaration(st)) && st.name?.text === name) {
           return { node: st, sf, name };
@@ -281,12 +309,12 @@ export class NextDiscoverySource implements DiscoverySource {
         if (nb && ts.isNamedImports(nb)) {
           for (const el of nb.elements) {
             if (el.name.text !== name) continue;
-            const target = self.loadModule(ts, spec, sf.fileName, deps);
+            const target = this.loadModule(ts, spec, sf.fileName, deps);
             if (target) return findExport((el.propertyName ?? el.name).text, target, depth + 1);
           }
         }
         if (st.importClause.name?.text === name) {
-          const target = self.loadModule(ts, spec, sf.fileName, deps);
+          const target = this.loadModule(ts, spec, sf.fileName, deps);
           if (target) return findExport("default", target, depth + 1);
         }
       }
@@ -300,20 +328,22 @@ export class NextDiscoverySource implements DiscoverySource {
             if (el.name.text !== name) continue;
             const local = (el.propertyName ?? el.name).text;
             if (st.moduleSpecifier) {
-              const target = self.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
+              const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
               if (target) return findExport(local, target, depth + 1);
             } else return findInFile(local, sf, depth + 1);
           }
         }
         if (ts.isExportAssignment(st) && name === "default") {
-          return ts.isIdentifier(st.expression) ? findInFile(st.expression.text, sf, depth + 1) : { node: st.expression, sf, name };
+          return ts.isIdentifier(st.expression)
+            ? findInFile(st.expression.text, sf, depth + 1)
+            : { node: st.expression, sf, name };
         }
       }
       const local = findInFile(name, sf, depth);
       if (local) return local;
       for (const st of sf.statements) {
         if (ts.isExportDeclaration(st) && !st.exportClause && st.moduleSpecifier) {
-          const target = self.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
+          const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
           const hit = target && findExport(name, target, depth + 1);
           if (hit) return hit;
         }
@@ -328,7 +358,7 @@ export class NextDiscoverySource implements DiscoverySource {
           if (!ts.isImportDeclaration(st) || !st.importClause?.namedBindings) continue;
           const nb = st.importClause.namedBindings;
           if (ts.isNamespaceImport(nb) && nb.name.text === ns) {
-            const target = self.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
+            const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
             if (target) return findExport(member, target, 0);
           }
         }
@@ -347,7 +377,10 @@ export class NextDiscoverySource implements DiscoverySource {
 
   private resolveModule(ts: any, spec: string, fromFile: string): string | null {
     if (!this.compiler) {
-      let options: any = { moduleResolution: ts.ModuleResolutionKind.Bundler ?? ts.ModuleResolutionKind.NodeNext, allowJs: true };
+      let options: any = {
+        moduleResolution: ts.ModuleResolutionKind.Bundler ?? ts.ModuleResolutionKind.NodeNext,
+        allowJs: true,
+      };
       for (const name of ["tsconfig.json", "jsconfig.json"]) {
         const p = path.join(this.root, name);
         if (!fs.existsSync(p)) continue;
@@ -375,7 +408,13 @@ export class NextDiscoverySource implements DiscoverySource {
     }
     const hit = this.sfCache.get(file);
     if (hit && hit.mtimeMs === stat.mtimeMs) return hit.sf;
-    const sf = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, scriptKind(ts, file));
+    const sf = ts.createSourceFile(
+      file,
+      fs.readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      scriptKind(ts, file),
+    );
     this.sfCache.set(file, { mtimeMs: stat.mtimeMs, sf });
     return sf;
   }
@@ -390,7 +429,9 @@ export class NextDiscoverySource implements DiscoverySource {
       const src = fs.readFileSync(file, "utf8");
       let line = lineOfIndex(
         src,
-        src.search(/export\s+(default\s+)?(async\s+)?function|export\s+(const|let)\s+(proxy|middleware)\b|export\s+default/),
+        src.search(
+          /export\s+(default\s+)?(async\s+)?function|export\s+(const|let)\s+(proxy|middleware)\b|export\s+default/,
+        ),
       );
       const matcher: string[] = [];
       if (ts) {
@@ -398,7 +439,12 @@ export class NextDiscoverySource implements DiscoverySource {
         for (const st of sf.statements) {
           if (ts.isVariableStatement(st)) {
             for (const d of st.declarationList.declarations) {
-              if (ts.isIdentifier(d.name) && d.name.text === "config" && d.initializer && ts.isObjectLiteralExpression(d.initializer)) {
+              if (
+                ts.isIdentifier(d.name) &&
+                d.name.text === "config" &&
+                d.initializer &&
+                ts.isObjectLiteralExpression(d.initializer)
+              ) {
                 for (const p of d.initializer.properties) {
                   if (ts.isPropertyAssignment(p) && p.name.getText(sf) === "matcher") {
                     const init = p.initializer;
@@ -408,7 +454,8 @@ export class NextDiscoverySource implements DiscoverySource {
                         if (ts.isStringLiteral(e)) matcher.push(e.text);
                         else if (ts.isObjectLiteralExpression(e)) {
                           const srcProp = e.properties.find((q: any) => q.name?.getText(sf) === "source");
-                          if (srcProp && ts.isStringLiteral((srcProp as any).initializer)) matcher.push((srcProp as any).initializer.text);
+                          if (srcProp && ts.isStringLiteral((srcProp as any).initializer))
+                            matcher.push((srcProp as any).initializer.text);
                         }
                       }
                     }

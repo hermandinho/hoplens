@@ -1,0 +1,43 @@
+{
+  "name": "@hoplens/next",
+  "version": "0.1.0",
+  "description": "Hoplens adapter for Next.js — withHoplens() config wrap and the Next route scanner.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": { "node": ">=20.9" },
+  "peerDependencies": {
+    "next": ">=15.3.0"
+  },
+  "dependencies": {
+    "@hoplens/core": "workspace:*",
+    "@hoplens/schema": "workspace:*",
+    "@hoplens/transform": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsup": "^8.3.5",
+    "typescript": "~5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

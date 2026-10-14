@@ -1,6 +1,6 @@
 # @hoplens/cli
 
-Command-line tool for [Hoplens](https://hoplens.dev). Installs as `hoplens`
+Command-line tool for [Hoplens](https://github.com/hermandinho/hoplens). Installs as `hoplens`
 on your `PATH` when you add the `hoplens` meta-package to a project. All
 commands are idempotent — safe to re-run and safe to run with `--dry-run`
 first.

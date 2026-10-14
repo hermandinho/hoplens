@@ -1,8 +1,10 @@
 import { batch, computed, signal } from "@preact/signals";
 import { type LiveConnection, api, openLive } from "../api/client";
-import type { Discovery, Meta, TraceRecord, TraceSummary } from "../api/types";
+import type { Discovery, Meta, RouteInfo, TraceRecord, TraceSummary } from "../api/types";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+export type TrafficFilter = "all" | "route" | "page" | "error";
+export type SidebarTab = "routes" | "traffic";
 
 export const metaState = signal<Meta | null>(null);
 export const routesState = signal<Discovery | null>(null);
@@ -14,9 +16,57 @@ export const liveStatus = signal<"live" | "reconnecting" | "offline">("offline")
 export const loadError = signal<string | null>(null);
 export const loadStatus = signal<LoadState>("idle");
 
+export const sidebarTab = signal<SidebarTab>("routes");
+export const routeSearch = signal("");
+export const trafficFilter = signal<TrafficFilter>("all");
+/** "routeId::METHOD" — identifies which route+method pair the request builder is editing. */
+export const selectedRouteKey = signal<string | null>(null);
+
 export const hasRoutes = computed(() => (routesState.value?.routes.length ?? 0) > 0);
 export const hasTraces = computed(() => tracesState.value.length > 0);
 export const tracesWithErrors = computed(() => tracesState.value.filter((t) => t.error).length);
+
+export const filteredRoutes = computed(() => {
+  const q = routeSearch.value.trim().toLowerCase();
+  const all = routesState.value?.routes ?? [];
+  if (!q) return all;
+  return all.filter((r) => r.path.toLowerCase().includes(q) || r.file.toLowerCase().includes(q));
+});
+
+export const filteredTraces = computed(() => {
+  const f = trafficFilter.value;
+  const traces = tracesState.value;
+  if (f === "all") return traces;
+  if (f === "error") return traces.filter((t) => t.error || (t.status ?? 0) >= 400);
+  return traces.filter((t) => t.kind === f);
+});
+
+/** Group routes by first visible path segment ("api", "admin", …). "/" items go under "root". */
+export const groupedRoutes = computed((): Array<{ group: string; items: RouteInfo[] }> => {
+  const groups = new Map<string, RouteInfo[]>();
+  for (const r of filteredRoutes.value) {
+    const parts = r.path.split("/").filter(Boolean);
+    const key = parts[0] ?? "root";
+    const list = groups.get(key) ?? [];
+    list.push(r);
+    groups.set(key, list);
+  }
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([group, items]) => ({ group, items }));
+});
+
+export function selectRoute(route: RouteInfo, method: string): void {
+  selectedRouteKey.value = `${route.id}::${method}`;
+}
+
+export function setSidebarTab(tab: SidebarTab): void {
+  sidebarTab.value = tab;
+}
+
+export function setTrafficFilter(f: TrafficFilter): void {
+  trafficFilter.value = f;
+}
 
 /** Fetch meta + routes + traces in parallel. Called on mount and when the user explicitly refreshes. */
 export async function bootstrap(): Promise<void> {

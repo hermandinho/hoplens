@@ -2,9 +2,17 @@
   "name": "hoplens-e2e",
   "version": "0.0.0",
   "private": true,
-  "description": "Playwright suite driving real next dev servers — placeholder.",
+  "description": "Playwright suite driving real next dev servers against the Hoplens UI.",
   "scripts": {
-    "test": "echo 'e2e suite placeholder'",
-    "typecheck": "echo 'no ts yet'"
+    "test": "playwright test",
+    "snapshots": "playwright test --update-snapshots",
+    "report": "playwright show-report",
+    "install:browsers": "playwright install --with-deps chromium",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.5",
+    "typescript": "~5.7.2"
   }
 }

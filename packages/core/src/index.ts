@@ -23,6 +23,8 @@ export {
   makeWrap,
   markOwnServer,
   isHoplensUrl,
+  toCapture,
+  decodeBody,
 } from "./capture";
 export {
   DEFAULT_REDACT,

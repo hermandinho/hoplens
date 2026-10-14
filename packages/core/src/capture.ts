@@ -166,7 +166,7 @@ function captureResponse(rt: Runtime, t: TraceRecord, res: http.ServerResponse, 
   res.once("close", finish);
 }
 
-function decodeBody(
+export function decodeBody(
   buf: Buffer,
   size: number,
   truncated: boolean,

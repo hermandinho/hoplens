@@ -61,7 +61,8 @@ test.describe("Hoplens UI", () => {
 
     // Click into the trace to drive the journey + details panes.
     await firstTrace.click();
-    await expect(page.locator(".journey-canvas")).toBeVisible();
+    // The default journey view (0.1.2+) is the waterfall; the old SVG flow view is behind the toggle.
+    await expect(page.locator(".waterfall, .journey-canvas").first()).toBeVisible();
 
     // Give the SVG + response pane a tick to settle before snapshotting.
     await page.waitForTimeout(400);
@@ -86,7 +87,8 @@ test.describe("Hoplens UI", () => {
     await expect(firstTrace).toBeVisible({ timeout: 15_000 });
 
     await firstTrace.click();
-    await expect(page.locator(".journey-canvas")).toBeVisible();
+    // The default journey view (0.1.2+) is the waterfall; the old SVG flow view is behind the toggle.
+    await expect(page.locator(".waterfall, .journey-canvas").first()).toBeVisible();
 
     // SVG + response + inspector all need a tick to settle.
     await page.waitForTimeout(400);

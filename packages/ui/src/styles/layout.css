@@ -2057,3 +2057,268 @@
     --dim: #7f8ba3;
   }
 }
+
+/* ================================================================
+   Journey pane: view toggle + waterfall layout
+   ================================================================ */
+
+.journey-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.journey-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.journey-pane-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.journey-view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.journey-view-toggle .view-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.journey-view-toggle .view-btn:hover {
+  color: var(--fg);
+}
+
+.journey-view-toggle .view-btn.active {
+  background: var(--in);
+  color: var(--fg);
+}
+
+.journey-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Waterfall rows -------------------------------------------------- */
+
+.waterfall {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+
+.waterfall-head {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.waterfall-name-col {
+  flex: 0 0 320px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.waterfall-bar-col {
+  flex: 1;
+  position: relative;
+  height: 20px;
+  margin-left: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.waterfall-tick {
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.waterfall-rows {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.waterfall-row-li {
+  margin: 0;
+  padding: 0;
+}
+
+.waterfall-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  font: inherit;
+}
+
+.waterfall-row:hover {
+  background: var(--panel-2);
+}
+
+.waterfall-row.selected {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 var(--in);
+}
+
+.waterfall-row.jw-row-err .jw-span-name {
+  color: var(--err);
+}
+
+.jw-kind-pill {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--bg);
+  text-transform: uppercase;
+  background: var(--muted);
+}
+
+.jw-kind-pill.jw-kind-request {
+  background: var(--k-io);
+}
+.jw-kind-pill.jw-kind-proxy {
+  background: var(--k-proxy);
+}
+.jw-kind-pill.jw-kind-router {
+  background: var(--k-router);
+}
+.jw-kind-pill.jw-kind-handler {
+  background: var(--k-handler);
+}
+.jw-kind-pill.jw-kind-response {
+  background: var(--k-response);
+}
+.jw-kind-pill.jw-kind-function {
+  background: var(--k-function);
+}
+.jw-kind-pill.jw-kind-fetch {
+  background: var(--k-fetch);
+}
+.jw-kind-pill.jw-kind-db {
+  background: var(--k-db);
+}
+.jw-kind-pill.jw-kind-render {
+  background: var(--k-render);
+}
+.jw-kind-pill.jw-kind-custom {
+  background: var(--k-custom);
+}
+
+.jw-span-name {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jw-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 10px;
+  border-radius: 3px;
+  background: var(--muted);
+  min-width: 2px;
+  display: flex;
+  align-items: center;
+  padding-right: 4px;
+  box-sizing: border-box;
+}
+
+.jw-bar.jw-kind-request {
+  background: var(--k-io);
+}
+.jw-bar.jw-kind-proxy {
+  background: var(--k-proxy);
+}
+.jw-bar.jw-kind-router {
+  background: var(--k-router);
+}
+.jw-bar.jw-kind-handler {
+  background: var(--k-handler);
+}
+.jw-bar.jw-kind-response {
+  background: var(--k-response);
+}
+.jw-bar.jw-kind-function {
+  background: var(--k-function);
+}
+.jw-bar.jw-kind-fetch {
+  background: var(--k-fetch);
+}
+.jw-bar.jw-kind-db {
+  background: var(--k-db);
+}
+.jw-bar.jw-kind-render {
+  background: var(--k-render);
+}
+.jw-bar.jw-kind-custom {
+  background: var(--k-custom);
+}
+
+.jw-bar-label {
+  font-size: 10px;
+  color: var(--bg);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  white-space: nowrap;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.4);
+}
+
+@media (max-width: 720px) {
+  .waterfall-name-col {
+    flex-basis: 180px;
+    min-width: 140px;
+  }
+  .jw-bar-label {
+    display: none;
+  }
+}

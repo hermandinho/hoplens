@@ -2,7 +2,16 @@
   "name": "@hoplens/ui",
   "version": "0.1.0",
   "description": "Hoplens UI — Preact + Vite, built to a single inlined HTML file served at /__hoplens.",
+  "keywords": ["hoplens", "ui", "preact", "devtools", "dashboard"],
   "license": "MIT",
+  "author": "Hoplens contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hermandinho/hoplens.git",
+    "directory": "packages/ui"
+  },
+  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/ui#readme",
   "type": "module",
   "main": "./dist/index.html",
   "exports": {

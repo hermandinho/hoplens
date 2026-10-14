@@ -49,11 +49,7 @@
   "bin": {
     "hoplens": "./bin/hoplens.js"
   },
-  "files": [
-    "dist",
-    "bin",
-    "README.md"
-  ],
+  "files": ["dist", "bin", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

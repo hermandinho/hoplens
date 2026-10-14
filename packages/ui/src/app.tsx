@@ -3,6 +3,7 @@ import { Inspector } from "./components/Inspector";
 import { MainPane } from "./components/MainPane";
 import { Sidebar } from "./components/Sidebar";
 import { SourcePeek } from "./components/SourcePeek";
+import { StatusBanner } from "./components/StatusBanner";
 import { TopBar } from "./components/TopBar";
 import { bootstrap, startLive, stopLive } from "./state/store";
 
@@ -18,6 +19,7 @@ export function App() {
       <a href="#main" class="skip-link">
         Skip to request builder
       </a>
+      <StatusBanner />
       <TopBar />
       <Sidebar />
       <MainPane />

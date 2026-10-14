@@ -10,6 +10,7 @@ import {
   selectRoute,
   selectedRouteKey,
 } from "../state/store";
+import { Skeleton } from "./Skeleton";
 
 export function RoutesList() {
   const status = loadStatus.value;
@@ -49,7 +50,11 @@ export function RoutesList() {
         )}
       </search>
 
-      {status === "loading" && <div class="muted">loading…</div>}
+      {status === "loading" && (
+        <div class="skeleton-wrap">
+          <Skeleton lines={5} />
+        </div>
+      )}
       {err && (
         <div class="error" role="alert">
           <b>Can't reach Hoplens.</b>

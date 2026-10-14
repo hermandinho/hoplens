@@ -1689,6 +1689,113 @@
   text-overflow: ellipsis;
 }
 
+/* ================================================================= banner */
+
+.banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+
+.banner-err {
+  background: var(--err-bg);
+  border-color: rgba(255, 95, 109, 0.35);
+  color: var(--err);
+}
+
+.banner-warn {
+  background: rgba(255, 179, 107, 0.08);
+  border-color: rgba(255, 179, 107, 0.3);
+  color: var(--warn);
+}
+
+.banner-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.banner-body b {
+  font-weight: 600;
+  color: inherit;
+}
+
+.banner-body code {
+  background: var(--panel-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font: 11px var(--font-mono);
+  color: var(--fg);
+}
+
+.banner-hint {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 4px;
+}
+
+.banner-err .banner-hint {
+  color: rgba(221, 229, 244, 0.75);
+}
+
+.banner-action {
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  color: var(--fg);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.banner-action:hover,
+.banner-action:focus-visible {
+  border-color: var(--line-3);
+}
+
+/* ================================================================ skeleton */
+
+.skeleton-wrap {
+  padding: 10px 14px;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-row {
+  height: 10px;
+  background: linear-gradient(90deg, var(--panel-2) 0%, var(--raise) 50%, var(--panel-2) 100%);
+  background-size: 200% 100%;
+  border-radius: 4px;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-row {
+    animation: none;
+    background: var(--panel-2);
+  }
+}
+
 .count {
   font: 10.5px var(--font-mono);
   color: var(--dim);

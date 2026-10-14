@@ -8,19 +8,36 @@ import { summarize } from "./store";
 import type { TraceRecord } from "./types";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-const UI_SEARCH_ROOTS = [
-  path.join(__dirname, "..", "ui"),
-  path.join(__dirname, "..", "..", "ui"),
-  path.join(__dirname, "..", "..", "@hoplens", "ui"),
-];
-
 let uiCache: { mtimeMs: number; html: string } | null = null;
+let uiPathCache: string | null = null;
+
+function resolveUiPath(): string | null {
+  if (uiPathCache && fs.existsSync(uiPathCache)) return uiPathCache;
+  // Adapters (e.g. @hoplens/next) resolve the UI path at config-eval time and set this env var,
+  // because bundlers (Turbopack) rewrite __dirname / require.resolve to sentinels like `/ROOT/`
+  // and `[project]` which don't survive path.join at runtime.
+  const fromEnv = process.env.HOPLENS_UI_PATH;
+  if (fromEnv && fs.existsSync(fromEnv)) return (uiPathCache = fromEnv);
+  // Non-bundled callers (plain Node, Nest, Express later) can still rely on require.resolve.
+  try {
+    const uiRoot = path.dirname(require.resolve("@hoplens/ui/package.json"));
+    const candidates = [path.join(uiRoot, "dist", "index.html"), path.join(uiRoot, "index.html")];
+    for (const f of candidates) if (fs.existsSync(f)) return (uiPathCache = f);
+  } catch {
+    /* fall through to the error page */
+  }
+  return null;
+}
+
 function uiHtml(): string {
-  const file = UI_SEARCH_ROOTS.map((d) => path.join(d, "index.html")).find((f) => fs.existsSync(f));
-  if (!file) return "<!doctype html><title>Hoplens</title><p>UI bundle missing. Reinstall @hoplens/core.</p>";
+  const file = resolveUiPath();
+  if (!file) {
+    return "<!doctype html><title>Hoplens</title><p>UI bundle missing. Reinstall @hoplens/core, or build @hoplens/ui.</p>";
+  }
   const stat = fs.statSync(file);
-  if (!uiCache || uiCache.mtimeMs !== stat.mtimeMs)
+  if (!uiCache || uiCache.mtimeMs !== stat.mtimeMs) {
     uiCache = { mtimeMs: stat.mtimeMs, html: fs.readFileSync(file, "utf8") };
+  }
   return uiCache.html;
 }
 

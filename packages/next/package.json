@@ -23,7 +23,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude \"**/benchmark.test.ts\"",
+    "bench": "vitest run test/benchmark.test.ts"
   },
   "engines": { "node": ">=20.9" },
   "peerDependencies": {

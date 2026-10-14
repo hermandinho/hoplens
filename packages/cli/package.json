@@ -1,0 +1,29 @@
+{
+  "name": "@hoplens/cli",
+  "version": "0.1.0",
+  "description": "Hoplens CLI — bin `hoplens`. init / doctor / remove.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "hoplens": "dist/cli.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "engines": { "node": ">=20.9" },
+  "dependencies": {
+    "@hoplens/transform": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsup": "^8.3.5",
+    "typescript": "~5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # `id-token: write` lets npm attach a sigstore provenance attestation when
+    # NPM_CONFIG_PROVENANCE is set below. `contents` + `pull-requests` are what
+    # changesets/action needs to open its Version PR.
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so changesets can diff against the base branch.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # Writes an .npmrc that auths to the npm registry using NPM_TOKEN.
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build packages
+        run: pnpm -r --filter "./packages/**" run build
+
+      - name: Test
+        run: pnpm -r --parallel run test
+
+      # The two Phase 6 gates — these ran on develop already, but we re-run on
+      # main as the last chance to catch a regression before publishing.
+      - name: Verify dev-only build
+        run: pnpm --filter hoplens-e2e verify:build
+
+      - name: Verify install flow
+        run: pnpm --filter hoplens-e2e verify:install
+
+      # If pending changesets exist: opens / updates a "Version Packages" PR
+      # that bumps versions and regenerates CHANGELOGs. When that PR is merged,
+      # this same job runs again and the `publish` step takes effect — pushing
+      # the tagged tarballs to npm.
+      - name: Changesets — version PR or publish
+        uses: changesets/action@v1
+        with:
+          version: pnpm run version
+          publish: pnpm run release
+          commit: "chore(release): version packages"
+          title: "chore(release): version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Tells npm to attach a sigstore provenance attestation to each tarball.
+          # Requires id-token: write and running in GitHub Actions (both true here).
+          NPM_CONFIG_PROVENANCE: "true"

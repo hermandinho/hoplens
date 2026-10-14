@@ -16,7 +16,8 @@
     "format": "biome format --write .",
     "clean": "pnpm -r --parallel exec rimraf dist .next",
     "changeset": "changeset",
-    "release": "changeset publish"
+    "version": "changeset version",
+    "release": "pnpm -r --filter=\"./packages/*\" run build && changeset publish"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

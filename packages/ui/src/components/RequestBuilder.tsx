@@ -89,6 +89,8 @@ export function RequestBuilder() {
             key={t}
             type="button"
             role="tab"
+            id={`builder-tab-${t}`}
+            aria-controls="builder-panel"
             class={`builder-tab ${tab === t ? "active" : ""}`}
             aria-selected={tab === t}
             onClick={() => setBuilderTab(t)}
@@ -100,7 +102,7 @@ export function RequestBuilder() {
         ))}
       </div>
 
-      <div class="builder-body" role="tabpanel">
+      <div id="builder-panel" class="builder-body" role="tabpanel" aria-labelledby={`builder-tab-${tab}`}>
         {tab === "body" && <BodyPane />}
         {tab === "query" && <KvPane target="query" rows={s.query} />}
         {tab === "headers" && <KvPane target="headers" rows={s.headers} />}

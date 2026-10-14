@@ -25,6 +25,8 @@ export function Details() {
             key={t.id}
             type="button"
             role="tab"
+            id={`details-tab-${t.id}`}
+            aria-controls="details-panel"
             class={`details-tab ${tab === t.id ? "active" : ""}`}
             aria-selected={tab === t.id}
             onClick={() => setDetailsTab(t.id)}
@@ -36,7 +38,7 @@ export function Details() {
           </button>
         ))}
       </div>
-      <div class="details-body" role="tabpanel">
+      <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
         {tab === "response" && <ResponsePane trace={trace} />}
         {tab === "waterfall" && <WaterfallPane trace={trace} />}
         {tab === "console" && <ConsolePane trace={trace} />}

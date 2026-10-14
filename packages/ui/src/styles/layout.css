@@ -1957,3 +1957,103 @@
   border-radius: 4px;
   font-size: 11px;
 }
+
+/* ================================================= responsive polish ≤ 500 */
+
+@media (max-width: 500px) {
+  /* Touch targets: 36 px minimum for comfortable tapping (bump pills/tabs/chips). */
+  .sidebar-tab,
+  .builder-tab,
+  .details-tab {
+    min-height: 36px;
+    padding: 10px 12px;
+  }
+
+  .pbtn {
+    min-height: 36px;
+    min-width: 40px;
+    font-size: 13px;
+  }
+
+  .chip,
+  .pill {
+    min-height: 28px;
+    padding: 6px 12px;
+  }
+
+  .method-btn {
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  /* Request builder: URL bar wraps cleanly; Send stays full width on its own row. */
+  .urlbar {
+    gap: 6px;
+  }
+
+  .url {
+    flex-basis: 100%;
+    order: 2;
+  }
+
+  .send {
+    flex: 1 1 auto;
+    order: 3;
+    justify-content: center;
+  }
+
+  .method-select {
+    flex: 0 0 auto;
+    order: 1;
+  }
+
+  /* Journey controls: scrubber takes its own row so it has enough width to drag. */
+  .journey-controls {
+    gap: 8px;
+  }
+
+  .scrubber {
+    flex-basis: 100%;
+    order: 2;
+    min-height: 32px;
+  }
+
+  /* Inspector logs/metrics tighten up. */
+  .insp-metrics {
+    gap: 10px;
+  }
+
+  .insp-log,
+  .console-line {
+    grid-template-columns: 54px 50px minmax(0, 1fr);
+    gap: 6px;
+    font-size: 11px;
+  }
+
+  .insp-log .stack-link {
+    grid-column: 1 / 4;
+  }
+
+  /* Headers table collapses on very narrow — key/value stacked. */
+  .headers-table {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .headers-row > .headers-key {
+    border-bottom: 0;
+    padding-bottom: 1px;
+  }
+}
+
+/* ============================================== high-contrast reinforcement */
+
+@media (prefers-contrast: more) {
+  :root {
+    --line: #3a4a6b;
+    --line-2: #556785;
+    --line-3: #7183a7;
+    --muted: #a9b4ca;
+    --dim: #7f8ba3;
+  }
+}

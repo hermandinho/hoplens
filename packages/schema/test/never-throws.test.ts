@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import ts from "typescript";
 import { describe, expect, test } from "vitest";
-import { exampleOf, interpretSchema, type Resolver, type Shape } from "../src/index";
+import { type Resolver, type Shape, exampleOf, interpretSchema } from "../src/index";
 
 const emptyResolver: Resolver = { ts, resolve: () => null, resolveMember: () => null };
 
@@ -29,9 +29,33 @@ describe("interpretSchema never throws", () => {
 
   test("on random z.*() call chains", () => {
     const method = fc.constantFrom(
-      "string", "number", "int", "boolean", "date", "email", "uuid", "url", "object", "array",
-      "optional", "nullable", "default", "min", "max", "length", "pipe", "transform", "refine",
-      "extend", "pick", "omit", "partial", "describe", "catch", "or", "and",
+      "string",
+      "number",
+      "int",
+      "boolean",
+      "date",
+      "email",
+      "uuid",
+      "url",
+      "object",
+      "array",
+      "optional",
+      "nullable",
+      "default",
+      "min",
+      "max",
+      "length",
+      "pipe",
+      "transform",
+      "refine",
+      "extend",
+      "pick",
+      "omit",
+      "partial",
+      "describe",
+      "catch",
+      "or",
+      "and",
     );
     const chain = fc.array(method, { minLength: 1, maxLength: 8 });
     fc.assert(
@@ -48,7 +72,9 @@ describe("interpretSchema never throws", () => {
     const expr: fc.Arbitrary<string> = fc.letrec((tie) => ({
       e: fc.oneof(
         prim,
-        fc.record({ k: fc.constantFrom("a", "b", "c", "x", "y", "key"), v: tie("e") }).map((o) => `z.object({ ${o.k}: ${o.v as string} })`),
+        fc
+          .record({ k: fc.constantFrom("a", "b", "c", "x", "y", "key"), v: tie("e") })
+          .map((o) => `z.object({ ${o.k}: ${o.v as string} })`),
         tie("e").map((inner) => `z.array(${inner as string})`),
         tie("e").map((inner) => `z.union([${inner as string}, z.string()])`),
       ),

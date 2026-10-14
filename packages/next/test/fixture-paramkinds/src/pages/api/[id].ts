@@ -1,1 +1,3 @@
-export default function handler(_req: any, res: any) { res.json({}); }
+export default function handler(_req: any, res: any) {
+  res.json({});
+}

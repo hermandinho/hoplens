@@ -4,8 +4,8 @@
 //     `webpack-internal:///…` sourceURL. We scan `<distDir>/{dev,}/server` for these inline maps.
 
 import fs from "node:fs";
-import path from "node:path";
 import { SourceMap } from "node:module";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SourceLocation } from "./types";
 
@@ -31,7 +31,7 @@ function exists(p: string) {
 }
 
 function loadMap(file: string): SourceMap | null {
-  const mapFile = file + ".map";
+  const mapFile = `${file}.map`;
   let stat: fs.Stats;
   try {
     stat = fs.statSync(mapFile);
@@ -198,7 +198,9 @@ export function relative(file: string, root: string): string {
 /** Maps a stack through source maps; returns the readable stack and the first frame in the user's code. */
 export function mapStack(stack: string, root: string, skip = 0): { stack: string; location?: SourceLocation } {
   const head = stack.split("\n").filter((l) => !l.trim().startsWith("at "))[0] ?? "";
-  const frames = parseStack(stack).slice(skip).map((f) => mapFrame(f, root));
+  const frames = parseStack(stack)
+    .slice(skip)
+    .map((f) => mapFrame(f, root));
   let location: SourceLocation | undefined;
   const lines: string[] = [];
   let framework = 0;
@@ -210,8 +212,8 @@ export function mapStack(stack: string, root: string, skip = 0): { stack: string
       hidden++;
       continue;
     }
-    const where = own ? `${relative(f.file, root)}:${f.line}:${f.column}` : shorten(f.file, root) + `:${f.line}`;
-    lines.push(`    at ${f.fn ? f.fn + " " : ""}(${where})${own ? "" : "  [framework]"}`);
+    const where = own ? `${relative(f.file, root)}:${f.line}:${f.column}` : `${shorten(f.file, root)}:${f.line}`;
+    lines.push(`    at ${f.fn ? `${f.fn} ` : ""}(${where})${own ? "" : "  [framework]"}`);
   }
   if (hidden) lines.push(`    … ${hidden} more framework frames`);
   return { stack: [head, ...lines].join("\n"), location };
@@ -221,7 +223,7 @@ function shorten(file: string, root: string): string {
   const nm = file.lastIndexOf("node_modules/");
   if (nm >= 0) return file.slice(nm + 13);
   const next = file.indexOf("/next/");
-  if (next >= 0) return "next" + file.slice(next + 5);
+  if (next >= 0) return `next${file.slice(next + 5)}`;
   if (file.startsWith(root)) return relative(file, root);
   return file;
 }

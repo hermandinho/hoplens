@@ -34,8 +34,8 @@ export async function doctor(_args: string[]) {
     `${cfg} uses withHoplens`,
     "next.config doesn't use withHoplens (run npx hoplens init)",
   );
-  const ins = ["src/instrumentation.ts", "src/instrumentation.js", "instrumentation.ts", "instrumentation.js"].find((f) =>
-    fs.existsSync(path.join(root, f)),
+  const ins = ["src/instrumentation.ts", "src/instrumentation.js", "instrumentation.ts", "instrumentation.js"].find(
+    (f) => fs.existsSync(path.join(root, f)),
   );
   check(
     !!ins && fs.readFileSync(path.join(root, ins), "utf8").includes("@hoplens/next/node"),
@@ -45,6 +45,10 @@ export async function doctor(_args: string[]) {
   if (ins && fs.existsSync(path.join(root, "src", "app")) && !ins.startsWith("src/")) {
     warn("Your app lives in src/, so instrumentation must be in src/ too.");
   }
-  check(!!loadTypeScript(root), "TypeScript available (schemas and auto-tracing)", "TypeScript not found: Zod pre-fill and function tracing are off");
+  check(
+    !!loadTypeScript(root),
+    "TypeScript available (schemas and auto-tracing)",
+    "TypeScript not found: Zod pre-fill and function tracing are off",
+  );
   console.log(good ? `\n${c.green("All set.")}\n` : "");
 }

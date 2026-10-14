@@ -79,8 +79,8 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     if (autoTrace !== false) {
       const loaderOptions = {
         root: resolved.root,
-        include: typeof autoTrace === "object" ? autoTrace.include ?? [] : [],
-        exclude: typeof autoTrace === "object" ? autoTrace.exclude ?? [] : [],
+        include: typeof autoTrace === "object" ? (autoTrace.include ?? []) : [],
+        exclude: typeof autoTrace === "object" ? (autoTrace.exclude ?? []) : [],
       };
       // Turbopack runs webpack loaders reliably from Next.js 16. On 15.x, Turbopack fails with
       // an internal TP1006 error — users must `next dev --webpack` for function hops.

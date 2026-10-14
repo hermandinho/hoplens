@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { interpretSchema, type Resolver, type Shape } from "../src/index";
+import { type Resolver, type Shape, interpretSchema } from "../src/index";
 
 // In-file-only resolver — enough for inline-source tests. Cross-file resolution has its own fixture suite.
 function makeResolver(sf: ts.SourceFile): Resolver {
@@ -28,7 +28,8 @@ export function interpret(source: string): Shape {
   const sf = ts.createSourceFile("inline.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const target = sf.statements.find(
     (st): st is ts.VariableStatement =>
-      ts.isVariableStatement(st) && st.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === "S"),
+      ts.isVariableStatement(st) &&
+      st.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === "S"),
   );
   if (!target) throw new Error("harness: no `const S = …` in snippet");
   const decl = target.declarationList.declarations.find((d) => ts.isIdentifier(d.name) && d.name.text === "S")!;

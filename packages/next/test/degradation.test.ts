@@ -32,7 +32,7 @@ describe("degradation contract", () => {
   });
 
   test("syntax error in a route file → scan still completes", () => {
-    writeFile("src/app/api/broken/route.ts", `export function GET(req: Request) { return`);
+    writeFile("src/app/api/broken/route.ts", "export function GET(req: Request) { return");
     const d = new NextDiscoverySource(tmp, "").scan();
     const broken = d.routes.find((r) => r.path === "/api/broken");
     expect(broken).toBeDefined();
@@ -66,12 +66,12 @@ describe("degradation contract", () => {
   });
 
   test("very large garbage file → scan completes bounded", () => {
-    writeFile("src/app/api/huge/route.ts", "x = ".repeat(50000) + "1;");
+    writeFile("src/app/api/huge/route.ts", `${"x = ".repeat(50000)}1;`);
     expect(() => new NextDiscoverySource(tmp, "").scan()).not.toThrow();
   });
 
   test("proxy.ts with no `config` export → ProxyInfo with empty matcher", () => {
-    writeFile("proxy.ts", `export function proxy(req: any) { return req; }`);
+    writeFile("proxy.ts", "export function proxy(req: any) { return req; }");
     const d = new NextDiscoverySource(tmp, "").scan();
     expect(d.proxy).toBeDefined();
     expect(d.proxy?.matcher).toEqual([]);

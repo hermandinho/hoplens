@@ -34,7 +34,7 @@ const ALWAYS_EXCLUDE = [
 ];
 
 export function globToRegExp(glob: string): RegExp {
-  return new RegExp("^" + globBody(glob) + "$");
+  return new RegExp(`^${globBody(glob)}$`);
 }
 
 function globBody(glob: string): string {
@@ -53,7 +53,11 @@ function globBody(glob: string): string {
         re += escapeRe(c);
         continue;
       }
-      re += "(?:" + glob.slice(i + 1, end).split(",").map(globBody).join("|") + ")";
+      re += `(?:${glob
+        .slice(i + 1, end)
+        .split(",")
+        .map(globBody)
+        .join("|")})`;
       i = end;
     } else re += escapeRe(c as string);
   }
@@ -126,14 +130,13 @@ export function transformSource(source: string, file: string, opts: TransformOpt
   if (!targets.length) return null;
 
   let out = source;
-  for (const start of constStarts.sort((a, b) => b - a)) out = out.slice(0, start) + "let  " + out.slice(start + 5);
+  for (const start of constStarts.sort((a, b) => b - a)) out = `${out.slice(0, start)}let  ${out.slice(start + 5)}`;
 
   const rel = path.relative(opts.root, file).split(path.sep).join("/");
   const calls = targets
     .map((t) => `${t.name} = __tpw(${t.name}, ${JSON.stringify({ name: t.name, file: rel, line: t.line })});`)
     .join(" ");
-  out +=
-    `\n;(function () { var __tpw = globalThis["__hoplens"] && globalThis["__hoplens"].wrap; if (typeof __tpw !== "function") return; ${calls} })();\n`;
+  out += `\n;(function () { var __tpw = globalThis["__hoplens"] && globalThis["__hoplens"].wrap; if (typeof __tpw !== "function") return; ${calls} })();\n`;
   return out;
 }
 

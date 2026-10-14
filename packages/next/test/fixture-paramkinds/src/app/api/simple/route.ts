@@ -1,1 +1,3 @@
-export function GET() { return Response.json([]); }
+export function GET() {
+  return Response.json([]);
+}

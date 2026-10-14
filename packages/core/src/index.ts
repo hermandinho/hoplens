@@ -14,8 +14,23 @@ export {
   setDistDir,
   resetEvalMaps,
 } from "./sourcemap";
-export { als, installHttpHook, installBodyHooks, installConsoleHook, installOtel, makeWrap, markOwnServer, isHoplensUrl } from "./capture";
-export { DEFAULT_REDACT, type HoplensOptions, type HoplensProfile, type AutoTraceGlobs, type ResolvedOptions } from "./options";
+export {
+  als,
+  installHttpHook,
+  installBodyHooks,
+  installConsoleHook,
+  installOtel,
+  makeWrap,
+  markOwnServer,
+  isHoplensUrl,
+} from "./capture";
+export {
+  DEFAULT_REDACT,
+  type HoplensOptions,
+  type HoplensProfile,
+  type AutoTraceGlobs,
+  type ResolvedOptions,
+} from "./options";
 export type {
   HopKind,
   SourceLocation,

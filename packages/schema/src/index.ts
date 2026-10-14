@@ -45,25 +45,81 @@ export interface Resolver {
 }
 
 const CONSTRUCTORS = new Set([
-  "string", "number", "bigint", "boolean", "date", "object", "strictObject", "looseObject", "array", "enum",
-  "nativeEnum", "literal", "union", "discriminatedUnion", "intersection", "record", "tuple", "optional", "nullable",
-  "any", "unknown", "null", "undefined", "void", "never", "email", "uuid", "uuidv4", "url", "cuid", "cuid2", "ulid", "nanoid",
-  "int", "int32", "float32", "float64", "lazy", "preprocess", "custom", "instanceof", "set", "map", "promise", "file",
-  "datetime", "ipv4", "ipv6", "base64", "jwt", "e164", "stringbool", "templateLiteral", "guid", "hostname", "emoji",
+  "string",
+  "number",
+  "bigint",
+  "boolean",
+  "date",
+  "object",
+  "strictObject",
+  "looseObject",
+  "array",
+  "enum",
+  "nativeEnum",
+  "literal",
+  "union",
+  "discriminatedUnion",
+  "intersection",
+  "record",
+  "tuple",
+  "optional",
+  "nullable",
+  "any",
+  "unknown",
+  "null",
+  "undefined",
+  "void",
+  "never",
+  "email",
+  "uuid",
+  "uuidv4",
+  "url",
+  "cuid",
+  "cuid2",
+  "ulid",
+  "nanoid",
+  "int",
+  "int32",
+  "float32",
+  "float64",
+  "lazy",
+  "preprocess",
+  "custom",
+  "instanceof",
+  "set",
+  "map",
+  "promise",
+  "file",
+  "datetime",
+  "ipv4",
+  "ipv6",
+  "base64",
+  "jwt",
+  "e164",
+  "stringbool",
+  "templateLiteral",
+  "guid",
+  "hostname",
+  "emoji",
 ]);
 
 export function interpretSchema(node: any, sf: any, r: Resolver, depth = 0, seen = new Set<any>()): Shape {
   const ts = r.ts;
   if (!node || depth > 24) return { t: "any" };
-  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression?.(node) || ts.isNonNullExpression(node)) {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression?.(node) ||
+    ts.isNonNullExpression(node)
+  ) {
     node = node.expression;
   }
 
   if (ts.isIdentifier(node)) {
-    if (seen.has(node.text + "@" + sf.fileName)) return { t: "any", ref: node.text };
+    if (seen.has(`${node.text}@${sf.fileName}`)) return { t: "any", ref: node.text };
     const hit = r.resolve(node.text, sf);
     if (!hit) return { t: "any", ref: node.text };
-    const next = new Set(seen).add(node.text + "@" + sf.fileName);
+    const next = new Set(seen).add(`${node.text}@${sf.fileName}`);
     return { ...interpretSchema(hit.node, hit.sf, r, depth + 1, next), ref: node.text };
   }
 
@@ -191,7 +247,9 @@ function construct(name: string, args: any[], sf: any, r: Resolver, depth: numbe
     case "lazy": {
       const fn = args[0];
       if (fn && (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) {
-        const body = ts.isBlock(fn.body) ? fn.body.statements.find((s: any) => ts.isReturnStatement(s))?.expression : fn.body;
+        const body = ts.isBlock(fn.body)
+          ? fn.body.statements.find((s: any) => ts.isReturnStatement(s))?.expression
+          : fn.body;
         if (body && depth < 6) return sub(body);
       }
       return { t: "any" };
@@ -296,16 +354,27 @@ function modify(base: Shape, method: string, args: any[], sf: any, r: Resolver, 
       const keys = literal(args[0], sf, r);
       const set = new Set(keys && typeof keys === "object" ? Object.keys(keys) : []);
       const props: Record<string, Shape> = {};
-      for (const [k, v] of Object.entries(s.props as Record<string, Shape>)) if (set.has(k) === (method === "pick")) props[k] = v;
+      for (const [k, v] of Object.entries(s.props as Record<string, Shape>))
+        if (set.has(k) === (method === "pick")) props[k] = v;
       return { ...s, props };
     }
     case "partial":
     case "deepPartial":
       if (s.t !== "object") return { ...s, optional: true };
-      return { ...s, props: Object.fromEntries(Object.entries(s.props as Record<string, Shape>).map(([k, v]) => [k, { ...v, optional: true }])) };
+      return {
+        ...s,
+        props: Object.fromEntries(
+          Object.entries(s.props as Record<string, Shape>).map(([k, v]) => [k, { ...v, optional: true }]),
+        ),
+      };
     case "required":
       if (s.t !== "object") return { ...s, optional: false };
-      return { ...s, props: Object.fromEntries(Object.entries(s.props as Record<string, Shape>).map(([k, v]) => [k, { ...v, optional: false }])) };
+      return {
+        ...s,
+        props: Object.fromEntries(
+          Object.entries(s.props as Record<string, Shape>).map(([k, v]) => [k, { ...v, optional: false }]),
+        ),
+      };
     case "element":
       return s.t === "array" ? s.item : s;
     case "unwrap":
@@ -368,7 +437,8 @@ function objectProps(node: any, sf: any, r: Resolver, depth: number, seen: Set<a
 }
 
 function propName(n: any, ts: any): string | undefined {
-  if (ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNumericLiteral(n) || ts.isPrivateIdentifier?.(n)) return n.text;
+  if (ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNumericLiteral(n) || ts.isPrivateIdentifier?.(n))
+    return n.text;
   return undefined;
 }
 
@@ -376,7 +446,8 @@ function propName(n: any, ts: any): string | undefined {
 export function literal(node: any, sf: any, r: Resolver, depth = 0): unknown {
   const ts = r.ts;
   if (!node || depth > 6) return undefined;
-  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression?.(node)) node = node.expression;
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression?.(node))
+    node = node.expression;
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   if (ts.isNumericLiteral(node)) return Number(node.text);
   if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
@@ -525,12 +596,18 @@ function stringFor(format: string | undefined, k: string, s: any): string {
   }
   if (/(^|_)?e?mail$/.test(k) || k.endsWith("email")) return "amina@example.com";
   if (k === "id" || k.endsWith("id") || k.endsWith("_id")) {
-    return s.len || s.min ? "id_" + "x".repeat(Math.max(0, (s.len ?? s.min) - 3)) : FIXED_UUID;
+    return s.len || s.min ? `id_${"x".repeat(Math.max(0, (s.len ?? s.min) - 3))}` : FIXED_UUID;
   }
   if (k === "firstname" || k === "first_name" || k === "givenname") return "Amina";
   if (k === "lastname" || k === "last_name" || k === "surname" || k === "familyname") return "Ngo";
   if (k.endsWith("name")) {
-    return k === "username" ? "amina" : k.includes("company") ? "Acme Inc." : k.includes("product") ? "Canvas tote" : "Amina Ngo";
+    return k === "username"
+      ? "amina"
+      : k.includes("company")
+        ? "Acme Inc."
+        : k.includes("product")
+          ? "Canvas tote"
+          : "Amina Ngo";
   }
   if (k.includes("phone") || k === "tel" || k === "mobile") return "+15145550123";
   if (k === "city") return "Montreal";
@@ -566,7 +643,7 @@ function fitString(v: string, s: any): string {
   if (s.includes && !v.includes(s.includes)) v = v + s.includes;
   const want = s.len ?? undefined;
   const min = want ?? s.min ?? 0;
-  const max = want ?? s.max ?? Infinity;
+  const max = want ?? s.max ?? Number.POSITIVE_INFINITY;
   if (v.length < min) v = v + "x".repeat(min - v.length);
   if (v.length > max) v = v.slice(0, max);
   return v;
@@ -584,8 +661,8 @@ function numberFor(s: any, k: string): number {
   else if (k.includes("year")) v = new Date().getFullYear();
   else v = 1;
   if (s.int) v = Math.round(v);
-  const lo = s.min ?? (s.gt !== undefined ? s.gt + (s.int ? 1 : 0.01) : -Infinity);
-  const hi = s.max ?? (s.lt !== undefined ? s.lt - (s.int ? 1 : 0.01) : Infinity);
+  const lo = s.min ?? (s.gt !== undefined ? s.gt + (s.int ? 1 : 0.01) : Number.NEGATIVE_INFINITY);
+  const hi = s.max ?? (s.lt !== undefined ? s.lt - (s.int ? 1 : 0.01) : Number.POSITIVE_INFINITY);
   if (v < lo) v = lo;
   if (v > hi) v = hi;
   if (s.multipleOf) v = Math.ceil(v / s.multipleOf) * s.multipleOf;

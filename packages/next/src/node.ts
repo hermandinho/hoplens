@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Runtime, createLogger, type ResolvedOptions } from "@hoplens/core";
+import { type ResolvedOptions, Runtime, createLogger } from "@hoplens/core";
 import { NextDiscoverySource } from "./routes";
 
 const log = createLogger("next");
@@ -74,7 +74,7 @@ function printBanner(rt: Runtime) {
   if (!rt.options.configured) notes.push("next.config isn't wrapped with withHoplens — function hops are off.");
   const fnOff = functionTracingReason(rt);
   if (fnOff) notes.push(`Function hops are off: ${fnOff}`);
-  const suffix = notes.length ? "\n   ! " + notes.join("\n   ! ") : "";
+  const suffix = notes.length ? `\n   ! ${notes.join("\n   ! ")}` : "";
   process.stdout.write(`\n \x1b[35m◆ Hoplens\x1b[0m  ${appUrl}${standalone}${suffix}\n\n`);
 }
 
@@ -82,7 +82,11 @@ function functionTracingReason(rt: Runtime): string | undefined {
   if (rt.options.autoTrace === false) return "autoTrace is off in withHoplens options";
   let major = 0;
   try {
-    major = Number(JSON.parse(fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8")).version.split(".")[0]);
+    major = Number(
+      JSON.parse(fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8")).version.split(
+        ".",
+      )[0],
+    );
   } catch {
     /* unknown */
   }

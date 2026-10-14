@@ -1,5 +1,5 @@
-import { init } from "./commands/init";
 import { doctor } from "./commands/doctor";
+import { init } from "./commands/init";
 import { remove } from "./commands/remove";
 import { c } from "./style";
 
@@ -27,6 +27,6 @@ Then run ${c.bold("next dev")} and open ${c.bold("/__hoplens")}.
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.stack ?? err.message : err);
+  console.error(err instanceof Error ? (err.stack ?? err.message) : err);
   process.exitCode = 1;
 });

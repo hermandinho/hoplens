@@ -1,4 +1,4 @@
-import { shouldTrace, transformSource, type TransformOptions } from "./index";
+import { type TransformOptions, shouldTrace, transformSource } from "./index";
 
 function hoplensLoader(this: any, source: string): string {
   const opts: TransformOptions = (typeof this.getOptions === "function" ? this.getOptions() : this.query) || {

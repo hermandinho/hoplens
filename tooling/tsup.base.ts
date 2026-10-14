@@ -9,5 +9,11 @@ export const base: Options = {
   target: "node20",
   splitting: false,
   treeshake: false,
-  external: ["typescript", "next", "@opentelemetry/api", "@opentelemetry/sdk-trace-base", "@opentelemetry/context-async-hooks"],
+  external: [
+    "typescript",
+    "next",
+    "@opentelemetry/api",
+    "@opentelemetry/sdk-trace-base",
+    "@opentelemetry/context-async-hooks",
+  ],
 };

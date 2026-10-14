@@ -34,7 +34,7 @@ export function createLogger(ns: string): Logger {
       emit(process.stderr, "warn", ns, msg);
     },
     error(msg, err) {
-      const detail = err instanceof Error ? err.stack ?? err.message : err !== undefined ? String(err) : "";
+      const detail = err instanceof Error ? (err.stack ?? err.message) : err !== undefined ? String(err) : "";
       emit(process.stderr, "error", ns, detail ? `${msg}\n${detail}` : msg);
     },
   };

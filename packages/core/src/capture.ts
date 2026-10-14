@@ -1,16 +1,16 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import http from "node:http";
 import https from "node:https";
+import { performance } from "node:perf_hooks";
 import util from "node:util";
 import zlib from "node:zlib";
-import { performance } from "node:perf_hooks";
-import { context, trace, type Span } from "@opentelemetry/api";
-import { BasicTracerProvider, type ReadableSpan, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { type Span, context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import type { BodyCapture, CapturedError, HopKind, SpanRecord, TraceKind, TraceRecord } from "./types";
+import { BasicTracerProvider, type ReadableSpan, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { Runtime } from "./runtime";
-import { callerLocation, mapStack } from "./sourcemap";
 import { preview, redactHeaders } from "./serialize";
+import { callerLocation, mapStack } from "./sourcemap";
+import type { BodyCapture, CapturedError, HopKind, SpanRecord, TraceKind, TraceRecord } from "./types";
 
 interface Ctx {
   trace: TraceRecord;
@@ -35,8 +35,8 @@ export function markOwnServer(server: http.Server) {
 
 function defaultClassify(headers: Record<string, string | string[] | undefined>, method: string): TraceKind {
   if (headers["next-action"]) return "action";
-  if (headers["rsc"] === "1") return "rsc";
-  if (String(headers["accept"] ?? "").includes("text/html") && method === "GET") return "page";
+  if (headers.rsc === "1") return "rsc";
+  if (String(headers.accept ?? "").includes("text/html") && method === "GET") return "page";
   return "route";
 }
 
@@ -82,7 +82,7 @@ function startTrace(rt: Runtime, req: http.IncomingMessage, res: http.ServerResp
   const t0 = now();
   const runId = typeof req.headers["x-hoplens-run"] === "string" ? req.headers["x-hoplens-run"] : undefined;
   const headers = { ...req.headers } as Record<string, any>;
-  delete headers["x-hoplens-run"];
+  headers["x-hoplens-run"] = undefined;
   const traceRec: TraceRecord = {
     id: `tr_${(++seq).toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     runId,
@@ -98,7 +98,8 @@ function startTrace(rt: Runtime, req: http.IncomingMessage, res: http.ServerResp
     logs: [],
   };
   const raw: Record<string, string> = {};
-  for (const [k, v] of Object.entries(headers)) if (v !== undefined) raw[k] = Array.isArray(v) ? v.join(", ") : String(v);
+  for (const [k, v] of Object.entries(headers))
+    if (v !== undefined) raw[k] = Array.isArray(v) ? v.join(", ") : String(v);
   rt.store.add(traceRec, { rawHeaders: raw });
   captureResponse(rt, traceRec, res, t0);
   return { trace: traceRec, t0 };
@@ -187,7 +188,13 @@ function decodeBody(
   return toCapture(data, size, truncated, contentType, rt);
 }
 
-export function toCapture(data: Buffer, size: number, truncated: boolean, contentType: string, rt: Runtime): BodyCapture {
+export function toCapture(
+  data: Buffer,
+  size: number,
+  truncated: boolean,
+  contentType: string,
+  rt: Runtime,
+): BodyCapture {
   const out: BodyCapture = { contentType: contentType || undefined, size, truncated: truncated || undefined };
   const textual = /json|text|xml|javascript|x-www-form-urlencoded|event-stream/.test(contentType) || !contentType;
   if (!textual) {
@@ -203,7 +210,7 @@ export function toCapture(data: Buffer, size: number, truncated: boolean, conten
       /* fall through to text */
     }
   }
-  out.text = text.length > 20000 ? text.slice(0, 20000) + "…" : text;
+  out.text = text.length > 20000 ? `${text.slice(0, 20000)}…` : text;
   return out;
 }
 
@@ -222,7 +229,8 @@ export function installBodyHooks(rt: Runtime) {
         const ctx = als.getStore();
         if (ctx && !ctx.trace.request.body && sameRequest(ctx.trace, this)) {
           const ct = this.headers.get("content-type") ?? "";
-          if (method === "json") ctx.trace.request.body = { contentType: ct, size: 0, json: preview(value, rt.redactor) };
+          if (method === "json")
+            ctx.trace.request.body = { contentType: ct, size: 0, json: preview(value, rt.redactor) };
           else if (method === "text") {
             ctx.trace.request.body = toCapture(Buffer.from(value), value.length, false, ct || "text/plain", rt);
           } else if (method === "formData") {
@@ -280,7 +288,7 @@ export function installConsoleHook(rt: Runtime) {
           ctx.trace.logs.push({
             t: now() - ctx.t0,
             level,
-            text: text.length > 4000 ? text.slice(0, 4000) + "…" : text,
+            text: text.length > 4000 ? `${text.slice(0, 4000)}…` : text,
             location: callerLocation(rt.root, 2),
             spanId: span?.spanContext().spanId,
           });
@@ -344,7 +352,8 @@ class HoplensProcessor implements SpanProcessor {
     if (!ctx) return;
     try {
       const attrs: Record<string, any> = {};
-      for (const [k, v] of Object.entries(span.attributes)) if (v !== undefined && !k.startsWith("hoplens.")) attrs[k] = v as any;
+      for (const [k, v] of Object.entries(span.attributes))
+        if (v !== undefined && !k.startsWith("hoplens.")) attrs[k] = v as any;
       const type = attrs["next.span_type"];
       const kind = classify(span.name, type, span.attributes as any);
       if (!kind) return;

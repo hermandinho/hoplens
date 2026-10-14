@@ -6,4 +6,4 @@ export const mul = (a: number, b: number) => a * b,
   PI = 3.14;
 export function* gen() {}
 export default function dflt() {}
-const internal = () => 1;
+const _internal = () => 1;

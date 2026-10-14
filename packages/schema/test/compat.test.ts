@@ -55,7 +55,7 @@ describe("unknown constructs degrade to any without crashing", () => {
     expect(interpret("const S = z.string().thisDoesNotExist();")).toMatchObject({ t: "string" });
   });
   test("very deep call chain does not throw", () => {
-    const chain = "z.string()" + ".min(1).trim().toLowerCase().optional().nullable().default('x').describe('z').meta({})".repeat(1);
+    const chain = `z.string()${".min(1).trim().toLowerCase().optional().nullable().default('x').describe('z').meta({})".repeat(1)}`;
     expect(() => interpret(`const S = ${chain};`)).not.toThrow();
   });
 });

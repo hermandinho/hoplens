@@ -77,9 +77,7 @@ describe("pass-through modifiers do not disturb the shape", () => {
 
 describe("object", () => {
   test("plain object with primitives", () => {
-    expect(
-      interpret("const S = z.object({ name: z.string(), age: z.number() });"),
-    ).toEqual({
+    expect(interpret("const S = z.object({ name: z.string(), age: z.number() });")).toEqual({
       t: "object",
       props: { name: { t: "string" }, age: { t: "number" } },
     });

@@ -1,7 +1,7 @@
-import { NextRequest } from "next/server";
-import { z } from "zod";
 import * as S from "@/lib";
 import { CreateUser } from "@/lib";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 const Query = z.object({ expand: z.coerce.boolean().default(false) });
 

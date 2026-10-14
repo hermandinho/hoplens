@@ -1,1 +1,3 @@
-export function h() { return Response.json([]); }
+export function h() {
+  return Response.json([]);
+}

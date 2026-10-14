@@ -12,10 +12,17 @@ beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-bench-"));
   for (let i = 0; i < ROUTES; i++) {
     const seg = i % 5 === 0 ? `/[id${i}]` : "";
-    const dir = path.join(tmp, "src", "app", "api", `r${Math.floor(i / 25)}`, `handler${i}${seg.replace(/[[\]]/g, "")}`);
+    const dir = path.join(
+      tmp,
+      "src",
+      "app",
+      "api",
+      `r${Math.floor(i / 25)}`,
+      `handler${i}${seg.replace(/[[\]]/g, "")}`,
+    );
     fs.mkdirSync(dir, { recursive: true });
-    const schemas = i % 3 === 0 ? `const Q = z.object({ a: z.string(), b: z.number().int().min(1) });\n` : "";
-    const uses = i % 3 === 0 ? `  Q.parse(await req.json());\n` : "";
+    const schemas = i % 3 === 0 ? "const Q = z.object({ a: z.string(), b: z.number().int().min(1) });\n" : "";
+    const uses = i % 3 === 0 ? "  Q.parse(await req.json());\n" : "";
     fs.writeFileSync(
       path.join(dir, "route.ts"),
       `import { z } from "zod";

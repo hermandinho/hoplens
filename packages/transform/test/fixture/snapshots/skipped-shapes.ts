@@ -13,4 +13,4 @@ export const notAFn = 42;
 export const alsoNot = { a: 1 };
 
 const _internal = () => "internal";
-function alsoInternal() {}
+function _alsoInternal() {}

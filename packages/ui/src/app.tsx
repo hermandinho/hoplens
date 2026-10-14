@@ -38,11 +38,7 @@ export function App() {
         </div>
         <div class="pills">
           {meta?.next && <span class="pill">Next {meta.next}</span>}
-          {meta && (
-            <span class={`pill ${meta.otel === "none" ? "pill-warn" : ""}`}>
-              OTel {meta.otel}
-            </span>
-          )}
+          {meta && <span class={`pill ${meta.otel === "none" ? "pill-warn" : ""}`}>OTel {meta.otel}</span>}
           {meta?.uiPort && <span class="pill mono">:{meta.uiPort}</span>}
           <span class={`pill pill-live pill-live-${live}`}>
             <i />
@@ -64,7 +60,8 @@ export function App() {
           )}
           {status === "ready" && !hasRoutes.value && (
             <div class="muted">
-              No route handlers found. Scanner looks for <code>app/**/route.ts</code> and <code>pages/api/**</code>.
+              No route handlers found. Scanner looks for <code>{"app/**/route.ts"}</code> and{" "}
+              <code>{"pages/api/**"}</code>.
             </div>
           )}
           {status === "ready" && hasRoutes.value && (

@@ -1,5 +1,5 @@
 import { batch, computed, signal } from "@preact/signals";
-import { api, openLive, type LiveConnection } from "../api/client";
+import { type LiveConnection, api, openLive } from "../api/client";
 import type { Discovery, Meta, TraceRecord, TraceSummary } from "../api/types";
 
 type LoadState = "idle" | "loading" | "ready" | "error";

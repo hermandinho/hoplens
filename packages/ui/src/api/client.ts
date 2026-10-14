@@ -1,19 +1,14 @@
-import type {
-  Discovery,
-  Meta,
-  RunInput,
-  RunResult,
-  SourceResponse,
-  TraceRecord,
-  TraceSummary,
-} from "./types";
+import type { Discovery, Meta, RunInput, RunResult, SourceResponse, TraceRecord, TraceSummary } from "./types";
 
 // Hoplens serves the UI at /__hoplens/ and the API under /__hoplens/api. In Vite dev the proxy
 // in vite.config.ts rewrites both to the standalone runtime port on 127.0.0.1:4983.
 const API = "/__hoplens/api";
 
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, { ...init, headers: { accept: "application/json", ...(init?.headers ?? {}) } });
+  const res = await fetch(`${API}${path}`, {
+    ...init,
+    headers: { accept: "application/json", ...(init?.headers ?? {}) },
+  });
   if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
   return (await res.json()) as T;
 }
@@ -70,7 +65,10 @@ export interface LiveConnection {
  * Reconnects with a capped backoff (1s → 30s) on disconnect. The returned
  * handle closes both the EventSource and any pending reconnect timer.
  */
-export function openLive(onEvent: (ev: LiveEvent) => void, onStatus?: (status: "live" | "reconnecting") => void): LiveConnection {
+export function openLive(
+  onEvent: (ev: LiveEvent) => void,
+  onStatus?: (status: "live" | "reconnecting") => void,
+): LiveConnection {
   let source: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let delay = 1000;

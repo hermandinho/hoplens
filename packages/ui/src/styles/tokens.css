@@ -49,7 +49,7 @@ body {
 }
 
 body {
-  font: 13px/1.5 var(--font-ui);
+  font: 13px / 1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
 

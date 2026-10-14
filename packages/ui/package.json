@@ -15,7 +15,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'ui tests arrive in D11 (Playwright)'"
+    "test": "echo 'UI tested via Playwright in the e2e workspace — pnpm --filter hoplens-e2e e2e'"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

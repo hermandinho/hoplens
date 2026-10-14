@@ -4,7 +4,7 @@
   "private": true,
   "description": "Playwright suite driving real next dev servers against the Hoplens UI.",
   "scripts": {
-    "test": "playwright test",
+    "e2e": "playwright test",
     "snapshots": "playwright test --update-snapshots",
     "report": "playwright show-report",
     "install:browsers": "playwright install --with-deps chromium",

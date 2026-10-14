@@ -23,10 +23,14 @@ Regenerate for another platform with `pnpm --filter hoplens-e2e snapshots` on th
 
 ```bash
 pnpm --filter hoplens-e2e install:browsers   # one-time, downloads Chromium
-pnpm --filter hoplens-e2e test               # run suite, compare to baselines
+pnpm --filter hoplens-e2e e2e                # run suite, compare to baselines
 pnpm --filter hoplens-e2e snapshots          # regenerate baselines
 pnpm --filter hoplens-e2e report             # open HTML report after a failure
 ```
+
+The script is named `e2e` (not `test`) on purpose, so repo-wide `pnpm -r test` runs stay
+quick — this suite needs Chromium installed and a free port 3100, which the default unit
+test sweep shouldn't require.
 
 The suite launches `next dev` via Playwright's `webServer` config (`reuseExistingServer`
 locally, fresh in CI). If a stale `next dev` is already bound to port 3100, stop it before

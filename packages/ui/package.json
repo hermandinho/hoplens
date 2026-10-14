@@ -1,18 +1,32 @@
 {
   "name": "@hoplens/ui",
   "version": "0.1.0",
-  "description": "Hoplens UI — single inlined HTML file served at /__hoplens.",
+  "description": "Hoplens UI — Preact + Vite, built to a single inlined HTML file served at /__hoplens.",
   "license": "MIT",
-  "main": "./index.html",
+  "type": "module",
+  "main": "./dist/index.html",
   "exports": {
-    ".": "./index.html",
-    "./index.html": "./index.html",
+    ".": "./dist/index.html",
+    "./index.html": "./dist/index.html",
     "./package.json": "./package.json"
   },
-  "files": ["index.html", "README.md"],
+  "files": ["dist", "README.md"],
   "scripts": {
-    "build": "echo 'ui is static in Phase 1 (Preact rebuild in Phase 4)'",
-    "typecheck": "echo 'no ts in ui yet'",
-    "test": "echo 'no tests in ui yet'"
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'ui tests arrive in D11 (Playwright)'"
+  },
+  "engines": { "node": ">=20.9" },
+  "dependencies": {
+    "preact": "^10.26.4",
+    "@preact/signals": "^2.0.3"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.1",
+    "@types/node": "^22.10.5",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

@@ -1,0 +1,65 @@
+{
+  "name": "hoplens",
+  "version": "0.1.0",
+  "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js adapter.",
+  "keywords": [
+    "nextjs",
+    "next",
+    "devtools",
+    "tracing",
+    "api",
+    "route-handlers",
+    "opentelemetry",
+    "zod",
+    "observability"
+  ],
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "import": "./dist/next.mjs",
+      "require": "./dist/next.js"
+    },
+    "./trace": {
+      "types": "./dist/trace.d.ts",
+      "import": "./dist/trace.mjs",
+      "require": "./dist/trace.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "hoplens": "./bin/hoplens.js"
+  },
+  "files": ["dist", "bin", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'meta: nothing to test'"
+  },
+  "engines": { "node": ">=20.9" },
+  "peerDependencies": {
+    "next": ">=15.3.0"
+  },
+  "peerDependenciesMeta": {
+    "next": { "optional": true }
+  },
+  "dependencies": {
+    "@hoplens/cli": "workspace:*",
+    "@hoplens/next": "workspace:*",
+    "@hoplens/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsup": "^8.3.5",
+    "typescript": "~5.7.2"
+  }
+}

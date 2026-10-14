@@ -82,6 +82,13 @@ ok(`${Object.keys(tarballs).length} tarballs packed`);
 
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "hop-scratch-"));
 step(`Scratch Next project → ${scratchDir}`);
+// Replicate the real user flow: `hoplens` is the only direct dev-dep they add,
+// and the six @hoplens/* workspaces come in transitively via hoplens → cli/next
+// → core → ui etc. We use npm `overrides` to redirect those transitive refs to
+// the local tarballs instead of hitting the real registry. Installing all seven
+// as direct deps (as the earlier version did) hid the ERR_PACKAGE_PATH_NOT_EXPORTED
+// bug because npm hoisted @hoplens/cli's bin into node_modules/.bin, bypassing
+// the meta shim that users actually invoke.
 const scratchPkg = {
   name: "hoplens-install-smoke",
   version: "0.0.0",
@@ -91,6 +98,8 @@ const scratchPkg = {
     react: "^19.0.0",
     "react-dom": "^19.0.0",
     hoplens: `file:${tarballs.hoplens}`,
+  },
+  overrides: {
     "@hoplens/cli": `file:${tarballs["@hoplens/cli"]}`,
     "@hoplens/next": `file:${tarballs["@hoplens/next"]}`,
     "@hoplens/core": `file:${tarballs["@hoplens/core"]}`,

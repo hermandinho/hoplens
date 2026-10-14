@@ -13,10 +13,12 @@
   "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
   "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/cli#readme",
   "type": "commonjs",
+  "main": "./dist/cli.js",
   "bin": {
     "hoplens": "dist/cli.js"
   },
   "exports": {
+    ".": "./dist/cli.js",
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md"],

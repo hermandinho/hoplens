@@ -109,7 +109,13 @@ export class NextDiscoverySource implements DiscoverySource {
     const routePath = this.basePath + "/" + pattern.join("/");
     const nextRoute = "/" + visible.join("/");
     const deps = new Set<string>();
-    const methods = ts ? this.methodsWithTs(ts, file, src, router, deps) : this.methodsWithRegex(src, router);
+    let methods: MethodInfo[];
+    try {
+      methods = ts ? this.methodsWithTs(ts, file, src, router, deps) : this.methodsWithRegex(src, router);
+    } catch {
+      // Pathological sources can overflow TypeScript's parser; the regex fallback is bounded.
+      methods = this.methodsWithRegex(src, router);
+    }
     const route: RouteInfo & { __deps?: string[] } = {
       id: rel(this.root, file),
       router,
@@ -162,10 +168,14 @@ export class NextDiscoverySource implements DiscoverySource {
           locals.set(d.name.text, d.initializer ?? d);
           if (isExported(st)) exported.set(d.name.text, d.initializer ?? d);
         }
-      } else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause) && !st.moduleSpecifier) {
+      } else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause)) {
         for (const el of st.exportClause.elements) {
           const local = (el.propertyName ?? el.name).text;
-          exported.set(el.name.text, { __alias: local, node: el });
+          if (st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)) {
+            exported.set(el.name.text, { __reexport: local, spec: st.moduleSpecifier.text, node: el });
+          } else {
+            exported.set(el.name.text, { __alias: local, node: el });
+          }
         }
       } else if (ts.isExportAssignment(st) && !st.isExportEquals) {
         exported.set("default", st.expression);
@@ -174,6 +184,19 @@ export class NextDiscoverySource implements DiscoverySource {
     const fnOf = (n: any): any => {
       if (!n) return null;
       if (n.__alias) return fnOf(locals.get(n.__alias)) ?? n.node;
+      if (n.__reexport) {
+        const target = this.loadModule(ts, n.spec, sf.fileName, deps);
+        if (!target) return n.node;
+        for (const st of target.statements) {
+          if (ts.isFunctionDeclaration(st) && st.name?.text === n.__reexport) return st;
+          if (ts.isVariableStatement(st)) {
+            for (const d of st.declarationList.declarations) {
+              if (ts.isIdentifier(d.name) && d.name.text === n.__reexport) return d.initializer ?? d;
+            }
+          }
+        }
+        return n.node;
+      }
       return n;
     };
 
@@ -205,7 +228,11 @@ export class NextDiscoverySource implements DiscoverySource {
       }
       ts.forEachChild(n, visitVars);
     };
-    visitVars(fn);
+    try {
+      visitVars(fn);
+    } catch {
+      // Pathological ASTs can overflow the recursive visitor; local var tracking just degrades.
+    }
     const classify = (text: string, hops = 0): SchemaInfo["target"] | null => {
       if (/\.json\s*\(|\breq\.body\b|\brequest\.body\b/.test(text)) return "body";
       if (/\.formData\s*\(/.test(text)) return "form";
@@ -257,7 +284,12 @@ export class NextDiscoverySource implements DiscoverySource {
       }
       ts.forEachChild(n, visit);
     };
-    visit(fn);
+    try {
+      visit(fn);
+    } catch {
+      // Pathological ASTs (e.g. extreme assignment chains) can overflow the recursive visitor.
+      // Scanner must still succeed; the route just gets no detected schemas.
+    }
     return found;
   }
 

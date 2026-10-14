@@ -9,6 +9,7 @@
     "report": "playwright show-report",
     "install:browsers": "playwright install --with-deps chromium",
     "verify:build": "node scripts/verify-build-clean.mjs",
+    "verify:install": "node scripts/verify-install.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

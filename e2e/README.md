@@ -27,6 +27,7 @@ pnpm --filter hoplens-e2e e2e                # run Playwright suite, compare to 
 pnpm --filter hoplens-e2e snapshots          # regenerate baselines
 pnpm --filter hoplens-e2e report             # open HTML report after a failure
 pnpm --filter hoplens-e2e verify:build       # dev-only guarantee: next build has no Hoplens leaks
+pnpm --filter hoplens-e2e verify:install     # install-flow smoke: pack → scratch install → init → doctor
 ```
 
 The script is named `e2e` (not `test`) on purpose, so repo-wide `pnpm -r test` runs stay
@@ -45,3 +46,11 @@ fails if it finds either `@hoplens/` (an import of a Hoplens workspace package) 
 mentions "Hoplens" and a dead `/__hoplens` link, so a plain string grep would false-
 positive — this check uses the two patterns that can only appear if a Hoplens module
 was actually bundled.
+
+## verify:install — end-to-end install smoke
+
+`verify:install` simulates `npm i -D hoplens` from a greenfield project. It packs all
+seven `@hoplens/*` workspaces into tarballs, writes a scratch Next 16 project in a temp
+dir with those tarballs as `file:` deps, runs `npm install`, then `npx hoplens init`,
+then `npx hoplens doctor` — expecting doctor to exit 0. Temp dirs are cleaned up on
+success; pass `--keep` to leave them for inspection.

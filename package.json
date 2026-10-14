@@ -1,0 +1,31 @@
+{
+  "name": "hoplens-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Hoplens monorepo — request-journey visualizer for Node backends (Next.js first).",
+  "engines": {
+    "node": ">=20.9",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter=\"./packages/*\" run build",
+    "typecheck": "pnpm -r --parallel run typecheck",
+    "test": "pnpm -r --parallel run test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "clean": "pnpm -r --parallel exec rimraf dist .next",
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@changesets/cli": "^2.27.11",
+    "@types/node": "^22.10.5",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "~5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

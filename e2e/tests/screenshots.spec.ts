@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 
 /**
  * One pass per viewport project (configured in playwright.config.ts): visit /__hoplens, snapshot
- * the empty state, send a real request through the live Next app, snapshot the loaded state.
+ * the empty state, send a real request through the live Next app, snapshot the loaded state, then
+ * drive a 500 error path and snapshot the error-state trace.
  */
 
 const VALID_ORDER = {
@@ -13,6 +14,11 @@ const VALID_ORDER = {
     address: { line1: "1200 Rue Sainte-Catherine", city: "Montreal", country: "CA" },
   },
 };
+
+// A pre-seeded order in the example app's in-memory store, already in "paid" status.
+// PATCHing it a second time makes payOrder() throw, which turns into a 500 trace with
+// a pinned error location — the exact path the Hoplens UI is designed to showcase.
+const ALREADY_PAID_ORDER_ID = "9c1e7a52-4b0d-4e1a-9a55-1f3c2e8d0b77";
 
 test.describe("Hoplens UI", () => {
   test("initial / empty state loads and matches snapshot", async ({ page, request }, info) => {
@@ -61,5 +67,30 @@ test.describe("Hoplens UI", () => {
     await page.waitForTimeout(400);
 
     await expect(page).toHaveScreenshot(`${info.project.name}-with-trace.png`, { fullPage: true });
+  });
+
+  test("after a 500 handler throw, the trace renders in error state", async ({ page, request }, info) => {
+    await request.delete("/__hoplens/api/traces");
+
+    // Second PATCH on an already-paid order makes payOrder() throw a plain Error.
+    // The example's proxy middleware gates non-GET /api/orders* on x-api-key.
+    const res = await request.patch(`/api/orders/${ALREADY_PAID_ORDER_ID}`, {
+      headers: { "x-api-key": "dev-key" },
+    });
+    expect(res.status()).toBe(500);
+
+    await page.goto("/__hoplens");
+    await page.getByRole("tab", { name: /^Traffic/ }).click();
+
+    const firstTrace = page.locator(".trace-row").first();
+    await expect(firstTrace).toBeVisible({ timeout: 15_000 });
+
+    await firstTrace.click();
+    await expect(page.locator(".journey-canvas")).toBeVisible();
+
+    // SVG + response + inspector all need a tick to settle.
+    await page.waitForTimeout(400);
+
+    await expect(page).toHaveScreenshot(`${info.project.name}-with-error.png`, { fullPage: true });
   });
 });

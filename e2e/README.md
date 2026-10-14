@@ -23,9 +23,10 @@ Regenerate for another platform with `pnpm --filter hoplens-e2e snapshots` on th
 
 ```bash
 pnpm --filter hoplens-e2e install:browsers   # one-time, downloads Chromium
-pnpm --filter hoplens-e2e e2e                # run suite, compare to baselines
+pnpm --filter hoplens-e2e e2e                # run Playwright suite, compare to baselines
 pnpm --filter hoplens-e2e snapshots          # regenerate baselines
 pnpm --filter hoplens-e2e report             # open HTML report after a failure
+pnpm --filter hoplens-e2e verify:build       # dev-only guarantee: next build has no Hoplens leaks
 ```
 
 The script is named `e2e` (not `test`) on purpose, so repo-wide `pnpm -r test` runs stay
@@ -35,3 +36,12 @@ test sweep shouldn't require.
 The suite launches `next dev` via Playwright's `webServer` config (`reuseExistingServer`
 locally, fresh in CI). If a stale `next dev` is already bound to port 3100, stop it before
 re-running — Next 16 refuses to spin up a second dev server on the same cwd.
+
+## verify:build — dev-only guarantee
+
+`verify:build` runs `next build` on the example app, then walks `.next/server/**` and
+fails if it finds either `@hoplens/` (an import of a Hoplens workspace package) or
+`withHoplens(` (the config wrap used as a function). The example app's homepage copy
+mentions "Hoplens" and a dead `/__hoplens` link, so a plain string grep would false-
+positive — this check uses the two patterns that can only appear if a Hoplens module
+was actually bundled.

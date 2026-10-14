@@ -8,6 +8,7 @@
     "snapshots": "playwright test --update-snapshots",
     "report": "playwright show-report",
     "install:browsers": "playwright install --with-deps chromium",
+    "verify:build": "node scripts/verify-build-clean.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

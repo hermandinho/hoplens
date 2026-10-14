@@ -1,9 +1,12 @@
+import { RequestBuilder } from "./RequestBuilder";
+
 export function MainPane() {
   return (
-    <main class="main" aria-label="Request builder and journey">
+    <main id="main" class="main" aria-label="Request builder and journey">
+      <RequestBuilder />
       <div class="empty">
-        <b>Request builder, journey canvas and details</b>
-        Builder lands in D5, journey in D6, details in D7.
+        <b>Journey canvas and details</b>
+        Journey lands in D6, details in D7.
       </div>
     </main>
   );

@@ -1,0 +1,24 @@
+{
+  "name": "example-next16-app",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7",
+    "hoplens": "workspace:*",
+    "@hoplens/next": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "~5.7.2"
+  }
+}

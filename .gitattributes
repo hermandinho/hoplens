@@ -1,0 +1,14 @@
+# Normalize all text files to LF to match biome's enforced line ending.
+# Prevents Windows CRLF from leaking into the repo and failing CI.
+* text=auto eol=lf
+
+# Keep lockfiles binary-ish (they're already LF; marking prevents diff noise)
+pnpm-lock.yaml -text
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

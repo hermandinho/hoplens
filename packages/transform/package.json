@@ -1,0 +1,40 @@
+{
+  "name": "@hoplens/transform",
+  "version": "0.1.0",
+  "description": "Hoplens source transform — rewrites exported functions as traced wrappers without moving a single line.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./loader": "./dist/loader.js",
+    "./register": {
+      "types": "./dist/register.d.ts",
+      "default": "./dist/register.js"
+    },
+    "./ts": {
+      "types": "./dist/ts.d.ts",
+      "default": "./dist/ts.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": { "node": ">=20.9" },
+  "dependencies": {
+    "typescript": ">=5.6.0 <7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsup": "^8.3.5",
+    "vitest": "^2.1.8"
+  }
+}

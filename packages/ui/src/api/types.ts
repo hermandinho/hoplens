@@ -363,3 +363,292 @@ export interface QueriesResponse {
   hosts: HostStat[];
   since: number;
 }
+
+// WP2 -- cause-first trace: pre-handler wait and per-URL-variant baselines (mirrors core).
+
+export interface TraceFacts {
+  /** ms from trace start to the first route-handler span; absent without one (pages, assets). */
+  preHandlerMs?: number;
+}
+
+/** One URL variant of a route (path + query sorted by key, then value; core `urlVariantKey`). */
+export interface UrlVariantStats {
+  url: string;
+  count: number;
+  /** count - cold: the quantile sample. */
+  warm: number;
+  p50?: number;
+  p95?: number;
+  /** Average self time per bucket (ms), warm requests of this variant. */
+  time?: Record<TimeBucket, number>;
+  /** Average I/O counts per request of this variant. */
+  io?: { db: number; fetch: number; cache: number; fn: number };
+}
+
+export interface EpochStats {
+  /** Per URL variant, most requests first; at most 20 per route-epoch. */
+  variants?: UrlVariantStats[];
+}
+
+// WP8 -- compare: GET /api/compare?a=&b= and /api/compare/baselines?b= (mirrors core compare.ts).
+
+export interface CompareSide {
+  id: string;
+  method: string;
+  url: string;
+  path: string;
+  route?: string;
+  status?: number;
+  duration: number;
+  startedAt: number;
+  done: boolean;
+  epoch?: number;
+  cold?: boolean;
+  ttfb?: number;
+  reqBytes?: number;
+  resBytes?: number;
+  error?: string;
+}
+
+export interface BucketDelta {
+  bucket: TimeBucket;
+  a: number;
+  b: number;
+  /** b - a, ms. */
+  delta: number;
+}
+
+export interface CountDelta {
+  name: keyof TraceFacts["counts"];
+  a: number;
+  b: number;
+  delta: number;
+}
+
+export type CompareRowStatus = "same" | "changed" | "onlyA" | "onlyB";
+
+export interface CompareGroupSide {
+  /** Spans folded into this row (x50). */
+  count: number;
+  /** Union of the members' intervals, ms. */
+  wallMs: number;
+  /** Sum of the members' durations, ms. */
+  totalMs: number;
+  /** Member span ids in start order, capped at 100. */
+  spanIds: string[];
+  start: number;
+  location?: SourceLocation;
+  errors: number;
+}
+
+/** One merged-diff row: every span of one shape under one matched parent path, folded. Depth-first order. */
+export interface CompareRow {
+  /** `kind|identity|parentPath`, stable across traces of the same route. */
+  key: string;
+  parentKey?: string;
+  depth: number;
+  kind: HopKind;
+  label: string;
+  bucket: TimeBucket;
+  a?: CompareGroupSide;
+  b?: CompareGroupSide;
+  /** b.wallMs - a.wallMs. */
+  deltaMs: number;
+  /** b.count - a.count. */
+  countDelta: number;
+  status: CompareRowStatus;
+}
+
+/** Span-level match; `key` = row key + `|` + occurrence index. */
+export interface CompareSpanPair {
+  key: string;
+  a?: string;
+  b?: string;
+  deltaMs?: number;
+}
+
+export type JsonType = "null" | "array" | "object" | "string" | "number" | "boolean" | "undefined";
+
+/** JSON-pointer path; array indexes are A's for `remove`, B's otherwise. Redacted values come as "[redacted]". */
+export interface JsonDiffOp {
+  op: "add" | "remove" | "replace" | "type";
+  path: string;
+  a?: unknown;
+  b?: unknown;
+  aType?: JsonType;
+  bType?: JsonType;
+}
+
+export interface BodyDiff {
+  mode: "json" | "text" | "binary" | "mixed" | "none";
+  same: boolean;
+  ops: JsonDiffOp[];
+  /** Over 200 ops: the rest were dropped. */
+  truncated: boolean;
+  /** A capture was cut short, the diff may miss differences. */
+  partial: boolean;
+  aSize?: number;
+  bSize?: number;
+}
+
+export interface HeaderDiffOp {
+  op: "add" | "remove" | "replace";
+  name: string;
+  a?: string;
+  b?: string;
+}
+
+export interface HeadersDiff {
+  same: boolean;
+  ops: HeaderDiffOp[];
+}
+
+export interface FindingChange {
+  fingerprint: string;
+  rule: FindingRule;
+  title: string;
+  a?: number;
+  b?: number;
+}
+
+export interface FindingsDiff {
+  added: FindingSummary[];
+  resolved: FindingSummary[];
+  changed: FindingChange[];
+  kept: number;
+}
+
+export interface CompareSummary {
+  deltaMs: number;
+  deltaPct?: number;
+  direction: "slower" | "faster" | "same";
+  largestBucket?: BucketDelta;
+  /** Row key of the change that drove the largest bucket delta. */
+  driverKey?: string;
+  /** "B is 55ms slower (+134%): db +52ms, SELECT ... x1 -> x50; new: findMany in a loop (store.ts:88)." */
+  sentence: string;
+}
+
+/** GET /api/compare?a=<baseline>&b=<subject>. Pins both traces server-side (404 `{missing:["a"|"b"]}`). */
+export interface CompareResult {
+  a: CompareSide;
+  b: CompareSide;
+  sameRoute: boolean;
+  summary: CompareSummary;
+  buckets: BucketDelta[];
+  counts: CountDelta[];
+  rows: CompareRow[];
+  rowsTruncated: boolean;
+  pairs: CompareSpanPair[];
+  pairsTruncated: boolean;
+  spans: { matched: number; onlyA: number; onlyB: number; truncated: boolean };
+  findings: FindingsDiff;
+  request: { headers: HeadersDiff; body: BodyDiff };
+  response: { status: { a?: number; b?: number }; headers: HeadersDiff; body: BodyDiff };
+}
+
+export type BaselineKind = "previous-build" | "previous-url" | "route-median";
+
+export interface Baseline {
+  kind: BaselineKind;
+  id: string;
+  duration: number;
+  startedAt: number;
+  epoch?: number;
+  status?: number;
+  url: string;
+}
+
+/** GET /api/compare/baselines?b=<subject>: default baseline first. DELETE /api/compare/pins/:id releases a pin. */
+export interface BaselinesResponse {
+  baselines: Baseline[];
+}
+
+// WP9a -- epochs, attribution and regressions: GET /api/epochs, GET /api/regressions and the SSE
+// stream GET /api/epochs/events (`event: epoch` = EpochView, `event: regression` = RouteRegression).
+// Mirrors core epoch.ts, regressions.ts and api/epochs.ts.
+
+export type EpochVia = "start" | "src-watch" | "candidates" | "unknown";
+export type EpochAffectedVia = "imports" | "candidates" | "none";
+
+export interface EpochView {
+  /** Epoch number (the `epoch` fact). */
+  id: number;
+  /** epoch ms the rebuild was noticed. */
+  at: number;
+  /** Watcher time of the newest build-output write (0 = unknown). */
+  rebuiltAt: number;
+  /** Project-relative source files changed since the previous epoch (capped at 50). */
+  files: string[];
+  deleted: string[];
+  moreFiles: number;
+  via: EpochVia;
+  /** Build-output hints ("app/api/feed/route", "src/lib/store.ts") from rebuilt chunk names. */
+  candidates: string[];
+  /** Route templates the change affects ("/api/orders/[id]"). */
+  routes: string[];
+  routesVia: EpochAffectedVia;
+}
+
+export interface EpochsResponse {
+  epoch: number;
+  /** Source files are watched, so "src-watch" attribution is possible. */
+  sourceWatch: boolean;
+  /** Newest first. */
+  items: EpochView[];
+}
+
+export type RegressionStatus = "regressed" | "improved" | "unchanged" | "insufficient" | "no-traffic";
+
+export interface RegressionSide {
+  epoch: number;
+  /** Warm requests (the p50 sample). */
+  n: number;
+  count: number;
+  p50?: number;
+  p95?: number;
+  time?: Record<TimeBucket, number>;
+  io?: { db: number; fetch: number; cache: number; fn: number };
+}
+
+export interface RegressionBucketDelta {
+  bucket: TimeBucket;
+  beforeMs: number;
+  afterMs: number;
+  deltaMs: number;
+}
+
+export interface RouteRegression {
+  /** "GET /api/products" (RouteStats.key). */
+  key: string;
+  method: string;
+  route: string;
+  /** Epoch being judged. */
+  epoch: number;
+  /** Last good epoch it is compared with. */
+  baselineEpoch?: number;
+  status: RegressionStatus;
+  /** min(n) < 8: dim the row, label "low confidence". */
+  lowConfidence: boolean;
+  before?: RegressionSide;
+  after?: RegressionSide;
+  deltaMs?: number;
+  /** 0.34 = +34%. */
+  deltaPct?: number;
+  /** Bucket that grew most. */
+  grew?: RegressionBucketDelta;
+  buckets: RegressionBucketDelta[];
+  io?: Record<"db" | "fetch" | "cache" | "fn", { before: number; after: number; delta: number }>;
+  findings: { added: FindingCount[]; removed: FindingCount[] };
+  /** "variants": compared over the URL variants seen on both sides (traffic-mix safe); "route": whole route. */
+  basis: "variants" | "route";
+  /** Variants compared when basis = "variants". */
+  urls?: string[];
+}
+
+export interface RegressionsResponse {
+  epoch: number;
+  rule: { minPct: number; minMs: number; minN: number; confidentN: number };
+  /** Newest epoch first, regressed first within an epoch. Filters: ?epoch=N, ?status=a,b. */
+  items: RouteRegression[];
+}

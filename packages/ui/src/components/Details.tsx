@@ -1,26 +1,40 @@
 import type { BodyCapture, TraceRecord } from "../api/types";
-import { detailsCounts, detailsTab, rawRequest, rawRequestError, setDetailsTab } from "../state/details";
+import {
+  type DetailsTab,
+  detailsCounts,
+  detailsTab,
+  rawRequest,
+  rawRequestError,
+  setDetailsTab,
+} from "../state/details";
+import { selectedHopId } from "../state/journey";
 import { isHandledError, statusClass } from "../state/stats";
 import { selectedTrace } from "../state/store";
+import { SpanDetail } from "./Inspector";
 import { JsonView } from "./JsonView";
 
-const TABS = [
+const TABS: readonly { id: DetailsTab; label: string }[] = [
   { id: "response", label: "Response" },
   { id: "request", label: "Request" },
   { id: "console", label: "Console" },
-] as const;
+  { id: "span", label: "Span" },
+];
 
 export function Details() {
   const trace = selectedTrace.value;
-  const tab = detailsTab.value;
+  const picked = detailsTab.value;
   const counts = detailsCounts.value;
+  const hopId = selectedHopId.value;
+  const span = hopId ? trace?.spans.find((s) => s.id === hopId) : undefined;
+  // The Span tab exists only while a span is selected; without one it falls back to Response.
+  const tab: DetailsTab = picked === "span" && !span ? "response" : picked;
 
   if (!trace) return null;
 
   return (
     <section class="details" aria-label="Trace details">
       <div class="details-tabs" role="tablist" aria-label="Trace detail views">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t.id !== "span" || span).map((t) => (
           <button
             key={t.id}
             type="button"
@@ -32,9 +46,7 @@ export function Details() {
             onClick={() => setDetailsTab(t.id)}
           >
             {t.label}
-            {counts[t.id] > 0 && t.id !== "response" && t.id !== "request" && (
-              <span class="tab-count">{counts[t.id]}</span>
-            )}
+            {counts[t.id] > 0 && t.id === "console" && <span class="tab-count">{counts[t.id]}</span>}
           </button>
         ))}
       </div>
@@ -42,6 +54,11 @@ export function Details() {
         {tab === "response" && <ResponsePane trace={trace} />}
         {tab === "console" && <ConsolePane trace={trace} />}
         {tab === "request" && <RequestPane />}
+        {tab === "span" && span && (
+          <div class="pane insp">
+            <SpanDetail trace={trace} span={span} />
+          </div>
+        )}
       </div>
     </section>
   );

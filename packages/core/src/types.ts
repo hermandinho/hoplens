@@ -119,6 +119,11 @@ export interface TraceFacts {
   epoch: number;
   /** True when the span cap (~2000) stopped facts/analysis early. */
   truncated?: boolean;
+  /**
+   * ms from trace start to the first route-handler span (the dev compile, proxy and routing wait
+   * before your code ran). Absent when the trace has no handler span (pages, assets).
+   */
+  preHandlerMs?: number;
 }
 
 export type FindingRule =

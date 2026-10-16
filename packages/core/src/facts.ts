@@ -268,7 +268,19 @@ export function computeFacts(t: TraceRecord, input: FactsInput = {}): TraceFacts
   };
   if (input.ttfb !== undefined) facts.ttfb = round(input.ttfb);
   if (truncated) facts.truncated = true;
+  const wait = preHandlerMs(spans);
+  if (wait !== undefined) facts.preHandlerMs = round(Math.min(wait, duration));
   return facts;
+}
+
+/**
+ * ms from trace start to the earliest route-handler span: the time the request waited (dev compile,
+ * proxy, routing) before the user's handler ran. Undefined without a timed handler span.
+ */
+export function preHandlerMs(spans: readonly SpanRecord[]): number | undefined {
+  let first = Number.POSITIVE_INFINITY;
+  for (const s of spans) if (s.kind === "handler" && !isMarker(s) && s.start < first) first = s.start;
+  return Number.isFinite(first) ? Math.max(0, first) : undefined;
 }
 
 /* ------------------------------------------------------- nested fetch fold */

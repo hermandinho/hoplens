@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
-import type { Finding, TimeBucket, TraceRecord } from "../api/types";
-import { clearHighlight, highlightSpans, selectHop } from "../state/journey";
-import { openSourceAt } from "../state/source";
+import type { TimeBucket, TraceFacts, TraceRecord } from "../api/types";
+import { selectHop } from "../state/journey";
+import { formatRoute, route } from "../state/router";
+import { serverStats } from "../state/serverStats";
 import {
   BUCKETS,
   BUCKET_LABELS,
-  RULE_LABELS,
-  SMALL_SAMPLE,
-  approx,
   fmtMs,
   isHandledError,
   percentiles,
@@ -17,12 +15,16 @@ import {
   warmDurations,
 } from "../state/stats";
 import { includeCold, metaState, openBuilder, selectedTrace, tracesState } from "../state/store";
-import { selfTimes, toCurl, toFetch, topSpansByBucket } from "../state/traceview";
+import { type SpanSelf, selfTimes, toCurl, toFetch, topSpansByBucket } from "../state/traceview";
+import { type Baseline, preHandlerWait, traceBaselines } from "../state/verdict";
 import { toVitest } from "../state/vitest";
+import { Verdict } from "./Verdict";
+import "../styles/verdict.css";
 
 /*
- * Single-request header: what the request was, how long it took and against what baseline, where
- * the time went (budget bar from facts.time) and what is wrong with it (findings strip).
+ * Single-request header, cause first: what the request was and how long it took, its baselines
+ * (same URL, route, before the last edit), the verdict (why it was slow and where), then the time
+ * budget bar as evidence. Bar segments open their popover on click.
  */
 
 const BUCKET_HINTS: Record<TimeBucket, string> = {
@@ -40,7 +42,7 @@ export function TraceHeader() {
   if (!trace) {
     return (
       <section class="rh rh-empty" aria-label="Request summary">
-        <span class="dim">No request selected. Pick one from Traffic, or send one.</span>
+        <span class="dim">No request selected. Pick one from the Requests list, or send one.</span>
         <button type="button" class="sbtn" onClick={() => openBuilder()}>
           New request
         </button>
@@ -80,7 +82,6 @@ export function TraceHeader() {
               title="Request body bytes / response bytes written"
             />
           )}
-          <VsRoute trace={trace} />
           {facts?.cold && (
             <span
               class="cold-badge"
@@ -102,8 +103,9 @@ export function TraceHeader() {
           </button>
         </span>
       </div>
-      <BudgetBar trace={trace} />
-      <FindingsStrip key={trace.id} trace={trace} />
+      <Baselines trace={trace} />
+      <Verdict trace={trace} />
+      <BudgetBar key={trace.id} trace={trace} />
     </section>
   );
 }
@@ -124,39 +126,119 @@ export function fmtBytes(n: number | undefined): string {
   return `${(n / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-/* ---------------------------------------------------------- vs route p50 */
+/* ------------------------------------------------------------- baselines */
 
-/** This request against the route's other (warm, unless toggled) requests. */
-function VsRoute({ trace }: { trace: TraceRecord }) {
+/**
+ * This request against its own URL variant (so `?fast=1` is not judged by `?fast=0`), the route as
+ * a whole when it has several variants, and the same URL before the last dev rebuild.
+ */
+function Baselines({ trace }: { trace: TraceRecord }) {
   const cold = includeCold.value;
+  const stats = serverStats.value;
   const traces = tracesState.value;
-  if (trace.duration === undefined) return null;
-  const key = routeKeyOf(trace);
-  const others = traces.filter((t) => t.id !== trace.id && routeKeyOf(t) === key);
-  const p = percentiles(warmDurations(others, cold));
-  if (p.n === 0 || p.p50 === undefined) return null;
-  const delta = trace.duration - p.p50;
-  const small = p.n < SMALL_SAMPLE;
+  const list = useMemo(() => traceBaselines(trace, stats, traces, cold), [trace, stats, traces, cold]);
+  if (list.length === 0) return null;
+  return (
+    <div class="rh-baselines" aria-label="Baselines">
+      {list.map((b) => (
+        <BaselineChip key={b.kind} b={b} cold={cold} />
+      ))}
+    </div>
+  );
+}
+
+function BaselineChip({ b, cold }: { b: Baseline; cold: boolean }) {
+  const pct = Math.round(b.deltaPct * 100);
+  const same = Math.abs(b.deltaMs) < 1 || Math.abs(pct) < 3;
+  const sign = b.deltaMs >= 0 ? "+" : "-";
+  const delta = b.kind === "edit" ? `${sign}${fmtMs(Math.abs(b.deltaMs))}` : `${sign}${Math.abs(pct)}%`;
+  const sample = `${b.n} ${cold ? "" : "warm "}request${b.n === 1 ? "" : "s"}${b.includesSelf ? ", this one included" : ""}`;
+  const where = b.source === "server" ? "" : " in this tab";
+  const build = b.epoch !== undefined ? ` (build e${b.epoch})` : "";
   return (
     <span
-      class={`rh-vs ${small ? "pctl-small" : delta > 0 ? "rh-vs-up" : "rh-vs-down"}`}
-      title={`Route p50 ${fmtMs(p.p50)} over ${p.n} other ${cold ? "" : "warm "}request${p.n === 1 ? "" : "s"}${small ? " (small sample: rough guide)" : ""}`}
+      class={`rh-vs ${b.small ? "pctl-small" : same ? "" : b.deltaMs > 0 ? "rh-vs-up" : "rh-vs-down"}`}
+      title={`${b.label} p50 ${fmtMs(b.p50)} over ${sample}${where}${build}${b.small ? ". Small sample: a rough guide" : ""}`}
     >
-      vs route p50{" "}
+      vs {b.label}{" "}
       <span class="mono">
-        {approx(p.n)}
-        {fmtMs(Math.abs(delta))} {delta >= 0 ? "slower" : "faster"}
+        {b.small ? "~" : ""}
+        {fmtMs(b.p50)} ({same ? "=" : delta})
       </span>
-      <span class="pctl-n">n={p.n}</span>
+      <span class="pctl-n">
+        n={b.n}
+        {b.includesSelf ? " incl. this" : ""}
+      </span>
     </span>
   );
 }
 
 /* ------------------------------------------------------------ budget bar */
 
+type SegKey = TimeBucket | "wait";
+
+interface Seg {
+  key: SegKey;
+  ms: number;
+  /** The wait segment: how much it took from each bucket (compile, idle, framework). */
+  parts?: Partial<Record<TimeBucket, number>>;
+}
+
+/** Pre-handler wait shown as its own segment when it is at least this share of the request. */
+const WAIT_MIN_SHARE = 0.05;
+
+/**
+ * Bar segments: a named "wait" segment for the time before the handler ran (cold compile, proxy,
+ * routing), then the buckets. The wait is carved out of compile, then idle, then framework time:
+ * that is what the pre-handler stretch is made of, so the bar still sums to the request.
+ */
+function segmentsOf(facts: TraceFacts, wait: number | undefined, total: number): Seg[] {
+  const time = { ...facts.time };
+  const out: Seg[] = [];
+  if (wait !== undefined && wait >= 5 && total > 0 && wait / total >= WAIT_MIN_SHARE) {
+    let left = wait;
+    const parts: Partial<Record<TimeBucket, number>> = {};
+    for (const b of ["compile", "idle", "framework"] as const) {
+      const take = Math.min(left, time[b] ?? 0);
+      time[b] = (time[b] ?? 0) - take;
+      left -= take;
+      if (take > 0) parts[b] = take;
+    }
+    const carved = wait - left;
+    if (carved > 0) out.push({ key: "wait", ms: carved, parts });
+  }
+  for (const b of BUCKETS) if ((time[b] ?? 0) > 0) out.push({ key: b, ms: time[b] });
+  return out;
+}
+
+const WAIT_HINT = "Time before your route handler started: dev compile, proxy and routing";
+
+function segLabel(k: SegKey): string {
+  return k === "wait" ? "wait" : BUCKET_LABELS[k];
+}
+
 function BudgetBar({ trace }: { trace: TraceRecord }) {
   const facts = trace.facts;
   const top = useMemo(() => topSpansByBucket(trace.spans, selfTimes(trace.spans), 5), [trace.spans]);
+  const [open, setOpen] = useState<SegKey | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   if (!facts) {
     return (
       <div class="budget budget-none dim">
@@ -166,64 +248,42 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
   }
   const sum = BUCKETS.reduce((s, b) => s + (facts.time[b] ?? 0), 0);
   const denom = Math.max(sum, trace.duration ?? 0, 1e-6);
+  const segs = segmentsOf(facts, preHandlerWait(trace), denom);
   const ttfb = facts.ttfb;
+  const summary = segs.map((g) => `${segLabel(g.key)} ${fmtMs(g.ms)}`).join(", ");
   let offset = 0;
-  const summary = BUCKETS.filter((b) => (facts.time[b] ?? 0) > 0)
-    .map((b) => `${BUCKET_LABELS[b]} ${fmtMs(facts.time[b])}`)
-    .join(", ");
+  const placed = segs.map((g) => {
+    const pct = (g.ms / denom) * 100;
+    const left = offset;
+    offset += pct;
+    return { ...g, pct, left };
+  });
+  const cur = placed.find((g) => g.key === open);
+  const wait = placed.find((g) => g.key === "wait");
 
   return (
-    <div class="budget">
+    <div class="budget budget-quiet" ref={ref}>
       <span class="sr-only">Time budget: {summary || "no time recorded"}</span>
       <div class="budget-bar">
-        {BUCKETS.map((b) => {
-          const v = facts.time[b] ?? 0;
-          if (v <= 0) return null;
-          const pct = (v / denom) * 100;
-          const left = offset;
-          offset += pct;
-          const spans = top[b];
-          return (
-            <span
-              key={b}
-              class={`budget-seg b-${b}`}
-              style={{ width: `${pct}%` }}
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users reach the tooltip
-              tabIndex={0}
-              aria-label={`${BUCKET_LABELS[b]} ${fmtMs(v)}, ${Math.round(pct)}%`}
-            >
-              {/* Name + ms only where it fits; a narrower segment shows just the ms, a sliver
-                  nothing (the legend below always has both). */}
-              {pct >= 9 && (
-                <span class="budget-seg-label mono">{pct >= 22 ? `${BUCKET_LABELS[b]} ${fmtMs(v)}` : fmtMs(v)}</span>
-              )}
-              <span class={`budget-tip ${left + pct / 2 > 60 ? "budget-tip-right" : ""}`} role="tooltip">
-                <span class="budget-tip-head">
-                  <span class={`legend-swatch b-${b}`} aria-hidden="true" />
-                  <b>{BUCKET_LABELS[b]}</b>
-                  <span class="mono">
-                    {fmtMs(v)} · {pctLabel(pct)}
-                  </span>
-                </span>
-                <span class="budget-tip-hint dim">{BUCKET_HINTS[b]}</span>
-                {spans.length > 0 && (
-                  <ol class="budget-tip-spans">
-                    {spans.map((x) => (
-                      <li key={x.span.id}>
-                        <button type="button" class="budget-tip-span" onClick={() => selectHop(x.span.id)}>
-                          <span class="mono budget-tip-ms">{fmtMs(x.self)}</span>
-                          <span class="budget-tip-name" title={x.span.name}>
-                            {x.span.name}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ol>
-                )}
+        {placed.map((g) => (
+          <button
+            type="button"
+            key={g.key}
+            class={`budget-seg ${g.key === "wait" ? "budget-wait" : `b-${g.key}`} ${open === g.key ? "open" : ""}`}
+            style={{ width: `${g.pct}%` }}
+            aria-expanded={open === g.key}
+            aria-label={`${segLabel(g.key)} ${fmtMs(g.ms)}, ${Math.round(g.pct)}%`}
+            onClick={() => setOpen(open === g.key ? null : g.key)}
+          >
+            {/* Name + ms only where it fits; a narrower segment shows just the ms, a sliver
+                nothing (the legend below always has both). */}
+            {g.pct >= 9 && (
+              <span class="budget-seg-label mono">
+                {g.pct >= 22 ? `${segLabel(g.key)} ${fmtMs(g.ms)}` : fmtMs(g.ms)}
               </span>
-            </span>
-          );
-        })}
+            )}
+          </button>
+        ))}
         {ttfb !== undefined && ttfb <= denom && (
           <div class="budget-ttfb" style={{ left: `${(ttfb / denom) * 100}%` }} title={`TTFB ${fmtMs(ttfb)}`}>
             <span
@@ -234,11 +294,37 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
           </div>
         )}
       </div>
+      {cur && (
+        <BudgetPopover
+          seg={cur.key}
+          ms={cur.ms}
+          pct={cur.pct}
+          center={cur.left + cur.pct / 2}
+          spans={cur.key === "wait" ? [] : top[cur.key]}
+          onPick={(id) => {
+            selectHop(id);
+            setOpen(null);
+          }}
+        />
+      )}
       <ul class="budget-legend" aria-label="Time per bucket">
+        {wait && (
+          <li title={`${WAIT_HINT}${waitParts(wait.parts) ? `. Includes ${waitParts(wait.parts)}` : ""}`}>
+            <span class="legend-swatch budget-wait" aria-hidden="true" />
+            <span>wait</span>
+            <span class="mono">{fmtMs(wait.ms)}</span>
+            <span class="mono dim">{pctLabel(wait.pct)}</span>
+            {(wait.parts?.compile ?? 0) >= 1 && (
+              <span class="dim">incl. {fmtMs(wait.parts?.compile ?? 0)} compile</span>
+            )}
+          </li>
+        )}
         {BUCKETS.map((b) => {
-          const v = facts.time[b] ?? 0;
+          const v = placed.find((g) => g.key === b)?.ms ?? 0;
+          // Nothing drawn that is empty: a bucket with no time has no legend entry.
+          if (v <= 0) return null;
           return (
-            <li key={b} class={v > 0 ? "" : "budget-legend-zero"} title={BUCKET_HINTS[b]}>
+            <li key={b} title={BUCKET_HINTS[b]}>
               <span class={`legend-swatch b-${b}`} aria-hidden="true" />
               <span>{BUCKET_LABELS[b]}</span>
               <span class="mono">{fmtMs(v)}</span>
@@ -251,114 +337,67 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
   );
 }
 
+/** Click popover for one bar segment, anchored under the bar near the segment's middle. */
+function BudgetPopover({
+  seg,
+  ms,
+  pct,
+  center,
+  spans,
+  onPick,
+}: {
+  seg: SegKey;
+  ms: number;
+  pct: number;
+  center: number;
+  spans: SpanSelf[];
+  onPick: (id: string) => void;
+}) {
+  const right = center > 60;
+  return (
+    <section
+      class={`budget-pop ${right ? "budget-pop-right" : ""}`}
+      style={right ? { right: `${Math.max(0, 100 - center - 10)}%` } : { left: `${Math.max(0, center - 10)}%` }}
+      aria-label={`${segLabel(seg)} details`}
+    >
+      <span class="budget-tip-head">
+        <span class={`legend-swatch ${seg === "wait" ? "budget-wait" : `b-${seg}`}`} aria-hidden="true" />
+        <b>{segLabel(seg)}</b>
+        <span class="mono">
+          {fmtMs(ms)} · {pctLabel(pct)}
+        </span>
+      </span>
+      <span class="budget-tip-hint dim">{seg === "wait" ? WAIT_HINT : BUCKET_HINTS[seg]}</span>
+      {spans.length > 0 && (
+        <ol class="budget-tip-spans">
+          {spans.map((x) => (
+            <li key={x.span.id}>
+              <button type="button" class="budget-tip-span" onClick={() => onPick(x.span.id)}>
+                <span class="mono budget-tip-ms">{fmtMs(x.self)}</span>
+                <span class="budget-tip-name" title={x.span.name}>
+                  {x.span.name}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+/** "compile 870ms, idle 12ms": what the wait segment was carved from. */
+function waitParts(parts: Partial<Record<TimeBucket, number>> | undefined): string {
+  return Object.entries(parts ?? {})
+    .filter(([, v]) => (v ?? 0) >= 1)
+    .map(([b, v]) => `${BUCKET_LABELS[b as TimeBucket]} ${fmtMs(v ?? 0)}`)
+    .join(", ");
+}
+
 function pctLabel(p: number): string {
   if (p <= 0) return "0%";
   if (p < 1) return "<1%";
   return `${Math.round(p)}%`;
-}
-
-/* -------------------------------------------------------- findings strip */
-
-function FindingsStrip({ trace }: { trace: TraceRecord }) {
-  const [open, setOpen] = useState<number | null>(null);
-  const findings = trace.findings ?? [];
-  if (findings.length === 0) {
-    if (!trace.done || !trace.facts) return null;
-    return <div class="fstrip fstrip-none dim">No findings for this request.</div>;
-  }
-  const current = open !== null ? findings[open] : undefined;
-  return (
-    <div class="fstrip-wrap">
-      <ul class="fstrip" aria-label="Findings for this request">
-        {findings.map((f, i) => (
-          <li key={`${f.fingerprint}-${i}`}>
-            <button
-              type="button"
-              class={`fchip fchip-${f.severity} ${open === i ? "active" : ""}`}
-              aria-expanded={open === i}
-              onClick={() => {
-                if (open === i) {
-                  // Closing the chip drops its highlight too.
-                  clearHighlight();
-                  setOpen(null);
-                  return;
-                }
-                if (f.spanIds.length > 0) highlightSpans(f.spanIds);
-                else clearHighlight();
-                setOpen(i);
-              }}
-              title={f.detail ?? f.title}
-            >
-              <span class={`sev-dot sev-${f.severity}`} aria-hidden="true" />
-              <span class="fchip-rule">{RULE_LABELS[f.rule] ?? f.rule}</span>
-              <span class="fchip-title">{f.title}</span>
-              {f.estSavedMs !== undefined && f.estSavedMs >= 1 && (
-                <span class="fchip-save mono">~{fmtMs(f.estSavedMs)}</span>
-              )}
-            </button>
-          </li>
-        ))}
-      </ul>
-      {current && <FindingDetail finding={current} />}
-    </div>
-  );
-}
-
-function FindingDetail({ finding: f }: { finding: Finding }) {
-  return (
-    <div class={`fdetail fdetail-${f.severity}`}>
-      <div class="fdetail-title">{f.title}</div>
-      {f.detail && <p class="fdetail-text">{f.detail}</p>}
-      <dl class="fdetail-meta">
-        {f.fn && (
-          <div>
-            <dt class="dim">function</dt>
-            <dd class="mono">{f.fn}</dd>
-          </div>
-        )}
-        {f.location && (
-          <div>
-            <dt class="dim">where</dt>
-            <dd>
-              <button
-                type="button"
-                class="src-link mono"
-                onClick={() => openSourceAt(f.location!.file, f.location!.line)}
-                title="Open in source viewer"
-              >
-                <span class="src-link-arrow" aria-hidden="true">
-                  ↗
-                </span>
-                {f.location.file}:{f.location.line}
-              </button>
-            </dd>
-          </div>
-        )}
-        {f.count !== undefined && (
-          <div>
-            <dt class="dim">count</dt>
-            <dd class="mono">×{f.count}</dd>
-          </div>
-        )}
-        {f.estSavedMs !== undefined && (
-          <div>
-            <dt class="dim">est. saving</dt>
-            <dd class="mono">~{fmtMs(f.estSavedMs)}</dd>
-          </div>
-        )}
-        {f.spanIds.length > 0 && (
-          <div>
-            <dt class="dim">spans</dt>
-            <dd>
-              <button type="button" class="sbtn" onClick={() => highlightSpans(f.spanIds)}>
-                Show {f.spanIds.length} in waterfall
-              </button>
-            </dd>
-          </div>
-        )}
-      </dl>
-    </div>
-  );
 }
 
 /* ------------------------------------------------------------- copy menu */
@@ -373,10 +412,15 @@ const COPY_ITEMS: { kind: CopyKind; label: string }[] = [
   { kind: "curl-secrets", label: "Copy as curl, with secrets" },
 ];
 
-/** Deep link to this trace in the Hoplens UI (the #trace= hash the store already reads). */
+/**
+ * Deep link to this trace in the Hoplens UI, in the router's canonical form (`#/r/<id>`), keeping
+ * the selected span and the since scope when this trace is the current route.
+ */
 function traceLink(id: string): string {
-  if (typeof location === "undefined") return `#trace=${encodeURIComponent(id)}`;
-  return `${location.origin}${location.pathname}${location.search}#trace=${encodeURIComponent(id)}`;
+  const r = route.peek();
+  const hash = formatRoute(r.view === "trace" && r.traceId === id ? r : { view: "trace", traceId: id });
+  if (typeof location === "undefined") return hash;
+  return `${location.origin}${location.pathname}${location.search}${hash}`;
 }
 
 /** The route's warm p95 over the traces this tab holds (this one included), when there are any. */

@@ -1,48 +1,32 @@
-import { useMemo } from "preact/hooks";
 import type { CapturedError, LogRecord, SpanRecord, TraceRecord } from "../api/types";
-import { whereToLook } from "../state/flame";
-import { selectHop, selectedHopId } from "../state/journey";
 import { openSourceAt } from "../state/source";
-import { BUCKET_LABELS, fmtMs } from "../state/stats";
 import { selectedTrace } from "../state/store";
-import { bucketOf } from "../state/traceview";
 import { JsonView } from "./JsonView";
+import { SpanSnippet } from "./SpanSnippet";
+import { WhereToLook } from "./WhereToLook";
 
+/**
+ * The subject's "Where to look" block. The selected span's details live in the drawer's Span tab
+ * (Details), so nothing here depends on the selection and no placeholder is drawn.
+ */
 export function Inspector() {
   const trace = selectedTrace.value;
-  const hopId = selectedHopId.value;
+  if (!trace) return null;
+  return (
+    <aside class="insp" aria-label="Where to look">
+      <WhereToLook trace={trace} />
+    </aside>
+  );
+}
 
-  if (!trace) {
-    return (
-      <aside class="insp" aria-label="Hop inspector">
-        <div class="empty">
-          <b>Hop inspector</b>
-          Pick a request, then click a row in the waterfall to see its location, duration, args and return value here.
-        </div>
-      </aside>
-    );
-  }
-
-  if (!hopId) return <WhereToLook trace={trace} />;
-
-  const span = trace.spans.find((s) => s.id === hopId);
-  if (!span) {
-    return (
-      <aside class="insp" aria-label="Hop inspector">
-        <div class="empty">
-          <b>Hop not in current trace</b>
-          Pick a hop from the current trace to see its details.
-        </div>
-      </aside>
-    );
-  }
-
+/** One span's details (kind, timing, code, error, args/result, attributes, logs): the drawer's Span tab. */
+export function SpanDetail({ trace, span }: { trace: TraceRecord; span: SpanRecord }) {
   const dur = Math.round(span.end - span.start);
   const offset = Math.round(span.start);
   const logs = trace.logs.filter((l) => l.spanId === span.id);
 
   return (
-    <aside class="insp" aria-label="Hop inspector">
+    <>
       <header class="insp-head">
         <KindTag kind={span.kind} />
         <h3 class="insp-name mono" title={span.name}>
@@ -67,80 +51,17 @@ export function Inspector() {
         )}
       </dl>
 
-      {span.location && (
-        <section class="insp-section">
-          <div class="insp-section-title">Location</div>
-          <button
-            type="button"
-            class="src-link mono"
-            onClick={() => openSourceAt(span.location!.file, span.location!.line)}
-            title="Open in source viewer"
-          >
-            <span class="src-link-arrow" aria-hidden="true">
-              ↗
-            </span>
-            {span.location.file}:{span.location.line}
-          </button>
-        </section>
-      )}
+      <section class="insp-section">
+        <div class="insp-section-title">Location</div>
+        <SpanSnippet span={span} spans={trace.spans} />
+      </section>
 
       {span.error && <ErrorBlock err={span.error} />}
       {span.args !== undefined && <JsonSection title="Arguments" value={span.args} />}
       {span.result !== undefined && <JsonSection title="Return value" value={span.result} />}
       <AttrsSection attrs={span.attrs} />
       {logs.length > 0 && <LogsSection logs={logs} />}
-    </aside>
-  );
-}
-
-/* --------------------------------------------------------- where to look */
-
-/** Empty state for a selected request: the spans the end of the request waited on longest (critical path). */
-function WhereToLook({ trace }: { trace: TraceRecord }) {
-  const picks = useMemo(() => whereToLook(trace.spans, 3), [trace.spans]);
-  return (
-    <aside class="insp" aria-label="Hop inspector">
-      <div class="insp-look">
-        <div class="insp-section-title">Where to look</div>
-        {picks.length === 0 ? (
-          <p class="dim insp-look-note">
-            {trace.done ? "Nothing on the critical path stands out." : "Waiting for the request to finish…"}
-          </p>
-        ) : (
-          <>
-            <p class="dim insp-look-note">
-              The end of this request waited longest on these spans: their own time on the critical path (the chain of
-              spans that decided when it finished). Speed one up and the request ends sooner.
-            </p>
-            <ol class="insp-look-list">
-              {picks.map((p) => {
-                const b = bucketOf(p.span);
-                return (
-                  <li key={p.span.id}>
-                    <button type="button" class="insp-look-item" onClick={() => selectHop(p.span.id)}>
-                      <span class={`legend-swatch b-${b}`} aria-hidden="true" title={BUCKET_LABELS[b]} />
-                      <span class="insp-look-name mono" title={p.span.name}>
-                        {p.span.name}
-                      </span>
-                      <span class="insp-look-ms mono" title="Time on the critical path spent in this span itself">
-                        {fmtMs(p.self)}
-                      </span>
-                      <span class="insp-look-pct mono dim">{Math.round(p.share * 100)}%</span>
-                      {p.span.location && (
-                        <span class="insp-look-loc mono dim">
-                          {p.span.location.file}:{p.span.location.line}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </>
-        )}
-        <p class="dim insp-look-note">Click any span in the Flame or Tree to inspect it.</p>
-      </div>
-    </aside>
+    </>
   );
 }
 

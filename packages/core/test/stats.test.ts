@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   HIST_BUCKETS,
+  HIST_EXACT_MAX,
   LogHistogram,
   RouteStatsStore,
   bucketHigh,
@@ -76,6 +77,27 @@ describe("quantiles", () => {
     expect(h.quantile(1)).toBe(123.4);
     for (let i = 0; i < 50; i++) h.add(123.4);
     expect(h.quantile(0.95)).toBe(123.4);
+  });
+
+  test("small samples are exact: the p50 of 5 values is their median", () => {
+    const h = new LogHistogram();
+    for (const v of [47.2, 70.7, 63.9, 56.8, 47.4]) h.add(v);
+    expect(h.quantile(0.5)).toBe(56.8);
+    expect(h.quantile(0.25)).toBe(47.4);
+    const even = new LogHistogram();
+    for (const v of [10, 20, 30, 40]) even.add(v);
+    expect(even.quantile(0.5)).toBe(25);
+    // Merged small histograms stay exact; past HIST_EXACT_MAX they fall back to the buckets.
+    const a = new LogHistogram();
+    const b = new LogHistogram();
+    a.add(1);
+    a.add(3);
+    b.add(2);
+    expect(a.merge(b).quantile(0.5)).toBe(2);
+    const big = new LogHistogram();
+    for (let i = 1; i <= HIST_EXACT_MAX + 1; i++) big.add(i * 10);
+    const p50 = big.quantile(0.5)!;
+    expect(Math.abs(p50 - 170) / 170).toBeLessThan(0.19);
   });
 
   test("uniform 1..1000 ms: p50/p95/p99 within one bucket (~19%) of the exact value", () => {

@@ -1,7 +1,8 @@
 // Server-side rolling aggregates per route (method + route template) and per dev-rebuild epoch, fed
 // from the store's `done` event, so the numbers survive ring-buffer eviction. Fixed log-bucket
 // histograms instead of a t-digest: a few hundred bytes per route-epoch, mergeable, and exact enough
-// for a dev tool (quantiles land within one bucket, ~19% wide, and are interpolated inside it).
+// for a dev tool (quantiles land within one bucket, ~19% wide, and are interpolated inside it; up to
+// HIST_EXACT_MAX samples they are exact).
 // Runs after the response finished, never on the request path.
 
 import { TIME_BUCKETS, normalizeUrl } from "./facts";
@@ -52,8 +53,17 @@ export interface HistogramBucket {
   count: number;
 }
 
+/**
+ * Below this many samples a histogram also keeps the raw values and answers quantiles exactly: with
+ * the n=3..30 a dev session produces per route, one ~19% bucket is the whole difference between
+ * "regressed" and "unchanged". 32 doubles (256 bytes) at most per histogram.
+ */
+export const HIST_EXACT_MAX = 32;
+
 export class LogHistogram {
   readonly counts = new Uint32Array(HIST_BUCKETS);
+  /** Raw samples while n <= HIST_EXACT_MAX; null once the histogram outgrew it. */
+  private samples: number[] | null = [];
   n = 0;
   sum = 0;
   min = Number.POSITIVE_INFINITY;
@@ -63,6 +73,10 @@ export class LogHistogram {
     if (!Number.isFinite(ms)) return;
     const v = Math.max(0, ms);
     this.counts[bucketIndex(v)]!++;
+    if (this.samples) {
+      if (this.samples.length < HIST_EXACT_MAX) this.samples.push(v);
+      else this.samples = null;
+    }
     this.n++;
     this.sum += v;
     if (v < this.min) this.min = v;
@@ -71,6 +85,10 @@ export class LogHistogram {
 
   merge(o: LogHistogram): this {
     for (let i = 0; i < HIST_BUCKETS; i++) this.counts[i] = this.counts[i]! + o.counts[i]!;
+    this.samples =
+      this.samples && o.samples && this.samples.length + o.samples.length <= HIST_EXACT_MAX
+        ? this.samples.concat(o.samples)
+        : null;
     this.n += o.n;
     this.sum += o.sum;
     if (o.min < this.min) this.min = o.min;
@@ -81,11 +99,20 @@ export class LogHistogram {
   /**
    * Nearest-rank quantile (q in [0, 1]), linearly interpolated inside its bucket and clamped to the
    * observed min/max, so a single sample (or identical samples) comes back exactly. Undefined when empty.
+   * While the raw samples are kept (n <= HIST_EXACT_MAX) the answer is exact: linear interpolation
+   * between order statistics, so the p50 of 5 samples is their median.
    */
   quantile(q: number): number | undefined {
     if (this.n === 0) return undefined;
     if (!(q > 0)) return this.min;
     if (q >= 1) return this.max;
+    if (this.samples && this.samples.length === this.n) {
+      const sorted = [...this.samples].sort((a, b) => a - b);
+      const pos = q * (sorted.length - 1);
+      const lo = Math.floor(pos);
+      const hi = Math.min(sorted.length - 1, lo + 1);
+      return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
+    }
     const rank = Math.min(this.n, Math.max(1, Math.ceil(Math.min(1, Math.max(0, q)) * this.n)));
     let seen = 0;
     for (let i = 0; i < HIST_BUCKETS; i++) {
@@ -126,6 +153,8 @@ const round = (n: number) => Math.round(n * 100) / 100;
 export interface StatsOptions {
   /** Routes kept; the least recently seen is dropped past this. Default 500. */
   maxRoutes?: number;
+  /** Distinct URL variants (path + query) tracked per route-epoch; later ones are not tracked. Default 20. */
+  maxUrlVariants?: number;
   /** Epochs kept per route (newest win). Default 5. */
   maxEpochs?: number;
   /** Distinct finding fingerprints counted per route-epoch. Default 50. */
@@ -177,6 +206,27 @@ export interface EpochStats {
   lastSeen: number;
   /** Warm duration histogram (non-empty buckets). Only with `GET /api/stats?buckets=1`. */
   buckets?: HistogramBucket[];
+  /**
+   * Per URL variant (`urlVariantKey`: path + sorted query), so `/api/feed?fast=1` gets its own
+   * baseline next to `/api/feed?fast=0`. Most requests first; at most `maxUrlVariants`.
+   */
+  variants?: UrlVariantStats[];
+}
+
+/** Aggregates for one URL variant of a route (see `urlVariantKey`). */
+export interface UrlVariantStats {
+  /** Path + query with params sorted by key, then value ("/api/feed?fast=1"). */
+  url: string;
+  count: number;
+  /** Requests in the warm sample (count - cold). */
+  warm: number;
+  /** Warm duration quantiles (ms). Absent when warm = 0. */
+  p50?: number;
+  p95?: number;
+  /** Average self time per bucket (ms) over this variant's warm requests that have facts. */
+  time?: Record<TimeBucket, number>;
+  /** Average I/O counts per request of this variant. */
+  io?: IoAverages;
 }
 
 export interface RouteStats {
@@ -212,6 +262,85 @@ export interface StatsResponse {
   since: number;
 }
 
+class VariantAgg {
+  count = 0;
+  readonly hist = new LogHistogram();
+  readonly timeSum: Record<TimeBucket, number> = { db: 0, cache: 0, ext: 0, fn: 0, framework: 0, compile: 0, idle: 0 };
+  timeN = 0;
+  readonly io: IoAverages = { db: 0, fetch: 0, cache: 0, fn: 0 };
+  ioN = 0;
+
+  merge(o: VariantAgg): this {
+    this.count += o.count;
+    this.hist.merge(o.hist);
+    for (const k of TIME_BUCKETS) this.timeSum[k] += o.timeSum[k];
+    this.timeN += o.timeN;
+    addIo(this.io, o.io);
+    this.ioN += o.ioN;
+    return this;
+  }
+
+  toJSON(url: string): UrlVariantStats {
+    const out: UrlVariantStats = { url, count: this.count, warm: this.hist.n };
+    if (this.hist.n > 0) {
+      out.p50 = round(this.hist.quantile(0.5)!);
+      out.p95 = round(this.hist.quantile(0.95)!);
+    }
+    if (this.timeN > 0) out.time = avgTime(this.timeSum, this.timeN);
+    if (this.ioN > 0) out.io = avgIo(this.io, this.ioN);
+    return out;
+  }
+}
+
+function addIo(into: IoAverages, o: IoAverages): void {
+  into.db += o.db;
+  into.fetch += o.fetch;
+  into.cache += o.cache;
+  into.fn += o.fn;
+}
+
+function avgTime(sum: Record<TimeBucket, number>, n: number): Record<TimeBucket, number> {
+  const time = {} as Record<TimeBucket, number>;
+  for (const k of TIME_BUCKETS) time[k] = round(sum[k] / n);
+  return time;
+}
+
+function avgIo(sum: IoAverages, n: number): IoAverages {
+  return {
+    db: round(sum.db / n),
+    fetch: round(sum.fetch / n),
+    cache: round(sum.cache / n),
+    fn: round(sum.fn / n),
+  };
+}
+
+/** Longest URL variant key kept; longer ones are cut (a giant query string is not a useful key). */
+const MAX_URL_KEY = 200;
+
+/**
+ * URL variant key: the path plus its query params sorted by key, then value, so `?b=2&a=1` and
+ * `?a=1&b=2` share a baseline. Fragment dropped, capped at 200 chars. Mirrored by the UI.
+ */
+export function urlVariantKey(url: string): string {
+  const hashAt = url.indexOf("#");
+  const clean = hashAt >= 0 ? url.slice(0, hashAt) : url;
+  const q = clean.indexOf("?");
+  let key = clean;
+  if (q >= 0) {
+    const params = clean
+      .slice(q + 1)
+      .split("&")
+      .filter(Boolean)
+      .sort((a, b) => {
+        const ka = a.split("=")[0]!;
+        const kb = b.split("=")[0]!;
+        return ka < kb ? -1 : ka > kb ? 1 : a < b ? -1 : a > b ? 1 : 0;
+      });
+    key = params.length ? `${clean.slice(0, q)}?${params.join("&")}` : clean.slice(0, q);
+  }
+  return key.length > MAX_URL_KEY ? key.slice(0, MAX_URL_KEY) : key;
+}
+
 class EpochAgg {
   count = 0;
   errors = 0;
@@ -222,27 +351,31 @@ class EpochAgg {
   readonly io: IoAverages = { db: 0, fetch: 0, cache: 0, fn: 0 };
   ioN = 0;
   readonly findings = new Map<string, FindingCount>();
+  /** URL variant key -> aggregates (insertion order; capped by the store). */
+  readonly variants = new Map<string, VariantAgg>();
   firstSeen = Number.POSITIVE_INFINITY;
   lastSeen = 0;
 
   constructor(readonly epoch: number) {}
 
-  merge(o: EpochAgg, maxFindings: number): this {
+  merge(o: EpochAgg, maxFindings: number, maxVariants = Number.POSITIVE_INFINITY): this {
     this.count += o.count;
     this.errors += o.errors;
     this.cold += o.cold;
     this.hist.merge(o.hist);
     for (const k of TIME_BUCKETS) this.timeSum[k] += o.timeSum[k];
     this.timeN += o.timeN;
-    this.io.db += o.io.db;
-    this.io.fetch += o.io.fetch;
-    this.io.cache += o.io.cache;
-    this.io.fn += o.io.fn;
+    addIo(this.io, o.io);
     this.ioN += o.ioN;
     for (const [fp, f] of o.findings) {
       const mine = this.findings.get(fp);
       if (mine) mine.count += f.count;
       else if (this.findings.size < maxFindings) this.findings.set(fp, { ...f });
+    }
+    for (const [url, v] of o.variants) {
+      const mine = this.variants.get(url);
+      if (mine) mine.merge(v);
+      else if (this.variants.size < maxVariants) this.variants.set(url, new VariantAgg().merge(v));
     }
     this.firstSeen = Math.min(this.firstSeen, o.firstSeen);
     this.lastSeen = Math.max(this.lastSeen, o.lastSeen);
@@ -268,20 +401,11 @@ class EpochAgg {
       out.max = round(this.hist.max);
       out.avg = round(this.hist.mean()!);
     }
-    if (this.timeN > 0) {
-      const time = {} as Record<TimeBucket, number>;
-      for (const k of TIME_BUCKETS) time[k] = round(this.timeSum[k] / this.timeN);
-      out.time = time;
-    }
-    if (this.ioN > 0) {
-      out.io = {
-        db: round(this.io.db / this.ioN),
-        fetch: round(this.io.fetch / this.ioN),
-        cache: round(this.io.cache / this.ioN),
-        fn: round(this.io.fn / this.ioN),
-      };
-    }
+    if (this.timeN > 0) out.time = avgTime(this.timeSum, this.timeN);
+    if (this.ioN > 0) out.io = avgIo(this.io, this.ioN);
     if (withBuckets) out.buckets = this.hist.buckets();
+    if (this.variants.size > 0)
+      out.variants = [...this.variants.entries()].map(([url, v]) => v.toJSON(url)).sort((a, b) => b.count - a.count);
     return out;
   }
 }
@@ -311,6 +435,7 @@ export class RouteStatsStore {
   private readonly maxRoutes: number;
   private readonly maxEpochs: number;
   private readonly maxFindings: number;
+  private readonly maxUrlVariants: number;
   private droppedSpans = 0;
   private newestEpoch = 0;
   since: number;
@@ -322,6 +447,7 @@ export class RouteStatsStore {
     this.maxRoutes = Math.max(1, opts.maxRoutes ?? 500);
     this.maxEpochs = Math.max(1, opts.maxEpochs ?? 5);
     this.maxFindings = Math.max(0, opts.maxFindings ?? 50);
+    this.maxUrlVariants = Math.max(0, opts.maxUrlVariants ?? 20);
     this.since = clock();
   }
 
@@ -377,16 +503,26 @@ export class RouteStatsStore {
     const cold = f?.cold ?? false;
     if (cold) e.cold++;
     else if (t.duration !== undefined) e.hist.add(t.duration);
-    if (f) {
-      if (!cold) {
-        for (const k of TIME_BUCKETS) e.timeSum[k] += f.time[k] ?? 0;
-        e.timeN++;
+    let v: VariantAgg | undefined;
+    if (t.url) {
+      const vk = urlVariantKey(t.url);
+      v = e.variants.get(vk);
+      if (!v && e.variants.size < this.maxUrlVariants) e.variants.set(vk, (v = new VariantAgg()));
+      if (v) {
+        v.count++;
+        if (!cold && t.duration !== undefined) v.hist.add(t.duration);
       }
-      e.io.db += f.counts.db;
-      e.io.fetch += f.counts.fetch;
-      e.io.cache += f.counts.cache;
-      e.io.fn += f.counts.fn;
-      e.ioN++;
+    }
+    if (f) {
+      const ioOf: IoAverages = { db: f.counts.db, fetch: f.counts.fetch, cache: f.counts.cache, fn: f.counts.fn };
+      for (const agg of v ? [e, v] : [e]) {
+        if (!cold) {
+          for (const k of TIME_BUCKETS) agg.timeSum[k] += f.time[k] ?? 0;
+          agg.timeN++;
+        }
+        addIo(agg.io, ioOf);
+        agg.ioN++;
+      }
       this.droppedSpans += f.droppedSpans;
     }
     for (const fd of t.findings ?? []) {
@@ -432,7 +568,7 @@ export class RouteStatsStore {
       const newest = kept[kept.length - 1];
       if (!newest) continue;
       const all = new EpochAgg(-1);
-      for (const e of kept) all.merge(e, this.maxFindings);
+      for (const e of kept) all.merge(e, this.maxFindings, this.maxUrlVariants);
       totals.requests += all.count;
       totals.errors += all.errors;
       totals.cold += all.cold;

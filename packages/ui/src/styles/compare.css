@@ -1,0 +1,435 @@
+/*
+ * WP8 Compare (plan 3.4): the merged diff of A (baseline) and B (subject). Imported by
+ * CompareView.tsx. Diff colors (--diff-*) mark worse / better / same; only-in-A / only-in-B use a
+ * glyph and a label, never a hue. Severity colors only on dots and chips. Tokens only
+ * (scripts/check-tokens.mjs).
+ */
+
+.cmp {
+  gap: 14px;
+}
+
+/* ============================================================ sides */
+
+.cmp-sides {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: center;
+}
+
+.cmp-sides .cmp-side {
+  grid-column: 1;
+}
+
+.cmp-swap {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.cmp-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.cmp-tag {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--line-3);
+  background: var(--panel-2);
+  color: var(--fg);
+  font: 600 var(--fs-label) / 1 var(--font-ui);
+  align-self: center;
+}
+
+.cmp-tag-b {
+  border-color: var(--accent);
+}
+
+.cmp-side-url {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+
+.cmp-side-ms {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.cmp-pin,
+.cmp-pin-btn {
+  font-size: var(--fs-label);
+}
+
+.cmp-pin {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: none;
+  color: var(--dim);
+}
+
+.cmp-pin:hover,
+.cmp-pin:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-3);
+}
+
+.cmp-pin.on,
+.cmp-pin-btn.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* ============================================================ baselines + pick */
+
+.cmp-baselines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.cmp-baselines .chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cmp-baselines kbd {
+  margin-left: 4px;
+}
+
+.cmp-pick {
+  display: block;
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-bg);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+.cmp-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.cmp-error {
+  margin: 0;
+  padding: 4px 10px;
+  border-left: 3px solid var(--err);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+.cmp-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* ============================================================ summary */
+
+.cmp-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--diff-same);
+}
+
+.cmp-summary.cmp-worse {
+  border-left-color: var(--diff-worse);
+}
+
+.cmp-summary.cmp-better {
+  border-left-color: var(--diff-better);
+}
+
+.cmp-sentence {
+  margin: 0;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.cmp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+/* Diff tones: text only (the summary rule and the bars set their own). */
+.cmp-worse {
+  color: var(--diff-worse);
+}
+
+.cmp-better {
+  color: var(--diff-better);
+}
+
+.cmp-same {
+  color: var(--muted);
+}
+
+.cmp-summary.cmp-worse,
+.cmp-summary.cmp-better,
+.cmp-summary.cmp-same {
+  color: inherit;
+}
+
+/* ============================================================ sections + tables */
+
+.cmp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cmp-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+}
+
+.cmp-section-head h3 {
+  margin: 0;
+}
+
+.cmp-seg {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.cmp-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.cmp-table th,
+.cmp-table td {
+  padding: 3px 8px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.cmp-table thead th {
+  border-top: 0;
+  font: 500 var(--fs-label) / 1.4 var(--font-ui);
+  color: var(--dim);
+}
+
+.cmp-table .num {
+  text-align: right;
+  width: 1%;
+}
+
+.cmp-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.cmp-bar-cell {
+  width: 30%;
+  min-width: 80px;
+}
+
+.cmp-bar {
+  display: block;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--diff-same);
+}
+
+.cmp-bar-worse {
+  background: var(--diff-worse);
+}
+
+.cmp-bar-better {
+  background: var(--diff-better);
+}
+
+/* span tree */
+
+.cmp-spans th[scope="row"] {
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cmp-span-label {
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+.cmp-tr-same .cmp-span-label {
+  color: var(--muted);
+}
+
+.cmp-tr-removed .cmp-span-label {
+  text-decoration: line-through;
+  text-decoration-color: var(--dim);
+}
+
+.cmp-glyph {
+  display: inline-block;
+  width: 1.2em;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cmp-glyph-added,
+.cmp-glyph-removed {
+  color: var(--fg);
+}
+
+.cmp-count {
+  margin-left: 8px;
+  color: var(--muted);
+}
+
+.cmp-count-changed {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.cmp-err-chip {
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--err-bg);
+  color: var(--err);
+  font-size: var(--fs-label);
+}
+
+/* findings */
+
+.cmp-findings,
+.cmp-ops {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cmp-finding {
+  display: grid;
+  grid-template-columns: auto 70px auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+.cmp-flabel {
+  color: var(--dim);
+  font-size: var(--fs-label);
+}
+
+.cmp-sev {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--info);
+}
+
+.cmp-sev-error {
+  background: var(--err);
+}
+
+.cmp-sev-warn {
+  background: var(--warn);
+}
+
+.cmp-ftitle {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* request / response diff */
+
+.cmp-details {
+  border-top: 1px solid var(--line);
+  padding: 6px 0;
+}
+
+.cmp-details summary {
+  cursor: pointer;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.cmp-part {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0 0 14px;
+}
+
+.cmp-op {
+  margin: 0;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.cmp-op-add .cmp-glyph,
+.cmp-op-remove .cmp-glyph,
+.cmp-op-type .cmp-glyph {
+  color: var(--fg);
+}
+
+/* The pick banner above a trace subject (outside .subject-body's padding). */
+.subject > .cmp-pick {
+  margin: 8px 14px 0;
+}
+
+/* A failed pin (`p` or the toggle) in the request's subject bar. */
+.cmp-pin-notice {
+  padding: 0 8px;
+  border-left: 3px solid var(--err);
+  font-size: var(--fs-label);
+  color: var(--fg);
+  white-space: nowrap;
+}

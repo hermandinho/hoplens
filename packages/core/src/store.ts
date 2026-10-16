@@ -12,8 +12,20 @@ type StoreEvent = "start" | "done" | "update" | "clear";
 /** Minimum gap between two `update` events for the same trace (ms). */
 export const UPDATE_THROTTLE_MS = 250;
 
-/** Most traces pinned at once (Compare pins both sides). Pinning past this unpins the oldest pin. */
+/**
+ * Most traces pinned at once per kind (automatic Compare pins; manual `p` pins). Pinning past this
+ * releases the oldest pin of the same kind.
+ */
 export const MAX_PINS = 20;
+
+/** Drop the oldest entries of an insertion-ordered set until it holds `max`. */
+function trim(set: Set<string>, max: number): void {
+  while (set.size > max) {
+    const oldest = set.values().next().value;
+    if (oldest === undefined) break;
+    set.delete(oldest);
+  }
+}
 
 /**
  * Ring buffer of recent traces plus a typed event stream the UI subscribes to via SSE.
@@ -34,11 +46,15 @@ export class TraceStore extends EventEmitter {
   private readonly lastUpdate = new Map<string, number>();
   private readonly pendingUpdate = new Map<string, ReturnType<typeof setTimeout>>();
   /**
-   * Pinned trace ids, oldest pin first. Pinned traces are skipped by eviction and don't count toward
-   * `max`, so at most `max + maxPins` traces are retained. Always a subset of `traces`: only a
-   * retained trace can be pinned, and pinned traces leave only through clear().
+   * Pinned trace ids, oldest pin first, in two disjoint sets of at most `maxPins` each: automatic pins
+   * (Compare pins both sides) and manual ones (the `p` key, "kept past rotation"). Automatic pins only
+   * ever release other automatic pins, so opening compares can't drop a pin the user made. Pinned
+   * traces are skipped by eviction and don't count toward `max`, so at most `max + 2 * maxPins` traces
+   * are retained. Both are subsets of `traces`: only a retained trace can be pinned, and pinned traces
+   * leave only through clear().
    */
   private readonly pins = new Set<string>();
+  private readonly manualPins = new Set<string>();
 
   constructor(
     private readonly max: number,
@@ -64,7 +80,7 @@ export class TraceStore extends EventEmitter {
   add(t: TraceRecord, internal: Internal): void {
     this.traces.set(t.id, t);
     this.internals.set(t, internal);
-    while (this.traces.size - this.pins.size > this.max) {
+    while (this.traces.size - this.pins.size - this.manualPins.size > this.max) {
       const oldest = this.oldestUnpinned();
       if (oldest === undefined) break;
       this.traces.delete(oldest);
@@ -105,38 +121,50 @@ export class TraceStore extends EventEmitter {
   }
 
   /**
-   * Keep a retained trace past ring rotation (Compare pins both sides so its view and deep link
-   * survive live traffic). Re-pinning refreshes its place; past `maxPins` the oldest pin is released
-   * and becomes evictable again. False when the trace is not retained.
+   * Keep a retained trace past ring rotation. Automatic pins (Compare pins both sides so its view and
+   * deep link survive live traffic) are capped at `maxPins`: past that the oldest automatic pin is
+   * released. `manual` pins (the user's `p`) have their own cap and are never released by automatic
+   * ones; an automatic pin of a manually pinned trace leaves it manual. Re-pinning refreshes the
+   * place. False when the trace is not retained.
    */
-  pin(id: string): boolean {
+  pin(id: string, opts: { manual?: boolean } = {}): boolean {
     if (!this.traces.has(id)) return false;
-    this.pins.delete(id);
-    this.pins.add(id);
-    while (this.pins.size > this.maxPins) {
-      const oldest = this.pins.values().next().value;
-      if (oldest === undefined) break;
-      this.pins.delete(oldest);
+    if (opts.manual) {
+      this.pins.delete(id);
+      this.manualPins.delete(id);
+      this.manualPins.add(id);
+      trim(this.manualPins, this.maxPins);
+    } else if (!this.manualPins.has(id)) {
+      this.pins.delete(id);
+      this.pins.add(id);
+      trim(this.pins, this.maxPins);
     }
     return true;
   }
 
-  /** Release a pin. The trace stays until normal rotation evicts it. */
+  /** Release a pin (manual or automatic). The trace stays until normal rotation evicts it. */
   unpin(id: string): boolean {
-    return this.pins.delete(id);
+    const a = this.pins.delete(id);
+    const m = this.manualPins.delete(id);
+    return a || m;
   }
 
   isPinned(id: string): boolean {
-    return this.pins.has(id);
+    return this.pins.has(id) || this.manualPins.has(id);
   }
 
-  /** Pinned ids, oldest pin first. */
+  /** Pinned ids (automatic, then manual), oldest pin first within each. */
   pinned(): string[] {
-    return Array.from(this.pins);
+    return [...this.pins, ...this.manualPins];
+  }
+
+  /** Manually pinned ids (the `p` key), oldest first. */
+  manuallyPinned(): string[] {
+    return Array.from(this.manualPins);
   }
 
   private oldestUnpinned(): string | undefined {
-    for (const id of this.traces.keys()) if (!this.pins.has(id)) return id;
+    for (const id of this.traces.keys()) if (!this.isPinned(id)) return id;
     return undefined;
   }
 
@@ -174,6 +202,7 @@ export class TraceStore extends EventEmitter {
   clear(): void {
     this.traces.clear();
     this.pins.clear();
+    this.manualPins.clear();
     for (const timer of this.pendingUpdate.values()) clearTimeout(timer);
     this.pendingUpdate.clear();
     this.lastUpdate.clear();

@@ -385,6 +385,23 @@ describe("TraceStore pinning", () => {
     expect(store.records()).toHaveLength(7);
   });
 
+  test("a manual pin (p) is never released by compare's automatic pins", () => {
+    const store = new TraceStore(5, undefined, 2);
+    for (const id of ["mine", "a", "b", "c", "d"]) add(store, id);
+    store.pin("mine", { manual: true });
+    for (const id of ["a", "b", "c", "d"]) store.pin(id); // two compares' worth of auto pins, past the cap
+    expect(store.isPinned("mine")).toBe(true);
+    expect(store.manuallyPinned()).toEqual(["mine"]);
+    expect(store.pinned()).toEqual(["c", "d", "mine"]);
+    store.pin("mine"); // compare opened on it: stays manual
+    expect(store.manuallyPinned()).toEqual(["mine"]);
+    for (let i = 0; i < 20; i++) add(store, `n${i}`);
+    expect(store.get("mine")).toBeDefined();
+    expect(store.records()).toHaveLength(8); // max + 2 auto + 1 manual
+    expect(store.unpin("mine")).toBe(true);
+    expect(store.isPinned("mine")).toBe(false);
+  });
+
   test("only retained traces can be pinned; clear() drops pins", () => {
     const store = new TraceStore(3);
     expect(store.pin("ghost")).toBe(false);
@@ -508,5 +525,16 @@ describe("GET /api/compare", () => {
     const del = await fetch(`${base}/api/compare/pins/A`, { method: "DELETE" });
     expect((await del.json()) as unknown).toEqual({ unpinned: true });
     expect(store.isPinned("A")).toBe(false);
+  });
+
+  test("pin one trace, list pins, 404 for an unknown id", async () => {
+    const res = await fetch(`${base}/api/compare/pins/A`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).pinned).toBe(true);
+    expect(store.isPinned("A")).toBe(true);
+    const list = (await (await fetch(`${base}/api/compare/pins`)).json()) as any;
+    expect(list.pinned).toContain("A");
+    expect(list.manual).toEqual(["A"]);
+    expect((await fetch(`${base}/api/compare/pins/nope`, { method: "POST" })).status).toBe(404);
   });
 });

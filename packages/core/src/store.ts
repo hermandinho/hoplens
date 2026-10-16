@@ -12,6 +12,9 @@ type StoreEvent = "start" | "done" | "update" | "clear";
 /** Minimum gap between two `update` events for the same trace (ms). */
 export const UPDATE_THROTTLE_MS = 250;
 
+/** Most traces pinned at once (Compare pins both sides). Pinning past this unpins the oldest pin. */
+export const MAX_PINS = 20;
+
 /**
  * Ring buffer of recent traces plus a typed event stream the UI subscribes to via SSE.
  *
@@ -30,10 +33,17 @@ export class TraceStore extends EventEmitter {
   /** trace id -> when its last `update` went out. Entries leave with the trace. */
   private readonly lastUpdate = new Map<string, number>();
   private readonly pendingUpdate = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Pinned trace ids, oldest pin first. Pinned traces are skipped by eviction and don't count toward
+   * `max`, so at most `max + maxPins` traces are retained. Always a subset of `traces`: only a
+   * retained trace can be pinned, and pinned traces leave only through clear().
+   */
+  private readonly pins = new Set<string>();
 
   constructor(
     private readonly max: number,
     private readonly throttleMs = UPDATE_THROTTLE_MS,
+    private readonly maxPins = MAX_PINS,
   ) {
     super();
     this.setMaxListeners(100);
@@ -54,12 +64,11 @@ export class TraceStore extends EventEmitter {
   add(t: TraceRecord, internal: Internal): void {
     this.traces.set(t.id, t);
     this.internals.set(t, internal);
-    while (this.traces.size > this.max) {
-      const oldest = this.traces.keys().next().value;
-      if (oldest !== undefined) {
-        this.traces.delete(oldest);
-        this.forgetUpdates(oldest);
-      }
+    while (this.traces.size - this.pins.size > this.max) {
+      const oldest = this.oldestUnpinned();
+      if (oldest === undefined) break;
+      this.traces.delete(oldest);
+      this.forgetUpdates(oldest);
     }
     this.emit("start", t);
   }
@@ -95,6 +104,42 @@ export class TraceStore extends EventEmitter {
     this.pendingUpdate.set(t.id, timer);
   }
 
+  /**
+   * Keep a retained trace past ring rotation (Compare pins both sides so its view and deep link
+   * survive live traffic). Re-pinning refreshes its place; past `maxPins` the oldest pin is released
+   * and becomes evictable again. False when the trace is not retained.
+   */
+  pin(id: string): boolean {
+    if (!this.traces.has(id)) return false;
+    this.pins.delete(id);
+    this.pins.add(id);
+    while (this.pins.size > this.maxPins) {
+      const oldest = this.pins.values().next().value;
+      if (oldest === undefined) break;
+      this.pins.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Release a pin. The trace stays until normal rotation evicts it. */
+  unpin(id: string): boolean {
+    return this.pins.delete(id);
+  }
+
+  isPinned(id: string): boolean {
+    return this.pins.has(id);
+  }
+
+  /** Pinned ids, oldest pin first. */
+  pinned(): string[] {
+    return Array.from(this.pins);
+  }
+
+  private oldestUnpinned(): string | undefined {
+    for (const id of this.traces.keys()) if (!this.pins.has(id)) return id;
+    return undefined;
+  }
+
   private forgetUpdates(id: string): void {
     this.lastUpdate.delete(id);
     const timer = this.pendingUpdate.get(id);
@@ -128,6 +173,7 @@ export class TraceStore extends EventEmitter {
 
   clear(): void {
     this.traces.clear();
+    this.pins.clear();
     for (const timer of this.pendingUpdate.values()) clearTimeout(timer);
     this.pendingUpdate.clear();
     this.lastUpdate.clear();

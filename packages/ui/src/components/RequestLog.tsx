@@ -12,6 +12,7 @@ import {
   routeLatency,
   searchError,
   searchState,
+  splitUrl,
 } from "../state/requestLog";
 import {
   type Percentiles,
@@ -308,22 +309,21 @@ export function RequestLog({ variant, label }: { variant: LogVariant; label: str
 
   // The open request's row in view: a deep link (#/r/<id>), Back/Forward or a click elsewhere
   // (Overview, a finding) can select a request far down the list. Once per selection, and only
-  // once its row exists (a deep link lands before the list loads). Follow keeps to the live tail
-  // itself, so it is left alone.
+  // once its row exists: a deep link lands before the list loads, and the scroller itself only
+  // mounts with the first rows, so this runs after the commit (a signal effect would fire before
+  // the scroller exists and never retry). Follow keeps to the live tail itself, so it is left alone.
   const revealed = useRef<string | null>(null);
-  useSignalEffect(() => {
-    const id = selectedTraceId.value;
-    const list = logRows.value;
+  useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!id || revealed.current === id || !el || followLive.peek()) return;
-    const i = list.findIndex((t) => t.id === id);
+    if (!selected || revealed.current === selected || !el || followLive.peek()) return;
+    const i = rows.findIndex((t) => t.id === selected);
     if (i < 0) return;
-    revealed.current = id;
+    revealed.current = selected;
     const top = i * rowH;
     const header = variant === "dense" ? rowH : 0;
     if (top < el.scrollTop || top + rowH > el.scrollTop + el.clientHeight - header)
       el.scrollTop = Math.max(0, top - (el.clientHeight - header) / 2);
-  });
+  }, [selected, rows, rowH, variant]);
 
   // Scroll anchoring. New traces are prepended and rows are absolutely positioned, so the browser's
   // own anchoring can't help: without this every arrival slides the rows a scrolled-down reader is on.
@@ -426,7 +426,7 @@ function DenseHeader() {
       <span class="num" title="db + cache + fetch calls">
         io
       </span>
-      <span>flags</span>
+      <span class="rlog-findcol" title="Findings: the dot is the worst severity, the number how many" />
     </div>
   );
 }
@@ -484,9 +484,10 @@ function LogRow({
   const nFindings = t.findings?.length ?? 0;
   const status = t.status ?? (t.done ? "—" : "…");
   const dur = t.duration;
+  const url = splitUrl(t.path, t.url);
   const ariaLabel = [
     t.method,
-    t.path,
+    `${url.path}${url.query}`,
     t.status !== undefined ? `status ${t.status}` : t.done ? "no status" : "in flight",
     dur !== undefined ? `${Math.round(dur)} milliseconds` : undefined,
     isHandledError(t) ? "handled error" : undefined,
@@ -537,16 +538,27 @@ function LogRow({
           <>
             <span class="rlog-time mono dim">{hhmmss(t.startedAt)}</span>
             <span class={`method-tag m-${t.method}`}>{t.method}</span>
-            <span class="trace-path mono">{t.path}</span>
+            {/* Path, its query (dim) and the flags share one cell: the flags never overlap the
+                path, they take their width from it and the path ellipsizes (plan 3.2). */}
+            <span class="rlog-pathcell">
+              <span class="trace-path mono">
+                {url.path}
+                {url.query && <span class="rlog-qs">{url.query}</span>}
+              </span>
+              {(cold || handled) && (
+                <span class="rlog-flags">
+                  {cold}
+                  {handled}
+                </span>
+              )}
+            </span>
             <span class={`status-code ${statusClass(t)} num`}>{status}</span>
             <DurBar dur={dur} lat={lat} />
             <span class="num mono dim">{f?.ttfb !== undefined ? fmtMs(f.ttfb) : "—"}</span>
             <span class="num mono dim">{kb(f?.resBytes)}</span>
             <span class={`num mono ${io ? "" : "dim"}`}>{io ?? "—"}</span>
-            <span class="rlog-flags">
-              {cold}
-              {handled}
-            </span>
+            {/* The findings chip sits over this column (it is a sibling button, see .rlog-find). */}
+            <span class="rlog-findcol" aria-hidden="true" />
           </>
         ) : (
           <>

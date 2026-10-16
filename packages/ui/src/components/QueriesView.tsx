@@ -1,151 +1,246 @@
-import { signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
-import type { HostStat, QueryKind, QueryStat, TraceSummary } from "../api/types";
+import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import type { HostStat, QueryStat, TraceSummary } from "../api/types";
+import { register } from "../state/keymap";
 import {
-  type HostSortKey,
+  type HostGroup,
+  type KindFilter,
+  LOOP_PER_REQ,
   type QuerySortKey,
   STATUS_BUCKETS,
+  type StatusBucket,
+  closeShape,
+  findShape,
+  fmtPerRequest,
+  groupHosts,
+  hostOfShape,
+  perRequest,
   queriesData,
   queriesError,
+  queriesHold,
   queriesState,
+  queryKind,
+  querySort,
   refreshQueries,
-  sortHosts,
-  sortQueries,
+  selectShape,
+  setListOption,
+  showFreshShapes,
+  shownShapes,
   statusHistogram,
+  stepShape,
 } from "../state/queries";
+import { findingQuery, quoteValue } from "../state/querySuggest";
+import { prefillQuery } from "../state/requestLog";
+import { route } from "../state/router";
 import { openSourceAt } from "../state/source";
 import { fmtMs, fmtPct, statusClass } from "../state/stats";
 import { actionError, loadTrace, tracesState } from "../state/store";
 import { Skeleton } from "./Skeleton";
+import { Split } from "./Split";
 
 /*
- * Queries view (plan feature 11): every db / cache / fetch fingerprint across requests, and the
- * hosts the app calls. Data from GET /api/queries, kept server-side so it survives ring eviction.
+ * Queries view (plan 3.8): one list | subject split, like every view.
+ *  - The list: every db / cache / fetch shape across requests (GET /api/queries, kept server-side so
+ *    it survives ring eviction), segmented by kind, sortable, or grouped by host (Hosts is a toggle
+ *    here, not a view of its own). Its order holds still while the pointer is on it.
+ *  - The subject (#/q/<fingerprint>): the full shape, its numbers, the loop hint linked to the
+ *    requests that show it, callers, routes and sample requests.
+ * j / k step through the list as shown; the subject follows.
  */
-
-type Tab = "queries" | "hosts";
-const tab = signal<Tab>("queries");
-const kindFilter = signal<QueryKind | "all">("all");
-const qSort = signal<{ by: QuerySortKey; desc: boolean }>({ by: "totalMs", desc: true });
-const hSort = signal<{ by: HostSortKey; desc: boolean }>({ by: "calls", desc: true });
-const expanded = signal<ReadonlySet<string>>(new Set());
 
 const SUPPORTED_DB =
   "pg (node-postgres), Prisma with tracing enabled, Drizzle through drizzleLogger() from @hoplens/core/trace, ioredis, node-redis, and any OpenTelemetry span carrying db.system / db.statement";
 
+const KINDS: Array<{ id: KindFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "db", label: "SQL" },
+  { id: "cache", label: "Cache" },
+  { id: "fetch", label: "Fetch" },
+];
+
+/** The shape the route names (#/q/<fingerprint>), if any. */
+function routeShape(): string | undefined {
+  const r = route.value;
+  return r.view === "queries" ? r.shape : undefined;
+}
+
+/** j / k: the next / previous shape as listed; opens the first one when none is open. */
+function step(delta: number): void {
+  const r = route.peek();
+  const cur = r.view === "queries" ? r.shape : undefined;
+  const next = stepShape(shownShapes.peek().rows, cur, delta);
+  if (next && next !== cur) selectShape(next, { replace: !!cur });
+}
+
 export function QueriesView() {
-  const state = queriesState.value;
-  const data = queriesData.value;
-  const t = tab.value;
+  const key = routeShape();
+
+  // Registered while the view is mounted, so the cheatsheet lists them only here.
+  useEffect(() => {
+    const onQueries = () => route.peek().view === "queries";
+    const offs = [
+      register("list", "j", "Next query shape (the subject follows)", () => step(1), { when: onQueries, hint: "move" }),
+      register("list", "k", "Previous query shape (the subject follows)", () => step(-1), {
+        when: onQueries,
+        hint: "move",
+      }),
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, []);
 
   return (
-    <section class="queries-view" aria-labelledby="queries-title">
-      <header class="ov-head">
-        <div>
-          <h2 id="queries-title" class="ov-title">
-            Queries
-          </h2>
-          <div class="ov-sub dim">
-            Every database, cache and fetch call across requests, grouped by shape. Kept server-side: survives trace
-            eviction, resets on Clear.
-          </div>
-        </div>
-        <div class="ov-head-tools">
+    <Split
+      id="queries-shapes"
+      list={<ShapeList selected={key} />}
+      listLabel="Query shapes"
+      subject={key ? <ShapeSubject shapeKey={key} /> : null}
+      subjectLabel="Query shape"
+      listClass="split-scroll qv-listpane"
+      subjectClass="split-scroll"
+      onHold={(held) => {
+        queriesHold.value = held;
+      }}
+    />
+  );
+}
+
+/* ====================================================================== list */
+
+function ShapeList({ selected }: { selected: string | undefined }) {
+  const state = queriesState.value;
+  const data = queriesData.value;
+  const shown = shownShapes.value;
+  const byHost = groupHosts.value;
+  const kind = queryKind.value;
+  const all = data?.queries ?? [];
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectedFp = data ? findShape(data.queries, selected)?.fingerprint : undefined;
+
+  // The open shape's row in view: a deep link (#/q/...) lands before the data, and j/k can walk
+  // past the fold. Once per shape, after the row exists.
+  const revealed = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!selectedFp || revealed.current === selectedFp) return;
+    const row = listRef.current?.querySelector(`[data-fp="${CSS.escape(selectedFp)}"]`);
+    if (!row) return;
+    revealed.current = selectedFp;
+    row.scrollIntoView({ block: "nearest" });
+  });
+
+  return (
+    <section class="queries-view" aria-labelledby="queries-title" ref={listRef}>
+      <header class="list-head qv-head">
+        <h2 id="queries-title" class="list-title">
+          Queries {data && <span class="count">{all.length}</span>}
+        </h2>
+        {shown.fresh > 0 && (
           <button
             type="button"
-            class="chip"
-            onClick={() =>
-              void refreshQueries().then(() => {
-                if (queriesState.value === "error") actionError.value = `Could not load queries: ${queriesError.value}`;
-                else if (actionError.value?.startsWith("Could not load queries")) actionError.value = null;
-              })
-            }
-            disabled={state === "loading"}
+            class="new-pill"
+            onClick={showFreshShapes}
+            title="New shapes arrived while you were reading; the list held its order"
           >
-            Refresh
+            {shown.fresh} new
           </button>
-        </div>
+        )}
+        <span class="list-hint dim">
+          <kbd>j</kbd> <kbd>k</kbd> move
+        </span>
+        <button
+          type="button"
+          class="chip"
+          onClick={() =>
+            void refreshQueries().then(() => {
+              if (queriesState.value === "error") actionError.value = `Could not load queries: ${queriesError.value}`;
+              else if (actionError.value?.startsWith("Could not load queries")) actionError.value = null;
+            })
+          }
+          disabled={state === "loading"}
+        >
+          Refresh
+        </button>
       </header>
 
-      <div class="qv-tabs" role="tablist" aria-label="Queries or hosts">
-        <TabBtn id="queries" label="Queries" count={data?.queries.length} />
-        <TabBtn id="hosts" label="Hosts" count={data?.hosts.length} />
+      <div class="qv-tools">
+        <fieldset class="qv-seg" disabled={byHost}>
+          <legend class="sr-only">Kind</legend>
+          {KINDS.map((k) => {
+            const n = k.id === "all" ? all.length : all.filter((q) => q.kind === k.id).length;
+            const on = (byHost ? "fetch" : kind) === k.id;
+            return (
+              <button
+                key={k.id}
+                type="button"
+                class={`qv-seg-btn ${on ? "qv-seg-on" : ""}`}
+                aria-pressed={on}
+                onClick={() => setListOption(() => (queryKind.value = k.id))}
+              >
+                {k.label} <span class="dim mono">{n}</span>
+              </button>
+            );
+          })}
+        </fieldset>
+        <button
+          type="button"
+          class={`chip ${byHost ? "chip-active" : ""}`}
+          aria-pressed={byHost}
+          title="Group the fetch shapes under the host they call, with each host's numbers"
+          onClick={() => setListOption(() => (groupHosts.value = !groupHosts.value))}
+        >
+          Group by host {data && <span class="dim mono">{data.hosts.length}</span>}
+        </button>
       </div>
 
-      <div role="tabpanel" id={`qv-panel-${t}`} aria-labelledby={`qv-tab-${t}`} class="qv-panel">
-        {state === "unavailable" ? (
-          <div class="ov-empty">
-            <b>Not available</b>
-            This Hoplens runtime has no <code>/api/queries</code> endpoint. Update <code>@hoplens/core</code> and
-            restart <code>next dev</code>.
-          </div>
-        ) : !data && (state === "loading" || state === "idle") ? (
-          <div class="skeleton-wrap" aria-busy="true">
-            <Skeleton lines={6} />
-          </div>
-        ) : !data && state === "error" ? (
-          <div class="error" role="alert">
-            <b>Could not load queries.</b> {queriesError.value}{" "}
-            <button type="button" class="link-btn" onClick={() => void refreshQueries()}>
-              Retry
-            </button>
-          </div>
-        ) : data ? (
-          <>
-            {state === "error" && (
-              <output class="qv-stale dim">Refresh failed ({queriesError.value}); showing the last snapshot.</output>
-            )}
-            {t === "queries" ? <QueriesTable list={data.queries} /> : <HostsTable list={data.hosts} />}
-          </>
-        ) : null}
-      </div>
+      {state === "unavailable" ? (
+        <div class="qv-empty">
+          <b>Not available</b>
+          This Hoplens runtime has no <code>/api/queries</code> endpoint. Update <code>@hoplens/core</code> and restart{" "}
+          <code>next dev</code>.
+        </div>
+      ) : !data && (state === "loading" || state === "idle") ? (
+        <div class="skeleton-wrap" aria-busy="true">
+          <Skeleton lines={6} />
+        </div>
+      ) : !data && state === "error" ? (
+        <div class="error" role="alert">
+          <b>Could not load queries.</b> {queriesError.value}{" "}
+          <button type="button" class="link-btn" onClick={() => void refreshQueries()}>
+            Retry
+          </button>
+        </div>
+      ) : data ? (
+        <>
+          {state === "error" && (
+            <output class="qv-stale dim">Refresh failed ({queriesError.value}); showing the last snapshot.</output>
+          )}
+          {!byHost && !all.some((q) => q.kind === "db") && (kind === "all" || kind === "db") && (
+            <div class="qv-note dim">
+              No SQL spans seen{all.length > 0 ? " yet" : ""}. Supported drivers: {SUPPORTED_DB}. A route that waits on
+              an unsupported driver shows the time as idle.
+            </div>
+          )}
+          <ShapeTable shown={shown.rows} groups={shown.groups} total={all.length} selected={selectedFp} />
+        </>
+      ) : null}
     </section>
   );
 }
 
-function TabBtn({ id, label, count }: { id: Tab; label: string; count?: number }) {
-  const on = tab.value === id;
-  return (
-    <button
-      type="button"
-      role="tab"
-      id={`qv-tab-${id}`}
-      aria-selected={on}
-      aria-controls={`qv-panel-${id}`}
-      class={`sidebar-tab ${on ? "active" : ""}`}
-      onClick={() => (tab.value = id)}
-      onKeyDown={(e) => {
-        if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-          e.preventDefault();
-          const next: Tab = id === "queries" ? "hosts" : "queries";
-          tab.value = next;
-          document.getElementById(`qv-tab-${next}`)?.focus();
-        }
-      }}
-      tabIndex={on ? 0 : -1}
-    >
-      {label}
-      {count !== undefined && <span class="tab-count">{count}</span>}
-    </button>
-  );
-}
-
 /** Sortable column header with aria-sort. */
-function SortTh<K extends string>({
+function SortTh({
   k,
-  sort,
-  onSort,
   children,
   title,
   cls = "",
 }: {
-  k: K;
-  sort: { by: K; desc: boolean };
-  onSort: (k: K) => void;
+  k: QuerySortKey;
   children: ComponentChildren;
   title?: string;
   cls?: string;
 }) {
+  const sort = querySort.value;
   const on = sort.by === k;
   return (
     <th
@@ -154,7 +249,15 @@ function SortTh<K extends string>({
       aria-sort={on ? (sort.desc ? "descending" : "ascending") : "none"}
       title={title}
     >
-      <button type="button" class={`th-sort ${on ? "th-sort-on" : ""}`} onClick={() => onSort(k)}>
+      <button
+        type="button"
+        class={`th-sort ${on ? "th-sort-on" : ""}`}
+        onClick={() =>
+          setListOption(() => {
+            querySort.value = on ? { by: k, desc: !sort.desc } : { by: k, desc: true };
+          })
+        }
+      >
         {children}
         <span class="th-arrow" aria-hidden="true">
           {on ? (sort.desc ? "▾" : "▴") : ""}
@@ -164,9 +267,257 @@ function SortTh<K extends string>({
   );
 }
 
-function toggleSort<K extends string>(sig: { value: { by: K; desc: boolean } }, k: K): void {
-  const cur = sig.value;
-  sig.value = cur.by === k ? { by: k, desc: !cur.desc } : { by: k, desc: true };
+const COLS = 7;
+
+function ShapeTable({
+  shown,
+  groups,
+  total,
+  selected,
+}: {
+  shown: QueryStat[];
+  groups: HostGroup[] | null;
+  total: number;
+  selected: string | undefined;
+}) {
+  if (groups ? groups.length === 0 : shown.length === 0) {
+    return (
+      <div class="qv-empty">
+        <b>{total === 0 ? "No queries yet" : groups ? "No outgoing fetches yet" : "Nothing of this kind"}</b>
+        {total === 0
+          ? "Send requests that hit a database, a cache or an external API. Each call is grouped by its shape here, with literals and ids replaced by ?."
+          : groups
+            ? "Hosts appear once a request calls fetch(): calls, p95, error rate and how many GETs asked for Next's data cache."
+            : "Try another kind."}
+      </div>
+    );
+  }
+  const row = (q: QueryStat) => <ShapeRow key={q.fingerprint} q={q} on={q.fingerprint === selected} />;
+  return (
+    <div class="qv-table-wrap">
+      <table class="qv-table">
+        <thead>
+          <tr>
+            <th scope="col">Shape</th>
+            <SortTh k="calls">Calls</SortTh>
+            <SortTh k="traces" title="Distinct requests" cls="qv-col-mid">
+              Reqs
+            </SortTh>
+            <SortTh k="totalMs">Total</SortTh>
+            <SortTh k="p95Ms">p95</SortTh>
+            <SortTh k="maxMs" cls="qv-col-opt">
+              Max
+            </SortTh>
+            <SortTh k="errors" cls="qv-col-opt">
+              Err
+            </SortTh>
+          </tr>
+        </thead>
+        {groups ? (
+          groups.map((g) => (
+            <tbody key={g.host} class="qv-group">
+              <HostRow g={g} />
+              {g.shapes.map(row)}
+            </tbody>
+          ))
+        ) : (
+          <tbody>{shown.map(row)}</tbody>
+        )}
+      </table>
+    </div>
+  );
+}
+
+function KindDot({ q }: { q: QueryStat }) {
+  return <span class={`qv-dot qv-dot-${q.kind}`} aria-hidden="true" />;
+}
+
+/** Loop marker: calls per request above LOOP_PER_REQ. Opens the newest request that shows it. */
+function LoopChip({ q }: { q: QueryStat }) {
+  const per = perRequest(q);
+  if (per <= LOOP_PER_REQ) return null;
+  const newest = q.traceIds[0];
+  const text = `×${fmtPerRequest(per)}`;
+  const title = `${fmtPerRequest(per)} calls per request: most likely a loop (N+1).`;
+  if (!newest)
+    return (
+      <span class="qv-loop" title={title}>
+        {text}
+      </span>
+    );
+  return (
+    <button
+      type="button"
+      class="qv-loop"
+      title={`${title} Open the newest request that made them.`}
+      aria-label={`${title} Open the newest request that made them`}
+      onClick={(e) => {
+        e.stopPropagation();
+        void loadTrace(newest, "user");
+      }}
+    >
+      {text}
+    </button>
+  );
+}
+
+function ShapeRow({ q, on }: { q: QueryStat; on: boolean }) {
+  return (
+    // The whole row is a click target for the mouse; the keyboard path is the shape button and j/k.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: see above
+    <tr
+      class={`qv-row ${on ? "qv-row-on" : ""}`}
+      data-fp={q.fingerprint}
+      onClick={() => !on && selectShape(q.fingerprint)}
+    >
+      <th scope="row" class="qv-shape">
+        <span class="qv-shape-cell">
+          <button
+            type="button"
+            class="qv-open mono"
+            title={q.shape}
+            aria-current={on ? "true" : undefined}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!on) selectShape(q.fingerprint);
+            }}
+          >
+            <KindDot q={q} />
+            <span class="qv-clip">{q.shape}</span>
+          </button>
+          <LoopChip q={q} />
+        </span>
+      </th>
+      <td class="num mono">{q.calls}</td>
+      <td class="num mono qv-col-mid">{q.traces}</td>
+      <td class="num mono">{q.timedCalls > 0 ? fmtMs(q.totalMs) : "—"}</td>
+      <td class="num mono">{fmtMs(q.p95Ms)}</td>
+      <td class="num mono qv-col-opt">{fmtMs(q.maxMs)}</td>
+      <td class="num mono qv-col-opt">
+        {q.errors > 0 ? <span class="qv-err-chip">{q.errors}</span> : <span class="dim">0</span>}
+      </td>
+    </tr>
+  );
+}
+
+const BUCKET_LABEL: Record<StatusBucket, string> = {
+  "2xx": "2xx",
+  "3xx": "3xx",
+  "4xx": "4xx",
+  "5xx": "5xx",
+  error: "failed",
+};
+
+/** Statuses as dots + counts (severity colours stay on dots, plan 3.10). */
+function StatusDots({ statuses }: { statuses: Record<string, number> }) {
+  const h = statusHistogram(statuses);
+  const parts = STATUS_BUCKETS.filter((b) => h[b] > 0);
+  if (parts.length === 0) return null;
+  return (
+    <span class="qv-statuses">
+      {parts.map((b) => (
+        <span key={b} class="qv-status" title={`${BUCKET_LABEL[b]}: ${h[b]}`}>
+          <span class={`qv-sdot st-${b}`} aria-hidden="true" />
+          {BUCKET_LABEL[b]} {h[b]}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function hostName(host: string): ComponentChildren {
+  return host || <span class="dim">(this app, relative URL)</span>;
+}
+
+function HostFacts({ h }: { h: HostStat }) {
+  return (
+    <span class="qv-host-facts mono">
+      <span>{h.calls} calls</span>
+      <span>p95 {fmtMs(h.p95Ms)}</span>
+      {h.errorPct > 0 && <span class="qv-err-chip">{fmtPct(h.errorPct)} failed</span>}
+      <span title="GETs that asked for Next's data cache (force-cache, revalidate > 0). Request-side intent, not an observed hit.">
+        cached {fmtPct(h.cachedPct)}
+      </span>
+      <StatusDots statuses={h.statuses} />
+    </span>
+  );
+}
+
+function HostRow({ g }: { g: HostGroup }) {
+  return (
+    <tr class="qv-host-row">
+      <th scope="rowgroup" colSpan={COLS}>
+        <span class="qv-host-name mono">{hostName(g.host)}</span>
+        {g.stat ? <HostFacts h={g.stat} /> : <span class="dim">no host totals</span>}
+        {g.shapes.length === 0 && <span class="dim"> · no shape in this list</span>}
+      </th>
+    </tr>
+  );
+}
+
+/* =================================================================== subject */
+
+function ShapeSubject({ shapeKey }: { shapeKey: string }) {
+  const data = queriesData.value;
+  const state = queriesState.value;
+  const q = data ? findShape(data.queries, shapeKey) : undefined;
+  const rows = shownShapes.value.rows;
+  const i = q ? rows.findIndex((x) => x.fingerprint === q.fingerprint) : -1;
+  const prev = i > 0 ? rows[i - 1] : undefined;
+  const next = i >= 0 ? rows[i + 1] : undefined;
+
+  return (
+    <div class="subject">
+      <div class="subject-bar">
+        <span class="subject-kind">Query shape</span>
+        <span class="subject-nav">
+          <button
+            type="button"
+            class="sbtn"
+            disabled={!prev}
+            onClick={() => prev && selectShape(prev.fingerprint, { replace: true })}
+            title="Previous shape in the list (k)"
+            aria-label="Previous shape"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            class="sbtn"
+            disabled={!next}
+            onClick={() => next && selectShape(next.fingerprint, { replace: true })}
+            title="Next shape in the list (j)"
+            aria-label="Next shape"
+          >
+            ›
+          </button>
+        </span>
+        <button
+          type="button"
+          class="source-close subject-close"
+          onClick={closeShape}
+          aria-label="Close"
+          title="Close (the list takes the full width)"
+        >
+          ×
+        </button>
+      </div>
+      {q ? (
+        <ShapeDetail q={q} hosts={data?.hosts ?? []} />
+      ) : !data && (state === "loading" || state === "idle") ? (
+        <div class="subject-loading">
+          <Skeleton lines={6} />
+        </div>
+      ) : (
+        <div class="subject-body">
+          <p class="subject-lead">
+            This shape isn't in the current snapshot: it was reset by Clear, or pushed out by newer shapes.
+          </p>
+          <pre class="qv-full mono">{shapeKey.replace(/^[a-z]+:/, "")}</pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function shortFile(file: string): string {
@@ -174,199 +525,15 @@ function shortFile(file: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : file;
 }
 
-/* ------------------------------------------------------------------- queries */
-
-const KINDS: Array<{ id: QueryKind | "all"; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "db", label: "Database" },
-  { id: "cache", label: "Cache" },
-  { id: "fetch", label: "Fetch" },
-];
-
-function QueriesTable({ list }: { list: QueryStat[] }) {
-  const kind = kindFilter.value;
-  const sort = qSort.value;
-  const open = expanded.value;
-  const rows = sortQueries(kind === "all" ? list : list.filter((q) => q.kind === kind), sort.by, sort.desc);
-  const hasDb = list.some((q) => q.kind === "db");
-
-  return (
-    <>
-      <fieldset class="chips qv-kinds">
-        <legend class="sr-only">Filter by kind</legend>
-        {KINDS.map((k) => {
-          const n = k.id === "all" ? list.length : list.filter((q) => q.kind === k.id).length;
-          return (
-            <button
-              key={k.id}
-              type="button"
-              class={`chip ${kind === k.id ? "chip-active" : ""}`}
-              aria-pressed={kind === k.id}
-              onClick={() => (kindFilter.value = k.id)}
-            >
-              {k.label} <span class="dim">{n}</span>
-            </button>
-          );
-        })}
-      </fieldset>
-
-      {!hasDb && (kind === "all" || kind === "db") && (
-        <div class="qv-note dim">
-          No db spans seen{list.length > 0 ? " yet" : ""}. Supported drivers: {SUPPORTED_DB}. A route that waits on an
-          unsupported driver shows the time as idle.
-        </div>
-      )}
-
-      {rows.length === 0 ? (
-        <div class="ov-empty">
-          <b>{list.length === 0 ? "No queries yet" : "Nothing of this kind"}</b>
-          {list.length === 0
-            ? "Send requests that hit a database, a cache or an external API. Each call is grouped by its shape here, with literals and ids replaced by ?."
-            : "Try another kind."}
-        </div>
-      ) : (
-        <div class="ov-table-wrap">
-          <table class="ov-table qv-table">
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span class="sr-only">Expand</span>
-                </th>
-                <th scope="col">Shape</th>
-                <th scope="col">Kind</th>
-                <SortTh k="calls" sort={sort} onSort={(k) => toggleSort(qSort, k)}>
-                  Calls
-                </SortTh>
-                <SortTh
-                  k="traces"
-                  sort={sort}
-                  onSort={(k) => toggleSort(qSort, k)}
-                  title="Distinct requests; calls per request above 1 hints at a loop"
-                >
-                  Reqs
-                </SortTh>
-                <SortTh k="totalMs" sort={sort} onSort={(k) => toggleSort(qSort, k)}>
-                  Total
-                </SortTh>
-                <SortTh k="p95Ms" sort={sort} onSort={(k) => toggleSort(qSort, k)}>
-                  p95
-                </SortTh>
-                <SortTh k="maxMs" sort={sort} onSort={(k) => toggleSort(qSort, k)} cls="qv-col-opt">
-                  Max
-                </SortTh>
-                <SortTh k="errors" sort={sort} onSort={(k) => toggleSort(qSort, k)} cls="qv-col-opt">
-                  Err
-                </SortTh>
-                <th scope="col" class="qv-col-opt">
-                  Routes
-                </th>
-                <th scope="col">Callers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((q) => (
-                <QueryRow key={q.fingerprint} q={q} open={open.has(q.fingerprint)} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </>
-  );
-}
-
-function toggleExpanded(fp: string): void {
-  const next = new Set(expanded.value);
-  if (next.has(fp)) next.delete(fp);
-  else next.add(fp);
-  expanded.value = next;
-}
-
-function QueryRow({ q, open }: { q: QueryStat; open: boolean }) {
-  const perReq = q.traces > 0 ? q.calls / q.traces : 0;
-  const caller = q.callers[0];
-  const detailId = `qv-detail-${q.fingerprint.length}-${hash(q.fingerprint)}`;
-  return (
-    <>
-      <tr class={`ov-row qv-row ${open ? "qv-row-open" : ""}`}>
-        <td class="qv-caret-cell">
-          <button
-            type="button"
-            class="qv-caret"
-            aria-expanded={open}
-            aria-controls={detailId}
-            aria-label={`${open ? "Hide" : "Show"} details for ${q.shape}`}
-            onClick={() => toggleExpanded(q.fingerprint)}
-          >
-            {open ? "▾" : "▸"}
-          </button>
-        </td>
-        <th scope="row" class="qv-shape mono" title={q.shape}>
-          <span class="qv-clip">{q.shape}</span>
-        </th>
-        <td>
-          <span class={`qv-kind qv-kind-${q.kind}`}>{q.system && q.kind !== "fetch" ? q.system : q.kind}</span>
-        </td>
-        <td class="num mono">{q.calls}</td>
-        <td class={`num mono ${perReq > 1.5 ? "qv-loop" : ""}`} title={`${perReq.toFixed(1)} calls per request`}>
-          {q.traces}
-          {perReq > 1.5 && <span class="dim"> ×{perReq.toFixed(perReq >= 10 ? 0 : 1)}</span>}
-        </td>
-        <td class="num mono">{q.timedCalls > 0 ? fmtMs(q.totalMs) : "—"}</td>
-        <td class="num mono">{fmtMs(q.p95Ms)}</td>
-        <td class="num mono qv-col-opt">{fmtMs(q.maxMs)}</td>
-        <td class={`num mono qv-col-opt ${q.errors > 0 ? "ov-err" : "dim"}`}>{q.errors}</td>
-        <td class="qv-routes mono qv-col-opt">
-          {q.routes[0] ? (
-            <>
-              <span class="qv-clip" title={q.routes.map((r) => `${r.route} ×${r.calls}`).join("\n")}>
-                {q.routes[0].route}
-              </span>
-              {q.routes.length > 1 && <span class="dim"> +{q.routes.length - 1}</span>}
-            </>
-          ) : (
-            <span class="dim">—</span>
-          )}
-        </td>
-        <td class="qv-callers">
-          {caller ? <CallerLink c={caller} /> : <span class="dim">—</span>}
-          {q.callers.length > 1 && <span class="dim"> +{q.callers.length - 1}</span>}
-        </td>
-      </tr>
-      {open && (
-        <tr class="qv-detail-row" id={detailId}>
-          <td />
-          <td colSpan={10}>
-            <QueryDetail q={q} />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-/** Small stable hash for DOM ids. */
-function hash(s: string): string {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
-
 function CallerLink({ c }: { c: QueryStat["callers"][number] }) {
   const loc = c.location;
-  const label = `${c.fn ?? "(anonymous)"}`;
-  if (!loc)
-    return (
-      <span class="mono" title={`${c.calls} calls`}>
-        {label}
-      </span>
-    );
+  if (!loc) return <span class="mono">{c.fn ?? "(anonymous)"}</span>;
   return (
     <button
       type="button"
       class="stack-link mono"
       onClick={() => openSourceAt(loc.file, loc.line)}
-      title={`${loc.file}:${loc.line} · ${c.calls} calls · open in source viewer`}
+      title={`${loc.file}:${loc.line} · open in the source viewer`}
     >
       {c.fn ? `${c.fn} ` : ""}
       {shortFile(loc.file)}:{loc.line}
@@ -374,25 +541,84 @@ function CallerLink({ c }: { c: QueryStat["callers"][number] }) {
   );
 }
 
-function QueryDetail({ q }: { q: QueryStat }) {
+/** "GET /api/x" -> the Requests query for that route. */
+function routeQuery(routeKey: string): string {
+  const sp = routeKey.indexOf(" ");
+  return sp > 0
+    ? `method:${routeKey.slice(0, sp)} route:${quoteValue(routeKey.slice(sp + 1))}`
+    : `route:${quoteValue(routeKey)}`;
+}
+
+function kindLabel(q: QueryStat): string {
+  if (q.kind === "fetch") return "fetch";
+  if (q.system) return q.system;
+  return q.kind === "db" ? "SQL" : "cache";
+}
+
+function ShapeDetail({ q, hosts }: { q: QueryStat; hosts: readonly HostStat[] }) {
+  const per = perRequest(q);
+  const loop = per > LOOP_PER_REQ;
+  const host = q.kind === "fetch" ? hostOfShape(q.shape) : undefined;
+  const hostStat = host !== undefined ? hosts.find((h) => h.host === host) : undefined;
   const byId = new Map<string, TraceSummary>();
   for (const t of tracesState.value) byId.set(t.id, t);
+  const routeKeys = q.routes.map((r) => r.route);
+
   return (
-    <div class="qv-detail">
+    <div class="subject-body qv-subject">
+      <h2 class="subject-title qv-subject-title">
+        <span class={`qv-kind qv-kind-${q.kind}`}>{kindLabel(q)}</span>
+        {host !== undefined && <span class="mono qv-subject-host">{hostName(host)}</span>}
+      </h2>
       <pre class="qv-full mono">{q.shape}</pre>
-      <dl class="qv-facts mono">
-        {q.system && (
+      <p class="subject-lead">
+        {q.calls} call{q.calls === 1 ? "" : "s"} from {q.traces} request{q.traces === 1 ? "" : "s"}
+        {q.timedCalls > 0 && (
           <>
-            <dt>system</dt>
-            <dd>{q.system}</dd>
+            {" "}
+            · total <b class="mono">{fmtMs(q.totalMs)}</b> · p95 <b class="mono">{fmtMs(q.p95Ms)}</b> · max{" "}
+            <b class="mono">{fmtMs(q.maxMs)}</b>
           </>
         )}
+        {q.errors > 0 && (
+          <>
+            {" "}
+            · <span class="qv-err-chip">{q.errors} failed</span>
+          </>
+        )}
+      </p>
+
+      {loop && (
+        <div class="qv-callout">
+          <span>
+            Runs <b class="mono">×{fmtPerRequest(per)}</b> per request: most likely a loop (N+1).
+          </span>
+          <span class="qv-callout-actions">
+            <button
+              type="button"
+              class="sbtn"
+              onClick={() => prefillQuery(findingQuery("n-plus-1", routeKeys.length === 1 ? routeKeys : []))}
+              title="List the requests with an N+1 finding"
+            >
+              Requests with N+1
+            </button>
+            {q.traceIds[0] && (
+              <button
+                type="button"
+                class="sbtn"
+                onClick={() => void loadTrace(q.traceIds[0] as string, "user")}
+                title="Open the newest request that made these calls"
+              >
+                Open newest
+              </button>
+            )}
+          </span>
+        </div>
+      )}
+
+      <dl class="qv-facts mono">
         <dt>avg</dt>
         <dd>{fmtMs(q.avgMs)}</dd>
-        <dt>max</dt>
-        <dd>{fmtMs(q.maxMs)}</dd>
-        <dt>errors</dt>
-        <dd class={q.errors > 0 ? "ov-err" : undefined}>{q.errors}</dd>
         <dt>timed calls</dt>
         <dd>
           {q.timedCalls} of {q.calls}
@@ -412,9 +638,16 @@ function QueryDetail({ q }: { q: QueryStat }) {
           </>
         )}
       </dl>
+
+      {hostStat && (
+        <p class="qv-host-line">
+          <span class="dim">Host</span> <HostFacts h={hostStat} />
+        </p>
+      )}
+
       <div class="qv-cols">
         <div>
-          <h4 class="qv-h">Callers</h4>
+          <h3 class="qv-h">Callers</h3>
           {q.callers.length === 0 ? (
             <div class="dim">No caller location recorded.</div>
           ) : (
@@ -428,17 +661,25 @@ function QueryDetail({ q }: { q: QueryStat }) {
           )}
         </div>
         <div>
-          <h4 class="qv-h">Routes</h4>
+          <h3 class="qv-h">Routes</h3>
           <ul class="qv-ul">
             {q.routes.map((r) => (
-              <li key={r.route} class="mono">
-                {r.route} <span class="dim">×{r.calls}</span>
+              <li key={r.route}>
+                <button
+                  type="button"
+                  class="link-btn mono"
+                  onClick={() => prefillQuery(routeQuery(r.route))}
+                  title="List this route's requests"
+                >
+                  {r.route}
+                </button>{" "}
+                <span class="dim mono">×{r.calls}</span>
               </li>
             ))}
           </ul>
         </div>
         <div>
-          <h4 class="qv-h">Sample requests</h4>
+          <h3 class="qv-h">Sample requests</h3>
           {q.traceIds.length === 0 ? (
             <div class="dim">The requests that made these calls were evicted.</div>
           ) : (
@@ -457,7 +698,7 @@ function QueryDetail({ q }: { q: QueryStat }) {
                         <>
                           <span class={`status-code ${statusClass(t)}`}>{t.status ?? "—"}</span>
                           <span class={`method-tag m-${t.method}`}>{t.method}</span>
-                          <span class="mono qv-sample-path">{t.path}</span>
+                          <span class="mono qv-sample-path">{t.url}</span>
                           <span class="mono dim">{fmtMs(t.duration)}</span>
                         </>
                       ) : (
@@ -472,91 +713,5 @@ function QueryDetail({ q }: { q: QueryStat }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/* --------------------------------------------------------------------- hosts */
-
-function HostsTable({ list }: { list: HostStat[] }) {
-  const sort = hSort.value;
-  const rows = sortHosts(list, sort.by, sort.desc);
-  if (rows.length === 0)
-    return (
-      <div class="ov-empty">
-        <b>No outgoing fetches yet</b>
-        Hosts appear once a request calls <code>fetch()</code>: calls, p95, error rate and how many GETs asked for
-        Next's data cache.
-      </div>
-    );
-  return (
-    <div class="ov-table-wrap">
-      <table class="ov-table qv-table">
-        <thead>
-          <tr>
-            <th scope="col">Host</th>
-            <SortTh k="calls" sort={sort} onSort={(k) => toggleSort(hSort, k)}>
-              Calls
-            </SortTh>
-            <SortTh k="p95Ms" sort={sort} onSort={(k) => toggleSort(hSort, k)}>
-              p95
-            </SortTh>
-            <th scope="col" class="num qv-col-opt">
-              Avg
-            </th>
-            <SortTh k="errorPct" sort={sort} onSort={(k) => toggleSort(hSort, k)} title="Failed, or HTTP >= 400">
-              Err %
-            </SortTh>
-            <SortTh
-              k="cachedPct"
-              sort={sort}
-              onSort={(k) => toggleSort(hSort, k)}
-              title="GETs that asked for Next's data cache (force-cache, revalidate > 0). Request-side intent, not an observed hit."
-            >
-              Cached %
-            </SortTh>
-            <th scope="col" class="num qv-col-opt" title="GETs that opted out explicitly (no-store, revalidate: 0)">
-              No-store %
-            </th>
-            <th scope="col">Statuses</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((h) => (
-            <tr key={h.host} class="ov-row">
-              <th scope="row" class="mono qv-host">
-                {h.host || <span class="dim">(this app, relative URL)</span>}
-              </th>
-              <td class="num mono">{h.calls}</td>
-              <td class="num mono">{fmtMs(h.p95Ms)}</td>
-              <td class="num mono dim qv-col-opt">{fmtMs(h.avgMs)}</td>
-              <td class={`num mono ${h.errorPct > 0 ? "ov-err" : "dim"}`}>{fmtPct(h.errorPct)}</td>
-              <td class="num mono">{fmtPct(h.cachedPct)}</td>
-              <td class="num mono dim qv-col-opt">{fmtPct(h.uncachedPct)}</td>
-              <td>
-                <StatusBar statuses={h.statuses} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-/** Stacked mini-bar of response statuses: 2xx / 3xx / 4xx / 5xx / failed without a status. */
-function StatusBar({ statuses }: { statuses: Record<string, number> }) {
-  const h = statusHistogram(statuses);
-  const total = STATUS_BUCKETS.reduce((s, b) => s + h[b], 0);
-  if (total === 0) return <span class="dim">—</span>;
-  const detail = Object.entries(statuses)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, n]) => `${k}: ${n}`)
-    .join(", ");
-  return (
-    <span class="status-bar" role="img" aria-label={`Statuses: ${detail}`} title={detail}>
-      {STATUS_BUCKETS.map((b) =>
-        h[b] > 0 ? <span key={b} class={`status-seg st-${b}`} style={{ width: `${(h[b] / total) * 100}%` }} /> : null,
-      )}
-    </span>
   );
 }

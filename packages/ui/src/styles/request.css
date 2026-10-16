@@ -226,42 +226,6 @@
   color: var(--fg);
 }
 
-.budget-tip {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 15;
-  width: max-content;
-  max-width: min(380px, 80vw);
-  padding: 8px 10px;
-  margin-top: 4px;
-  background: var(--raise);
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px var(--shadow);
-  font-size: var(--fs-sm);
-  color: var(--fg);
-  filter: none;
-}
-
-/* Bridge the 4px gap so moving the pointer into the tooltip keeps it open. */
-.budget-tip::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -6px;
-  height: 6px;
-}
-
-.budget-seg:hover .budget-tip,
-.budget-seg:focus-within .budget-tip {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .budget-tip-head {
   display: flex;
   align-items: center;
@@ -470,16 +434,4 @@
 
 .span-snippet.k-compile {
   border-left-color: var(--b-compile);
-}
-
-/* ============================================================ inspector: where to look */
-
-.insp-look {
-  padding: 14px;
-}
-
-.insp-look-note {
-  margin: 6px 0 10px;
-  font-size: var(--fs-sm);
-  line-height: 1.5;
 }

@@ -141,6 +141,20 @@ export const queryErrors = computed(() => {
   return out;
 });
 
+/**
+ * A log row's path and its query string, shown dim after it (plan 3.2: `/api/feed ?fast=0`), so two
+ * variants of one route read apart without hovering. `url` is the request target as captured
+ * (path + query, sometimes absolute); `path` is its pathname. The fragment never reaches a server.
+ */
+export function splitUrl(path: string, url: string | undefined): { path: string; query: string } {
+  const u = url ?? "";
+  const q = u.indexOf("?");
+  if (q < 0) return { path, query: "" };
+  const hash = u.indexOf("#", q);
+  const query = u.slice(q, hash < 0 ? undefined : hash);
+  return { path, query: query.length > 1 ? query : "" };
+}
+
 /* ----------------------------------------------- duration scale: the route's warm p95 */
 
 /**

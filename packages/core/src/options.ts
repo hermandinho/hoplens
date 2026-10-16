@@ -45,6 +45,12 @@ export interface HoplensOptions {
    * Server-Timing header, never overwriting it. Never added when NODE_ENV=production. Default true.
    */
   serverTiming?: boolean;
+  /**
+   * Keep route stats, rebuild epochs and finding counts across dev restarts, as NDJSON in
+   * `<distDir>/cache/hoplens` (two files of at most 5 MB). Facts and summaries only: no bodies,
+   * headers, spans, logs or error messages are written. `hoplens remove` deletes it. Default false.
+   */
+  persist?: boolean;
 }
 
 /** What an adapter hands to the runtime through env/disk. */

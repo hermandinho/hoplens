@@ -58,7 +58,10 @@ export async function remove(args: string[]) {
   const ins = unpatchInstrumentation(ts, root);
   if (ins) edits.push(ins);
 
-  if (edits.length === 0) {
+  // Read distDir before the config is rewritten (or deleted) below.
+  const data = hoplensData(root);
+
+  if (edits.length === 0 && data.length === 0) {
     skip("Nothing to remove — Hoplens isn't wired into this project.");
     return;
   }
@@ -79,7 +82,47 @@ export async function remove(args: string[]) {
     }
   }
 
+  for (const rel of data) {
+    if (dryRun) {
+      console.log(`${c.dim(`--- ${rel} (delete)`)}\n`);
+      continue;
+    }
+    try {
+      fs.rmSync(path.join(root, rel), { recursive: true, force: true });
+      ok(`Deleted ${rel}`);
+    } catch (err) {
+      warn(`Couldn't delete ${rel}: ${(err as Error).message}`);
+    }
+  }
+
   console.log(`\n${c.green("Done.")} If you no longer need Hoplens, uninstall it: ${c.bold("npm rm hoplens")}\n`);
+}
+
+/**
+ * Files Hoplens writes under the build output: the persisted stats (`persist: true`, a directory) and
+ * the resolved options written by withHoplens. Project-relative paths of the ones that exist.
+ */
+export function hoplensData(root: string): string[] {
+  const cache = path.join(readDistDir(root), "cache");
+  return [path.join(cache, "hoplens"), path.join(cache, "hoplens.json")].filter((rel) =>
+    fs.existsSync(path.join(root, rel)),
+  );
+}
+
+/** `distDir` from next.config when it's a plain string literal, else Next's default `.next`. */
+export function readDistDir(root: string): string {
+  const name = CONFIG_FILES.find((f) => fs.existsSync(path.join(root, f)));
+  if (name) {
+    try {
+      const m = /\bdistDir\s*:\s*(["'`])([^"'`\r\n]+)\1/.exec(fs.readFileSync(path.join(root, name), "utf8"));
+      const dir = m?.[2]?.trim();
+      // Never follow a distDir out of the project.
+      if (dir && !path.isAbsolute(dir) && !path.normalize(dir).startsWith("..")) return path.normalize(dir);
+    } catch {
+      /* fall back to the default */
+    }
+  }
+  return ".next";
 }
 
 function unpatchConfig(ts: any, root: string): Edit | null {

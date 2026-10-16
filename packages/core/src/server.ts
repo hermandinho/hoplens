@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
@@ -8,8 +7,17 @@ import * as healthApi from "./api/health";
 import type { ApiModule } from "./api/module";
 import type { QueryKind } from "./queries";
 import { type QueryTarget, matchQuery, parseQuery } from "./query";
+import {
+  type RunInput,
+  RunInputError,
+  batchHttpStatus,
+  parseFlag,
+  parseRepeat,
+  prepareRun,
+  runBatch,
+  runOnce,
+} from "./replay";
 import type { Runtime } from "./runtime";
-import { preview } from "./serialize";
 import { summarize } from "./store";
 import type { BodyCapture, TraceRecord } from "./types";
 
@@ -251,9 +259,19 @@ addRoute("GET", "/api/events", ({ rt, req, res }) => {
   rt.store.on("done", onDone);
   rt.store.on("update", onUpdate);
   rt.store.on("clear", onClear);
+  // WP6: process health (`event: health`, HealthTick) on the same stream, first one right away.
+  const detachHealth = healthApi.attachHealthEvents(
+    rt.health,
+    (chunk) => {
+      if (!res.writableEnded && !res.destroyed) res.write(chunk);
+    },
+    healthApi.HEALTH_EVENT_MIN_GAP_MS,
+    { immediate: true },
+  );
   const beat = setInterval(() => res.write(": ping\n\n"), 15000);
   const stop = () => {
     clearInterval(beat);
+    detachHealth();
     rt.store.off("start", onStart);
     rt.store.off("done", onDone);
     rt.store.off("update", onUpdate);
@@ -263,9 +281,14 @@ addRoute("GET", "/api/events", ({ rt, req, res }) => {
   res.on("error", stop);
 });
 
-addRoute("POST", "/api/run", async ({ rt, req, res }) => {
-  const input = JSON.parse((await readBody(req)) || "{}");
-  await run(rt, input, res);
+addRoute("POST", "/api/run", async ({ rt, req, res, url }) => {
+  let input: RunInput;
+  try {
+    input = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return json(res, 400, { error: "Body must be JSON" });
+  }
+  await run(rt, input, res, url);
 });
 
 /* ------------------------------------------------ per-endpoint modules (plan 4.1) */
@@ -358,80 +381,28 @@ export async function handleUi(rt: Runtime, req: http.IncomingMessage, res: http
 
 /* --------------------------------------------------------------- /api/run */
 
-interface RunInput {
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: string;
-  profile?: string;
-}
-
-async function run(rt: Runtime, input: RunInput, res: http.ServerResponse) {
-  const port = rt.appPort ?? (Number(process.env.PORT) || 3000);
-  if (!input.path || !input.path.startsWith("/")) return json(res, 400, { error: "Path must start with /" });
-  const runId = randomUUID();
-  const headers: Record<string, string> = {};
-  const profile = input.profile ? rt.options.profiles?.[input.profile] : undefined;
-  if (input.profile && !profile) return json(res, 400, { error: `Unknown profile "${input.profile}"` });
-  for (const [k, v] of Object.entries(profile?.headers ?? {})) headers[k.toLowerCase()] = interpolate(v);
-  for (const [k, v] of Object.entries(input.headers ?? {}))
-    if (k.trim()) headers[k.trim().toLowerCase()] = interpolate(String(v));
-  headers["x-hoplens-run"] = runId;
-  const method = (input.method || "GET").toUpperCase();
-  const hasBody = input.body !== undefined && input.body !== "" && method !== "GET" && method !== "HEAD";
-  if (hasBody && !headers["content-type"])
-    headers["content-type"] = /^\s*[[{]/.test(input.body!) ? "application/json" : "text/plain";
-
-  const done = new Promise<TraceRecord | undefined>((resolve) => {
-    const timer = setTimeout(() => {
-      rt.store.off("done", onDone);
-      resolve(rt.store.byRun(runId));
-    }, 60000);
-    const onDone = (t: TraceRecord) => {
-      if (t.runId !== runId) return;
-      clearTimeout(timer);
-      rt.store.off("done", onDone);
-      resolve(t);
-    };
-    rt.store.on("done", onDone);
-  });
-
-  const started = Date.now();
-  let status = 0;
-  let error: string | undefined;
+/**
+ * One run (legacy shape `{runId, traceId, status, error, elapsed}`), or Replay xN when `repeat` is
+ * given in the query (`?repeat=N`) or body (WP7): see replay.ts for the batch response.
+ */
+async function run(rt: Runtime, input: RunInput, res: http.ServerResponse, url?: URL) {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}${input.path}`, {
-      method,
-      headers,
-      body: hasBody ? input.body : undefined,
-      redirect: "manual",
-    });
-    status = r.status;
-    await r.arrayBuffer().catch(() => undefined);
-  } catch (err: any) {
-    error = `Could not reach your app on port ${port}: ${err?.cause?.code ?? err?.message ?? err}`;
-  }
-  const trace = error ? undefined : await done;
-  if (trace) {
-    const internal = rt.store.internal(trace);
-    if (internal && hasBody) internal.rawBody = input.body;
-    if (trace.request.body === undefined && hasBody) {
-      trace.request.body = {
-        contentType: headers["content-type"],
-        size: Buffer.byteLength(input.body!),
-        text: input.body!.slice(0, 20000),
-      };
-      try {
-        trace.request.body.json = preview(JSON.parse(input.body!), rt.redactor);
-        trace.request.body.text = undefined;
-      } catch {
-        /* keep text */
-      }
+    const repeat = parseRepeat(url?.searchParams.get("repeat") ?? input.repeat);
+    if (repeat) {
+      const keepGoing = parseFlag(url?.searchParams.get("keepGoing") ?? input.keepGoing);
+      const r = await runBatch(rt, { ...input, keepGoing }, repeat);
+      return json(res, batchHttpStatus(r), r);
     }
+    const r = await runOnce(rt, prepareRun(rt, input));
+    json(res, r.error ? 502 : 200, {
+      runId: r.runId,
+      traceId: r.trace?.id,
+      status: r.status,
+      error: r.error,
+      elapsed: r.elapsed,
+    });
+  } catch (err) {
+    if (err instanceof RunInputError) return json(res, 400, { error: err.message });
+    throw err;
   }
-  json(res, error ? 502 : 200, { runId, traceId: trace?.id, status, error, elapsed: Date.now() - started });
-}
-
-function interpolate(v: string): string {
-  return v.replace(/\$\{([A-Z0-9_]+)\}/gi, (_, name) => process.env[name] ?? "");
 }

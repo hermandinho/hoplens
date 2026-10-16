@@ -97,9 +97,12 @@ function startTrace(rt: Runtime, req: http.IncomingMessage, res: http.ServerResp
   const runId = typeof req.headers["x-hoplens-run"] === "string" ? req.headers["x-hoplens-run"] : undefined;
   const headers = { ...req.headers } as Record<string, any>;
   headers["x-hoplens-run"] = undefined;
+  const batchId = typeof req.headers["x-hoplens-batch"] === "string" ? req.headers["x-hoplens-batch"] : undefined;
+  headers["x-hoplens-batch"] = undefined;
   const traceRec: TraceRecord = {
     id: `tr_${(++seq).toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     runId,
+    ...(batchId ? { batchId } : {}),
     startedAt: t0,
     done: false,
     method: req.method ?? "GET",

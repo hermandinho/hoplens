@@ -185,6 +185,7 @@ export function summarize(t: TraceRecord): TraceSummary {
   return {
     id: t.id,
     runId: t.runId,
+    batchId: t.batchId,
     startedAt: t.startedAt,
     duration: t.duration,
     done: t.done,

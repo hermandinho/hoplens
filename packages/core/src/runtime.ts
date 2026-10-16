@@ -19,6 +19,7 @@ import { HealthMonitor } from "./health";
 import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
 import { QueryStatsStore } from "./queries";
+import { LastRuns } from "./replay";
 import { type Redactor, makeRedactor } from "./serialize";
 import { handleUi, startApiModules } from "./server";
 import { setDistDir } from "./sourcemap";
@@ -62,6 +63,8 @@ export class Runtime {
   readonly queries = new QueryStatsStore();
   /** Event-loop delay, memory, GC and process errors (GET /api/health). Listeners attach in start(). */
   readonly health = new HealthMonitor();
+  /** WP7 Replay xN: last batch per method+path+profile, for "vs last run" (LRU of 100). */
+  readonly lastRuns = new LastRuns(100);
 
   appPort?: number;
   uiPort?: number;

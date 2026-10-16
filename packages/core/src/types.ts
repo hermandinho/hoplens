@@ -69,6 +69,8 @@ export interface TraceRecord {
   id: string;
   /** Set when the request was fired by the UI's "Run" or "Edit and resend" buttons. */
   runId?: string;
+  /** Set on every run of one Replay xN batch (WP7, `x-hoplens-batch`), so the log can fold them. */
+  batchId?: string;
   /** epoch ms (fractional). */
   startedAt: number;
   duration?: number;
@@ -161,6 +163,7 @@ export type FindingSummary = Pick<
 export interface TraceSummary {
   id: string;
   runId?: string;
+  batchId?: string;
   startedAt: number;
   duration?: number;
   done: boolean;

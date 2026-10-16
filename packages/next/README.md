@@ -37,6 +37,22 @@ export async function register() {
 
 Then `next dev` and open `http://localhost:3000/__hoplens`.
 
+## Options
+
+The second argument takes Hoplens options:
+
+```ts
+export default withHoplens(nextConfig, {
+  insights: { thresholds: { nPlusOneMin: 10 }, disable: ["logs-on-success"] },
+  serverTiming: true, // Server-Timing + x-hoplens-trace on dev responses (default)
+  persist: true,      // keep stats, edits and verdicts across dev restarts (default false)
+});
+```
+
+Every option (`port`, `autoTrace`, `redact`, `profiles`, `maxTraces`,
+`insights`, `serverTiming`, `persist`, `lateSpanGraceMs`, `allowRemote`) is
+documented in the [repo README](https://github.com/hermandinho/hoplens#options).
+
 ## What it does
 
 - `withHoplens()` adds the Next.js config bits Hoplens needs (webpack / Turbopack

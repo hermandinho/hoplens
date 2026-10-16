@@ -91,6 +91,9 @@ Reverse of `init`. Unwraps the `withHoplens(...)` call in `next.config` and
 strips the Hoplens block from `instrumentation.register()`. Deletes files
 that `init` created when nothing user-authored remains, so an
 `init → remove` round-trip is byte-identical to the pre-init state.
+It also deletes the data Hoplens wrote under the build output: the persisted
+stats in `<distDir>/cache/hoplens` (from `persist: true`) and
+`<distDir>/cache/hoplens.json`.
 
 ```bash
 npx hoplens remove             # undo init

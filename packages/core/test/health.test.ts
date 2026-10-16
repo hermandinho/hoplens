@@ -33,14 +33,18 @@ afterEach(() => {
 });
 
 describe("HealthMonitor", () => {
-  test("a 100ms block shows loop p99 >= 90ms", async () => {
+  test("a 100ms block shows loop p99 of the block minus the timer interval", async () => {
     const h = monitor({ resolutionMs: 10, sampleMs: 60_000 }).start();
     await wait(30);
     block(100);
     await wait(30);
     const s = h.sample();
-    expect(s.loopP99).toBeGreaterThanOrEqual(90);
-    expect(s.loopMax).toBeGreaterThanOrEqual(90);
+    // The timer was due up to one interval into the block, so its lateness is the block minus the
+    // largest floor sample() can subtract: 11ms on Linux, 16.6ms on Windows (15.6ms tick). 2ms slack
+    // for Date.now() granularity in block().
+    const min = 98 - loopFloorMs(undefined, Number.POSITIVE_INFINITY, 10);
+    expect(s.loopP99).toBeGreaterThanOrEqual(min);
+    expect(s.loopMax).toBeGreaterThanOrEqual(min);
     expect(s.rss).toBeGreaterThan(0);
     expect(s.heapUsed).toBeGreaterThan(0);
     // The histogram resets per window.

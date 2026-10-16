@@ -35,7 +35,7 @@ test.describe("Hoplens UI", () => {
     await page.getByRole("tab", { name: /^Traffic/ }).click();
     await expect(page.getByText("No requests yet.")).toBeVisible();
 
-    // Back to Routes for the screenshot.
+    // Back to Routes for the screenshot. The main pane lands on the Overview ("No traffic yet").
     await page.getByRole("tab", { name: /^Routes$/ }).click();
     await expect(page.locator(".route-row").first()).toBeVisible();
 
@@ -61,10 +61,10 @@ test.describe("Hoplens UI", () => {
 
     // Click into the trace to drive the journey + details panes.
     await firstTrace.click();
-    // The default journey view (0.1.2+) is the waterfall; the old SVG flow view is behind the toggle.
-    await expect(page.locator(".waterfall, .journey-canvas").first()).toBeVisible();
+    // Clicking a trace opens the workbench and its journey canvas (Tree by default; `.waterfall` root).
+    await expect(page.locator(".waterfall").first()).toBeVisible();
 
-    // Give the SVG + response pane a tick to settle before snapshotting.
+    // Give the journey canvas + response pane a tick to settle before snapshotting.
     await page.waitForTimeout(400);
 
     await expect(page).toHaveScreenshot(`${info.project.name}-with-trace.png`, { fullPage: true });
@@ -87,10 +87,10 @@ test.describe("Hoplens UI", () => {
     await expect(firstTrace).toBeVisible({ timeout: 15_000 });
 
     await firstTrace.click();
-    // The default journey view (0.1.2+) is the waterfall; the old SVG flow view is behind the toggle.
-    await expect(page.locator(".waterfall, .journey-canvas").first()).toBeVisible();
+    // Clicking a trace opens the workbench and its journey canvas (Tree by default; `.waterfall` root).
+    await expect(page.locator(".waterfall").first()).toBeVisible();
 
-    // SVG + response + inspector all need a tick to settle.
+    // Journey canvas + response + inspector all need a tick to settle.
     await page.waitForTimeout(400);
 
     await expect(page).toHaveScreenshot(`${info.project.name}-with-error.png`, { fullPage: true });

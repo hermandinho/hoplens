@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/hermandinho/hoplens/main/assets/logo-mark.svg" alt="Hoplens logo" width="64" height="64">
+
 # hoplens
 
 [![npm](https://img.shields.io/npm/v/hoplens.svg)](https://www.npmjs.com/package/hoplens)

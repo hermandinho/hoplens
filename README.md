@@ -1,3 +1,5 @@
+<img src="assets/logo-mark.svg" alt="Hoplens logo" width="64" height="64">
+
 # Hoplens
 
 [![npm](https://img.shields.io/npm/v/hoplens.svg)](https://www.npmjs.com/package/hoplens)

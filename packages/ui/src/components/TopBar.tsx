@@ -54,7 +54,13 @@ export function TopBar() {
       <div class="top-row">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true">
-            ◆
+            <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+              <path class="bm-ring" d="M7 0h18a7 7 0 0 1 7 7v18a7 7 0 0 1-7 7H7a7 7 0 0 1-7-7V7a7 7 0 0 1 7-7z" />
+              <rect class="bm-tile" x="2" y="2" width="28" height="28" rx="5" />
+              <path class="bm-hop" d="M7 6h8a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+              <rect class="bm-focus" x="10" y="14" width="16" height="6" rx="1" />
+              <rect class="bm-end" x="18" y="22" width="8" height="4" rx="1" />
+            </svg>
           </span>
           <span class="brand-name">Hoplens</span>
         </div>

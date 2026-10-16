@@ -35,6 +35,13 @@
   --accent-ink: #0a0e24;
   --accent-bg: color-mix(in srgb, var(--accent) 14%, transparent);
 
+  /* brand mark (TopBar logo only; mirrors assets/favicon.svg) */
+  --brand-ring: #4a5b80;
+  --brand-tile: var(--panel);
+  --brand-hop: #b4bdd0;
+  --brand-focus: var(--accent);
+  --brand-end: #f4f6fb;
+
   /* severity */
   --err: #ff5d6c;
   --warn: #f39a2a;

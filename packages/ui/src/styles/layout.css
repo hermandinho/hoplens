@@ -60,7 +60,7 @@
 
 .brand {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   font-weight: 600;
   font-size: var(--fs-title);
@@ -69,8 +69,36 @@
 }
 
 .brand-mark {
-  color: var(--accent);
-  font-size: 16px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-mark .bm-ring {
+  fill: var(--brand-ring);
+}
+
+.brand-mark .bm-tile {
+  fill: var(--brand-tile);
+}
+
+.brand-mark .bm-hop {
+  fill: var(--brand-hop);
+}
+
+.brand-mark .bm-focus {
+  fill: var(--brand-focus);
+}
+
+.brand-mark .bm-end {
+  fill: var(--brand-end);
 }
 
 /* The request filter takes the slack between the tabs and the actions. */

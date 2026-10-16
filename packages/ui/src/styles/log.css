@@ -1,0 +1,1028 @@
+/* ============================================================ Phase 2 pass B:
+ * request log + query bar, Requests view, Queries view, view nav.
+ * Imported after canvas.css. Uses the tokens.css palette only. */
+
+/* ------------------------------------------------------------ shared bits */
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-label);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+}
+
+.link-btn:hover,
+.link-btn:focus-visible {
+  color: var(--fg);
+  text-decoration-color: var(--accent);
+}
+
+kbd {
+  font: var(--fs-label) var(--font-mono);
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+/* ------------------------------------------------------------ view nav */
+
+.view-nav {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg);
+  margin-right: 4px;
+}
+
+.view-nav-btn {
+  border-color: transparent;
+  background: none;
+  padding: 4px 10px;
+  border-radius: 7px;
+}
+
+.view-nav-btn[aria-current="page"] {
+  color: var(--fg);
+  background: var(--raise);
+  border-color: var(--line-2);
+}
+
+@media (max-width: 720px) {
+  .view-nav {
+    order: -1;
+    width: 100%;
+    margin: 0 0 4px;
+  }
+  .view-nav-btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
+
+/* ------------------------------------------------------------ sidebar traffic */
+
+/* ------------------------------------------------------------ query bar */
+
+.qbar {
+  flex: 0 0 auto;
+}
+
+.qbar-search {
+  position: relative;
+}
+
+.qbar-slash {
+  color: var(--dim);
+  font-size: var(--fs-label);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 15px;
+}
+
+.qbar-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px var(--shadow);
+  max-height: 280px;
+  overflow: auto;
+}
+
+.qbar-opt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.qbar-opt:hover,
+.qbar-opt-active {
+  background: var(--raise);
+}
+
+.qbar-opt-active {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.qbar-hint {
+  font-size: var(--fs-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.qbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 0 14px;
+  font-size: var(--fs-label);
+  min-height: 4px;
+}
+
+.qbar-status:not(:empty) {
+  padding-bottom: 6px;
+}
+
+.qbar-err {
+  color: var(--warn);
+}
+
+.qbar-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qbar-key {
+  background: none;
+  border: 1px dashed var(--line-2);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-label);
+  padding: 0 8px;
+}
+
+.qbar-key:hover,
+.qbar-key:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-3);
+}
+
+.qbar-dense .qbar-search {
+  margin: 0 0 6px;
+}
+
+.qbar-dense .qbar-status {
+  padding: 0 0 8px;
+}
+
+/* ------------------------------------------------------------ the log */
+
+.rlog {
+  container: rlog / inline-size;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rlog-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  contain: strict;
+}
+
+.rlog-empty {
+  padding: 10px 14px;
+  font-size: var(--fs-sm);
+}
+
+.rlog-list {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.rlog-list .rlog-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--line);
+}
+
+.rlog-compact .rlog-row {
+  height: 50px;
+}
+
+.rlog-dense .rlog-row {
+  height: 30px;
+}
+
+.rlog-row .rlog-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding-right: 6px;
+}
+
+/*
+ * Selection, the j/k cursor and keyboard focus decorate the whole row (an overlay on the <li>), so the
+ * findings chip next to the row button sits inside the highlight instead of hanging off its edge.
+ */
+.rlog-row.rlog-selected {
+  background: var(--panel-2);
+}
+
+.rlog-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.rlog-row.rlog-cursor::after {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+
+.rlog-row.rlog-cursor.rlog-selected::after {
+  box-shadow: inset 2px 0 var(--accent), inset 0 0 0 1px var(--line-3);
+}
+
+.rlog-row .rlog-open:focus-visible {
+  outline: none;
+}
+
+.rlog-row:has(.rlog-open:focus-visible)::after {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.rlog-find {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-right: 10px;
+  border: 0;
+  font: 500 var(--fs-label) var(--font-mono);
+}
+
+.rlog-find:hover,
+.rlog-find:focus-visible {
+  filter: brightness(1.25);
+}
+
+.rlog-find-none {
+  width: 0;
+  margin: 0;
+}
+
+.rlog-time {
+  font-size: var(--fs-label);
+}
+
+/* compact (sidebar): two lines */
+.rlog-compact .rlog-open {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 6px 4px 14px;
+}
+
+.rlog-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.rlog-line-2 {
+  gap: 6px;
+}
+
+.rlog-line-2 .rlog-time {
+  margin-left: auto;
+}
+
+/*
+ * dense (Requests view): one grid line. The header and every row button take their columns from
+ * one variable and share their side padding, so header and cells can't drift (plan 3.10; rows are
+ * absolutely positioned for windowing, which rules out a real subgrid). The findings chip is a
+ * sibling button laid over the last column (.rlog-findcol), not a cell of its own. The variables
+ * live on the scroller: a container query can't restyle its own container (.rlog).
+ * Column sets by the list's own width (container rlog):
+ *   > 820   time method path status duration ttfb KB io findings
+ *   <= 820  time method path status duration io findings            (list beside a subject)
+ *   <= 620  time method path status ms io findings                  (the bar goes, the ms stays)
+ *   <= 460  method path status ms findings                          (phone)
+ */
+.rlog-scroll {
+  --rlog-pad-l: 12px;
+  --rlog-pad-r: 8px;
+  --rlog-find-w: 40px;
+  --rlog-cols: 62px 56px minmax(0, 1fr) 44px minmax(100px, 180px) 52px 44px 30px var(--rlog-find-w);
+}
+
+.rlog-head,
+.rlog-dense .rlog-open {
+  display: grid;
+  grid-template-columns: var(--rlog-cols);
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--rlog-pad-r) 0 var(--rlog-pad-l);
+}
+
+.rlog-dense .rlog-open {
+  overflow: hidden;
+}
+
+.rlog-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 30px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--dim);
+}
+
+.rlog-head > span {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rlog-head .num,
+.rlog-dense .num {
+  text-align: right;
+}
+
+.rlog-dense .status-code {
+  justify-self: end;
+  min-width: 0;
+}
+
+.rlog-dense .method-tag {
+  justify-self: start;
+}
+
+/* path + dim query + flags: the flags keep their width, the path gives way */
+.rlog-pathcell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rlog-pathcell .trace-path {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.rlog-qs {
+  color: var(--dim);
+}
+
+.rlog-flags {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+/* A folded Replay xN batch ("x10") and a pinned request: neutral chips, no severity colour. */
+.batch-badge,
+.pin-badge {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
+/* The findings chip over the last column: same right edge as the header's findings column. */
+.rlog-dense .rlog-find {
+  position: absolute;
+  top: 50%;
+  right: var(--rlog-pad-r);
+  width: var(--rlog-find-w);
+  margin: 0;
+  transform: translateY(-50%);
+  justify-content: center;
+}
+
+.rlog-dense .rlog-find-none {
+  display: none;
+}
+
+@container rlog (max-width: 820px) {
+  .rlog-scroll {
+    --rlog-cols: 58px 52px minmax(0, 1fr) 40px minmax(72px, 110px) 28px var(--rlog-find-w);
+  }
+  .rlog-head > :nth-child(6),
+  .rlog-dense .rlog-open > :nth-child(6),
+  .rlog-head > :nth-child(7),
+  .rlog-dense .rlog-open > :nth-child(7) {
+    display: none;
+  }
+}
+
+@container rlog (max-width: 620px) {
+  .rlog-scroll {
+    --rlog-find-w: 36px;
+    --rlog-cols: 54px 44px minmax(0, 1fr) 34px 46px 24px var(--rlog-find-w);
+  }
+  .rlog-head,
+  .rlog-dense .rlog-open {
+    gap: 6px;
+  }
+  .rlog-dense .dur-track {
+    display: none;
+  }
+  .rlog-dense .dur-ms {
+    flex: 1 1 auto;
+  }
+  .rlog-dense .status-code {
+    padding: 1px 3px;
+  }
+}
+
+@container rlog (max-width: 460px) {
+  .rlog-scroll {
+    --rlog-pad-l: 10px;
+    --rlog-find-w: 32px;
+    --rlog-cols: 40px minmax(0, 1fr) 32px 44px var(--rlog-find-w);
+  }
+  .rlog-head > :nth-child(1),
+  .rlog-dense .rlog-open > :nth-child(1),
+  .rlog-head > :nth-child(8),
+  .rlog-dense .rlog-open > :nth-child(8) {
+    display: none;
+  }
+}
+
+/* duration bar: scaled to 2x the route's warm p95, tick at the p95 */
+.dur-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dur-cell-bare {
+  width: 60px;
+  flex: 0 0 60px;
+}
+
+.dur-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.dur-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+}
+
+/* The fill is neutral whatever the duration (plan 3.10: severity is never a large fill, and the
+   bar is not a bucket). Over the p95 / past 2x a 3px severity cap at its end carries the signal. */
+.dur-ok,
+.dur-warn,
+.dur-err {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+
+.dur-warn {
+  box-shadow: inset -3px 0 0 var(--warn);
+}
+
+.dur-err {
+  box-shadow: inset -3px 0 0 var(--err);
+}
+
+.dur-none {
+  background: var(--line-3);
+}
+
+.dur-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--fg);
+  opacity: 0.55;
+}
+
+.dur-ms {
+  flex: 0 0 46px;
+  text-align: right;
+  font-size: var(--fs-label);
+}
+
+/* ------------------------------------------------------------ Overview additions */
+
+/* ------------------------------------------------------------ Queries view
+ * A list | subject split (QueriesView renders the Split; MainPane mounts it directly). */
+
+.queries-view {
+  container: qv / inline-size;
+  padding: 0 0 16px;
+}
+
+.qv-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--panel);
+}
+
+.qv-head .list-hint {
+  margin-left: auto;
+}
+
+.qv-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 10px;
+}
+
+/* SQL / Cache / Fetch segments (plan 3.8) */
+.qv-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  min-width: 0;
+}
+
+.qv-seg-btn {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.qv-seg-btn:hover,
+.qv-seg-btn:focus-visible {
+  color: var(--fg);
+}
+
+.qv-seg-on {
+  color: var(--fg);
+  background: var(--raise);
+  border-color: var(--line-2);
+}
+
+.qv-seg:disabled {
+  opacity: 0.55;
+}
+
+.qv-note,
+.qv-stale,
+.qv-empty,
+.queries-view > .error,
+.queries-view > .skeleton-wrap {
+  margin: 0 14px 10px;
+}
+
+.qv-note {
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+}
+
+.qv-stale {
+  display: block;
+  font-size: var(--fs-label);
+}
+
+.qv-empty {
+  padding: 16px 0;
+  color: var(--dim);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  max-width: 60ch;
+}
+
+.qv-empty b {
+  display: block;
+  color: var(--fg);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.qv-table-wrap {
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+}
+
+.qv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  table-layout: fixed;
+}
+
+.qv-table th,
+.qv-table td {
+  padding: 5px 8px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.qv-table thead th {
+  border-top: 0;
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--dim);
+  background: var(--panel);
+}
+
+.qv-table th:first-child,
+.qv-table td:first-child {
+  padding-left: 14px;
+}
+
+/* numeric columns: fixed widths, the shape takes the rest */
+.qv-table thead th.num {
+  width: 64px;
+}
+
+.qv-table .num {
+  text-align: right;
+}
+
+.qv-row:hover {
+  background: var(--panel-2);
+}
+
+.qv-row-on,
+.qv-row-on:hover {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.qv-shape {
+  font-weight: 400;
+}
+
+.qv-shape-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qv-open {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 auto;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: var(--fs-label);
+  text-align: left;
+}
+
+.qv-open:hover .qv-clip,
+.qv-open:focus-visible .qv-clip {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+}
+
+.qv-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* kind: a bucket-coloured dot (db violet, fetch teal, cache orchid) */
+.qv-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.qv-dot-db {
+  background: var(--b-db);
+}
+
+.qv-dot-cache {
+  background: var(--b-cache);
+}
+
+.qv-dot-fetch {
+  background: var(--b-ext);
+}
+
+/* the loop marker: a warn chip, linked to the newest request that shows it */
+.qv-loop {
+  flex: 0 0 auto;
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--warn);
+  background: var(--warn-bg);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+button.qv-loop:hover,
+button.qv-loop:focus-visible {
+  border-color: var(--warn);
+}
+
+.qv-err-chip {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--err);
+  background: var(--err-bg);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* group by host: one header row per host */
+.qv-host-row > th {
+  background: var(--bg);
+  font-weight: 400;
+  white-space: normal;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.qv-host-name {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+.qv-host-facts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.qv-statuses {
+  display: inline-flex;
+  gap: 10px;
+}
+
+.qv-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* status dots (severity colours stay on dots) */
+.qv-sdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.st-2xx {
+  background: var(--ok);
+}
+
+.st-3xx {
+  background: var(--info);
+}
+
+.st-4xx {
+  background: var(--warn);
+}
+
+.st-5xx,
+.st-error {
+  background: var(--err);
+}
+
+/* Narrow list (beside a subject): shape, calls, total, p95. */
+@container qv (max-width: 900px) {
+  .qv-table .qv-col-opt {
+    display: none;
+  }
+}
+
+@container qv (max-width: 560px) {
+  .qv-table .qv-col-mid {
+    display: none;
+  }
+  .qv-table thead th.num {
+    width: 56px;
+  }
+}
+
+/* subject */
+.qv-subject-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.qv-subject-host {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.qv-kind {
+  font: 500 var(--fs-label) var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+}
+
+.qv-kind-db {
+  color: var(--b-db);
+  border-color: color-mix(in srgb, var(--b-db) 40%, transparent);
+}
+
+.qv-kind-cache {
+  color: var(--b-cache);
+  border-color: color-mix(in srgb, var(--b-cache) 40%, transparent);
+}
+
+.qv-kind-fetch {
+  color: var(--b-ext);
+  border-color: color-mix(in srgb, var(--b-ext) 40%, transparent);
+}
+
+.qv-full {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.qv-subject .subject-lead b {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* the loop hint: a 3px warn rule, not a fill */
+.qv-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--panel-2);
+  border-radius: 0 6px 6px 0;
+  font-size: var(--fs-body);
+}
+
+.qv-callout-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.qv-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+.qv-facts dt {
+  color: var(--dim);
+}
+
+.qv-facts dd {
+  margin: 0 0 0 -8px;
+}
+
+.qv-host-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  font-size: var(--fs-label);
+}
+
+.qv-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px 20px;
+}
+
+.qv-h {
+  margin: 0 0 4px;
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--dim);
+}
+
+.qv-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-label);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.qv-ul .stack-link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.qv-sample {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 1px 0;
+  color: inherit;
+  max-width: 100%;
+  text-align: left;
+}
+
+.qv-sample-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qv-sample:hover .qv-sample-path,
+.qv-sample:focus-visible .qv-sample-path {
+  color: var(--accent);
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+.th-sort:hover,
+.th-sort:focus-visible,
+.th-sort-on {
+  color: var(--fg);
+}
+
+.th-arrow {
+  display: inline-block;
+  width: 8px;
+}
+
+@media (prefers-contrast: more) {
+  .rlog-row.rlog-cursor::after {
+    box-shadow: inset 0 0 0 2px var(--fg);
+  }
+}

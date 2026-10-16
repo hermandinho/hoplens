@@ -1,0 +1,441 @@
+/*
+ * WP2 cause-first trace: baselines row, verdict line + inline source peek, the quieter click-to-open
+ * time bar, and the grouped "where to look" rows. Imported by Verdict.tsx / WhereToLook.tsx /
+ * TraceHeader.tsx. Colors through tokens only (scripts/check-tokens.mjs).
+ */
+
+/* ============================================================ baselines */
+
+.rh-baselines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-top: -4px;
+}
+
+.rh-baselines .pctl-n {
+  margin-left: 4px;
+  color: var(--dim);
+}
+
+/* ============================================================ verdict */
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 3px solid var(--line-3);
+}
+
+.verdict-slow {
+  border-left-color: var(--warn);
+}
+
+.verdict-fail {
+  border-left-color: var(--err);
+}
+
+.verdict-ok {
+  border-left-color: var(--ok);
+}
+
+.verdict-text {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--fs-hero);
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+button.verdict-text {
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+button.verdict-text:hover,
+button.verdict-text:focus-visible,
+button.verdict-text.active {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+
+.verdict-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.verdict-save {
+  color: var(--fg);
+}
+
+.verdict-loc {
+  font-size: var(--fs-sm);
+}
+
+.verdict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.verdict-actions kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  padding: 0 4px;
+  border: 1px solid var(--line-3);
+  border-radius: 3px;
+  color: var(--fg);
+}
+
+.verdict-actions .sbtn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+/* other findings, folded */
+.verdict-more-toggle {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.verdict-more-toggle:hover,
+.verdict-more-toggle:focus-visible {
+  color: var(--fg);
+}
+
+.verdict-more-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.verdict-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.verdict-more-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.verdict-more-row:disabled {
+  cursor: default;
+}
+
+.verdict-more-row:not(:disabled):hover,
+.verdict-more-row:focus-visible,
+.verdict-more-row.active {
+  border-color: var(--accent);
+}
+
+.verdict-more-rule {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.verdict-more-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.verdict-more-loc {
+  flex: 0 0 auto;
+}
+
+/* ============================================================ inline source peek */
+
+.src-inline {
+  display: block;
+  width: 100%;
+  max-width: 760px;
+  margin: 0;
+  padding: 0 0 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  text-align: left;
+  overflow-x: auto;
+}
+
+.src-inline-cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: var(--fs-label);
+}
+
+.src-inline-open {
+  font-size: var(--fs-label);
+}
+
+.src-inline-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.src-inline-lines li {
+  display: flex;
+  gap: 12px;
+  padding: 0 10px;
+  white-space: pre;
+}
+
+.src-inline-num {
+  flex: 0 0 3ch;
+  text-align: right;
+  color: var(--dim);
+}
+
+.src-inline-code {
+  font: inherit;
+  color: var(--muted);
+}
+
+.src-inline-hit {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  box-shadow: inset 3px 0 var(--warn);
+}
+
+.src-inline-hit .src-inline-code {
+  color: var(--fg);
+}
+
+.src-inline-note {
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.src-inline-fallback {
+  align-self: flex-start;
+}
+
+/* ============================================================ quiet time bar, click popover */
+
+.budget-quiet {
+  position: relative;
+}
+
+.budget-quiet .budget-bar {
+  height: 16px;
+}
+
+.budget-quiet .budget-seg {
+  padding: 0;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.budget-quiet .budget-seg:hover,
+.budget-quiet .budget-seg:focus-visible {
+  filter: none;
+  outline: 1px solid var(--line-3);
+}
+
+.budget-quiet .budget-seg.open {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 1;
+}
+
+.budget-quiet .budget-seg-label {
+  line-height: 16px;
+}
+
+/* pre-handler wait: hatched grey, named */
+.budget-wait {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--b-idle) 0 3px,
+    color-mix(in srgb, var(--b-idle) 45%, transparent) 3px 6px
+  );
+}
+
+.budget-seg.budget-wait .budget-seg-label {
+  color: var(--fg);
+}
+
+.budget-pop {
+  position: absolute;
+  top: 22px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: max-content;
+  max-width: min(380px, 80vw);
+  padding: 8px 10px;
+  background: var(--raise);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px var(--shadow);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+/* ============================================================ where to look */
+
+.look {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+}
+
+.look-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+
+.look-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.look-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.look-row.active {
+  border-color: var(--accent);
+}
+
+.look-main {
+  display: grid;
+  grid-template-columns: 9px 4ch minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.look-main:hover .look-name,
+.look-main:focus-visible .look-name {
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+}
+
+.look-count {
+  text-align: right;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.look-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.look-pct {
+  font-size: var(--fs-label);
+  min-width: 4ch;
+  text-align: right;
+}
+
+.look-loc,
+.look-rule {
+  grid-column: 3 / 6;
+  font-size: var(--fs-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.look-rule {
+  justify-self: start;
+  padding: 0 6px;
+  border-left: 3px solid var(--warn);
+  color: var(--muted);
+}
+
+.look-actions {
+  display: flex;
+  gap: 4px;
+  padding-right: 4px;
+}
+
+.look-act {
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.look-act:hover,
+.look-act:focus-visible,
+.look-act[aria-pressed="true"],
+.look-act[aria-expanded="true"] {
+  color: var(--fg);
+  border-color: var(--line-3);
+}
+
+.look-peek {
+  grid-column: 1 / -1;
+  padding: 0 6px 6px;
+}

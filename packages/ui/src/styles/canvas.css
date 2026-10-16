@@ -1,0 +1,608 @@
+/*
+ * Single-request canvas (JourneyWaterfall.tsx): Flame and Tree modes, the "Next.js" band, the
+ * critical-path outline, hatched idle gaps and log ticks. Bars and boxes use the bucket colors
+ * (--b-*, .b-* in overview.css), the same legend as the time-budget bar above them.
+ */
+
+/* ============================================================ pane controls */
+
+.tc-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.journey-pane-head {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.journey-pane-meta {
+  margin-right: auto;
+}
+
+.tc-mode {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.tc-crit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tc-crit-swatch {
+  width: 14px;
+  height: 8px;
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.tc-crit-toggle.chip-active .tc-crit-swatch {
+  opacity: 1;
+}
+
+/* ============================================================ tree mode */
+
+.tc-caret,
+.tc-caret-pad {
+  flex: 0 0 12px;
+  width: 12px;
+  text-align: center;
+}
+
+.tc-caret:hover {
+  color: var(--fg);
+}
+
+.jw-bar.b-idle .jw-bar-label,
+.jw-bar.b-framework .jw-bar-label {
+  color: var(--fg);
+}
+
+.waterfall-row.tc-crit .jw-bar,
+.waterfall-row.tc-crit .wf-group-track {
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+}
+
+/* the chain as a strip under the bars: one segment per stretch the end waited on */
+.tc-crit-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.tc-crit-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  background: var(--fg);
+  border-radius: 1px;
+}
+
+.tc-band-row .jw-span-name {
+  font-weight: 600;
+}
+
+.tc-band-note {
+  font-size: var(--fs-label);
+  white-space: nowrap;
+}
+
+.jw-kind-pill.jw-kind-next {
+  background: var(--b-framework);
+  color: var(--fg);
+}
+
+.tc-band-track {
+  background: color-mix(in srgb, var(--b-idle) 18%, transparent);
+}
+
+.tc-late .jw-bar,
+.fl-rect.tc-late {
+  opacity: 0.6;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 4px,
+    color-mix(in srgb, var(--bg) 45%, transparent) 4px 6px
+  );
+}
+
+.tc-late-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px dashed var(--warn);
+  border-radius: 3px;
+  color: var(--warn);
+  font-size: var(--fs-label);
+}
+
+/* idle gaps: hatched, "nothing captured was running here" */
+.tc-gap {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 1px;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--muted) 32%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+  border-left: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent);
+  z-index: 0;
+}
+
+/* log ticks: warn/error dots at their instant */
+.tc-tick {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+  z-index: 2;
+}
+
+.tc-tick-warn {
+  background: var(--warn);
+}
+
+.tc-tick-error {
+  background: var(--err);
+}
+
+/* ============================================================ flame mode */
+
+.fl-head .waterfall-bar-col {
+  margin-left: 0;
+}
+
+.tc-flame .waterfall-head {
+  padding: 8px 10px;
+}
+
+.fl-canvas {
+  position: relative;
+  margin: 8px 10px 4px;
+  min-width: 0;
+}
+
+.fl-gaps {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.fl-gaps .tc-gap {
+  top: 0;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.fl-rect {
+  position: absolute;
+  min-width: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--bg);
+  text-align: left;
+  overflow: hidden;
+  font: var(--fs-label) / 20px var(--font-mono);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.fl-rect:hover {
+  filter: brightness(1.12);
+}
+
+.fl-rect.b-idle,
+.fl-rect.b-framework,
+.fl-band {
+  color: var(--fg);
+}
+
+.fl-band {
+  font-weight: 600;
+}
+
+.fl-group {
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--bg) 30%, transparent) 3px 4px
+  );
+}
+
+.fl-label {
+  position: relative;
+  padding-left: 4px;
+  pointer-events: none;
+}
+
+/* with the critical path on, everything off the path steps back */
+.tc-crit-on .fl-rect:not(.tc-crit):not(.selected):not(.wf-hl) {
+  opacity: 0.45;
+}
+
+.tc-crit-on .waterfall-row:not(.tc-crit) .jw-bar,
+.tc-crit-on .waterfall-row:not(.tc-crit) .wf-group-track {
+  opacity: 0.45;
+}
+
+.fl-ms {
+  opacity: 0.75;
+}
+
+.fl-rect.selected {
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 1px var(--bg);
+  z-index: 3;
+}
+
+.fl-rect.wf-hl {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  filter: brightness(1.15);
+}
+
+.fl-rect.fl-err {
+  box-shadow: inset 0 0 0 2px var(--err);
+}
+
+.fl-rect.tc-crit {
+  outline: 1.5px solid var(--fg);
+  outline-offset: -1px;
+  z-index: 2;
+}
+
+.fl-rect .tc-crit-seg {
+  top: auto;
+  bottom: 0;
+  height: 3px;
+}
+
+.fl-hint {
+  margin: 4px 12px 10px;
+  font-size: var(--fs-label);
+}
+
+.fl-selection {
+  margin: 6px 10px 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.fl-selection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+/* group/band ticks: request.css gives .wf-group-tick a muted default after .b-* is declared */
+.wf-group-tick.b-db {
+  background: var(--b-db);
+}
+.wf-group-tick.b-cache {
+  background: var(--b-cache);
+}
+.wf-group-tick.b-ext {
+  background: var(--b-ext);
+}
+.wf-group-tick.b-fn {
+  background: var(--b-fn);
+}
+.wf-group-tick.b-framework {
+  background: var(--b-framework);
+}
+.wf-group-tick.b-compile {
+  background: var(--b-compile);
+}
+.wf-group-tick.b-idle {
+  background: var(--line-3);
+}
+
+/* ============================================================ toolbar, minimap (WP3) */
+
+/* toolbar + minimap + axis stay put while the rows scroll under them */
+.tc-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--panel);
+}
+
+.tc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 6px;
+  min-width: 0;
+}
+
+.tc-search {
+  flex: 0 1 240px;
+  min-width: 140px;
+}
+
+.tc-search-input {
+  width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+
+.tc-search-input::placeholder {
+  color: var(--dim);
+}
+
+.tc-search-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.tc-search-count {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.tc-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tc-zoom {
+  margin-left: auto;
+}
+
+.tc-zoom-range {
+  font-size: var(--fs-sm);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.tc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+}
+
+.tc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tc-btn kbd {
+  font-size: var(--fs-label);
+}
+
+.tc-cold-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+.tc-cold-swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--b-compile) 70%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--b-compile) 60%, transparent);
+}
+
+/* minimap: the whole trace at a few px per row; window = the viewport */
+.tc-minimap {
+  padding: 0 10px 6px;
+}
+
+.tc-mm {
+  display: block;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.tc-mm-panning {
+  cursor: grabbing;
+}
+
+.tc-mm-r {
+  fill: var(--b-fn);
+}
+.tc-mm-r.mm-db {
+  fill: var(--b-db);
+}
+.tc-mm-r.mm-cache {
+  fill: var(--b-cache);
+}
+.tc-mm-r.mm-ext {
+  fill: var(--b-ext);
+}
+.tc-mm-r.mm-framework {
+  fill: var(--b-framework);
+}
+.tc-mm-r.mm-compile {
+  fill: var(--b-compile);
+}
+.tc-mm-r.mm-idle {
+  fill: var(--line-3);
+}
+
+.tc-mm-dim {
+  opacity: 0.3;
+}
+
+.tc-mm-fold {
+  fill: color-mix(in srgb, var(--b-compile) 22%, transparent);
+}
+
+.tc-mm-shade {
+  fill: color-mix(in srgb, var(--bg) 62%, transparent);
+  pointer-events: none;
+}
+
+.tc-mm-window {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  cursor: grab;
+}
+
+.tc-mm-brush {
+  fill: var(--accent-bg);
+  stroke: var(--accent);
+  stroke-width: 1px;
+  pointer-events: none;
+}
+
+/* zoomed bars are clipped at the viewport edges */
+.tc-clip,
+.waterfall .waterfall-head .waterfall-bar-col {
+  overflow: hidden;
+}
+
+.tc-axis-break {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-left: 2px double var(--b-compile);
+  border-right: 2px double var(--b-compile);
+  background: color-mix(in srgb, var(--b-compile) 14%, transparent);
+  pointer-events: auto;
+}
+
+/* the untraced cold-start wait: sand hatch, labelled, drawn compressed when folded */
+.tc-gap.tc-cold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--b-compile) 34%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+  border-left: 1px dashed color-mix(in srgb, var(--b-compile) 60%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--b-compile) 60%, transparent);
+}
+
+.tc-cold-label {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  color: var(--b-compile);
+  font-size: var(--fs-label);
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.waterfall-row .tc-gap.tc-cold {
+  z-index: 2;
+}
+
+.fl-gaps .tc-cold-label {
+  white-space: normal;
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
+.tc-cold-label b {
+  font-weight: 600;
+}
+
+/* folded "xN" rows: striped with the bucket their subtree spends most time in */
+.fl-rect.tc-fold,
+.wf-group-tick.tc-fold {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--bg) 38%, transparent) 5px 7px
+  );
+}
+
+/*
+ * A folded row's name ("getUser") keeps its width and the note gives way: proportional shrinking took
+ * a fraction of a pixel off the name too, enough to ellipsize it ("getUs…"). Capped so a long name
+ * still leaves the note some room.
+ */
+.jw-name-keep {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
+.tc-fold-note {
+  /* shrinks before the span name does */
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-label);
+}
+
+/* highlight (state/canvas): everything else steps back to 30%, nothing hides */
+.tc-hl-on .fl-rect:not(.wf-hl):not(.selected) {
+  opacity: 0.3;
+}
+
+.tc-hl-on .waterfall-row:not(.wf-hl):not(.selected) > * {
+  opacity: 0.3;
+}
+
+.tc-hl-on.tc-crit-on .fl-rect.wf-hl,
+.tc-hl-on.tc-crit-on .waterfall-row.wf-hl .jw-bar,
+.tc-hl-on.tc-crit-on .waterfall-row.wf-hl .wf-group-track {
+  opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .tc-minimap {
+    display: none;
+  }
+}

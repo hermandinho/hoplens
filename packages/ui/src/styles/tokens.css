@@ -1,4 +1,17 @@
+/*
+ * Hoplens design tokens. Every color and type size the UI uses is defined here; the other style
+ * sheets only reference these variables (scripts/check-tokens.mjs enforces it).
+ *
+ * Color roles (plan 3.10). The first three families never share a hue:
+ *   buckets   (--b-*)       data fills: bars, flame rects, fold stripes. Mid saturation.
+ *   severity  (--err ...)   chips, dots and a 3px left rule only, never a large fill.
+ *   accent    (--accent)    focus, selection, primary button. Nothing else.
+ * Diff (--diff-*) is only used by Compare and delta badges. Syntax (--syn-*) only inside code/JSON.
+ * Span kinds (--k-*) are aliases onto the bucket a kind's self time lands in (core facts.ts
+ * bucketOf), so the flame, the tree and the time bar read as one legend.
+ */
 :root {
+  /* surfaces */
   --bg: #080c15;
   --panel: #0d1320;
   --panel-2: #121a2b;
@@ -6,34 +19,92 @@
   --line: #1b263d;
   --line-2: #28354f;
   --line-3: #3a4a6b;
-
-  --fg: #dde5f4;
-  --muted: #8692ab;
-  --dim: #56627c;
   --grid: #121a2b;
+  --scrim: rgb(8 12 21 / 0.72);
+  --shadow: rgb(0 0 0 / 0.45);
+  --shadow-lg: rgb(0 0 0 / 0.6);
+  --black: #000;
 
-  --in: #f4b740;
-  --in-ink: #1d1405;
-  --out: #a08dff;
-  --ok: #43d39e;
-  --err: #ff5f6d;
+  /* text: >= 4.5:1 on --bg, --panel and --panel-2 */
+  --fg: #dde5f4;
+  --muted: #9aa5bb;
+  --dim: #7c88a1;
+
+  /* accent */
+  --accent: #7c8cff;
+  --accent-ink: #0a0e24;
+  --accent-bg: color-mix(in srgb, var(--accent) 14%, transparent);
+
+  /* brand mark (TopBar logo only; mirrors assets/favicon.svg) */
+  --brand-ring: #4a5b80;
+  --brand-tile: var(--panel);
+  --brand-hop: #b4bdd0;
+  --brand-focus: var(--accent);
+  --brand-end: #f4f6fb;
+
+  /* severity */
+  --err: #ff5d6c;
+  --warn: #f39a2a;
+  --info: #94a3b8;
+  --ok: #4ade80;
   --err-bg: #2a1219;
-  --warn: #ffb36b;
+  --warn-bg: color-mix(in srgb, var(--warn) 10%, transparent);
+  --info-bg: color-mix(in srgb, var(--info) 10%, transparent);
+  --ok-bg: color-mix(in srgb, var(--ok) 10%, transparent);
 
-  --k-io: #8692ab;
-  --k-proxy: #4cc9c0;
-  --k-router: #6b7a99;
-  --k-handler: #6aa6ff;
-  --k-function: #5fdc9a;
-  --k-fetch: #7fd6ff;
-  --k-db: #d58cff;
-  --k-custom: #e6d16a;
-  --k-render: #ff9b54;
-  --k-response: #8692ab;
+  /* diff (Compare and delta badges only) */
+  --diff-worse: #f87171;
+  --diff-better: #4ade80;
+  --diff-same: #6b7280;
+
+  /* time buckets (TraceFacts.time): one legend for every stacked bar */
+  --b-fn: #8b9bb4; /* handler / user code: slate */
+  --b-db: #a78bfa; /* violet */
+  --b-ext: #2dd4bf; /* external: teal */
+  --b-framework: #5aa8f7; /* render / framework: blue */
+  --b-cache: #e879f9; /* orchid */
+  --b-compile: #c4bf88; /* compile / cold: sand, hatched */
+  --b-idle: #6b7280; /* pre-handler wait: grey, hatched */
+
+  /* span kinds -> bucket of their self time */
+  --k-handler: var(--b-fn);
+  --k-function: var(--b-fn);
+  --k-proxy: var(--b-fn);
+  --k-custom: var(--b-fn);
+  --k-router: var(--b-framework);
+  --k-render: var(--b-framework);
+  --k-fetch: var(--b-ext);
+  --k-db: var(--b-db);
+  --k-io: var(--muted);
+  --k-response: var(--muted);
+
+  /* syntax (JSON viewer, code) */
+  --syn-key: #a9b8d4;
+  --syn-str: #a8d8a0;
+  --syn-num: #e6c68a;
+  --syn-bool: #c0a8f5;
+
+  /* type scale (plan 3.10) */
+  --fs-hero: 20px; /* verdict, hero: 600 */
+  --fs-title: 14px; /* subject title: 600 */
+  --fs-body: 13px; /* body, cells: 400 */
+  --fs-sm: 12px; /* code and values (mono, tabular-nums); secondary UI text */
+  --fs-label: 11px; /* labels: 500, sentence case */
 
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
   color-scheme: dark;
+}
+
+/* High-contrast reinforcement: brighter rules and secondary text, same roles. */
+@media (prefers-contrast: more) {
+  :root {
+    --line: #3a4a6b;
+    --line-2: #556785;
+    --line-3: #7183a7;
+    --muted: #b4bed1;
+    --dim: #97a2b8;
+  }
 }
 
 * {
@@ -49,7 +120,7 @@ body {
 }
 
 body {
-  font: 13px / 1.5 var(--font-ui);
+  font: var(--fs-body) / 1.5 var(--font-ui);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -66,12 +137,13 @@ button {
 }
 
 :focus-visible {
-  outline: 2px solid var(--in);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .mono {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .muted {
@@ -79,5 +151,32 @@ button {
 }
 
 .dim {
+  color: var(--dim);
+}
+
+/* type roles */
+
+.t-hero {
+  font: 600 var(--fs-hero) / 1.35 var(--font-ui);
+}
+
+.t-title {
+  font: 600 var(--fs-title) / 1.4 var(--font-ui);
+}
+
+.t-label {
+  font: 500 var(--fs-label) / 1.4 var(--font-ui);
+}
+
+.t-value {
+  font: var(--fs-sm) / 1.4 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The only letter-spaced uppercase style. Reserved for section heads (see check-tokens.mjs). */
+.section-head {
+  font: 600 var(--fs-label) / 1.4 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--dim);
 }

@@ -1,0 +1,605 @@
+/*
+ * Cross-request surfaces: Overview view, chart primitives (Charts.tsx), runtime badges in the
+ * sidebar route list and the richer traffic rows. Kept apart from layout.css so per-trace
+ * journey work and cross-request work don't collide in one file.
+ */
+
+/* ============================================================ bucket colors */
+
+.b-db {
+  background: var(--b-db);
+}
+.b-cache {
+  background: var(--b-cache);
+}
+.b-ext {
+  background: var(--b-ext);
+}
+.b-fn {
+  background: var(--b-fn);
+}
+.b-framework {
+  background: var(--b-framework);
+}
+.b-compile {
+  background: var(--b-compile);
+}
+.b-idle {
+  background: var(--b-idle);
+}
+
+/* ============================================================ chart primitives */
+
+.mix-bar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--panel-2);
+  min-width: 40px;
+}
+
+.mix-bar-empty {
+  background: repeating-linear-gradient(135deg, var(--panel-2) 0 4px, var(--line) 4px 6px);
+}
+
+.mix-seg {
+  display: block;
+  height: 100%;
+  min-width: 1px;
+}
+
+.mix-seg + .mix-seg {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.pctl {
+  white-space: nowrap;
+}
+
+.pctl-small {
+  color: var(--dim);
+}
+
+.pctl-n {
+  margin-left: 6px;
+  font-size: var(--fs-label);
+  color: var(--dim);
+}
+
+.sev-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 var(--fs-label) var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.sev-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sev-badge.sev-info,
+.sev-dot.sev-info {
+  color: var(--info);
+}
+.sev-badge.sev-info {
+  background: var(--info-bg);
+}
+.sev-badge.sev-warn,
+.sev-dot.sev-warn {
+  color: var(--warn);
+}
+.sev-badge.sev-warn {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.sev-badge.sev-error,
+.sev-dot.sev-error {
+  color: var(--err);
+}
+.sev-badge.sev-error {
+  background: var(--err-bg);
+}
+
+.cold-badge {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--b-compile);
+  border: 1px solid color-mix(in srgb, var(--b-compile) 35%, transparent);
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
+.handled-badge {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
+/* ============================================================ top bar */
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.action-danger,
+.action-danger:hover,
+.action-danger:focus-visible {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 50%, transparent);
+  background: var(--err-bg);
+}
+
+.action-count {
+  margin-left: 2px;
+}
+
+/* ============================================================ overview */
+
+/* The Overview is the list pane of its split: at 1280 with a route open it is ~490px wide, so the
+   layout keys off its own width (container queries), not the viewport. */
+.overview {
+  container: overview / inline-size;
+  padding: 14px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ov-head {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+}
+
+.ov-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.ov-sub {
+  font-size: var(--fs-label);
+  min-width: 0;
+}
+
+.ov-cold {
+  margin-left: auto;
+}
+
+.ov-empty {
+  padding: 24px 4px;
+  color: var(--dim);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  max-width: 60ch;
+}
+
+.ov-empty b {
+  display: block;
+  color: var(--fg);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+/* hero: the cause, in one sentence. Severity only as the 3px rule. */
+.ov-hero {
+  border-left: 3px solid var(--line-2);
+  padding: 2px 0 2px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ov-hero-warn {
+  border-left-color: var(--warn);
+}
+.ov-hero-error {
+  border-left-color: var(--err);
+}
+.ov-hero-info {
+  border-left-color: var(--info);
+}
+.ov-hero-ok {
+  border-left-color: var(--ok);
+}
+
+.ov-hero-text {
+  margin: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ov-hero-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-loc {
+  font-size: var(--fs-sm);
+}
+
+.ov-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ov-hero-sub .ov-actions {
+  margin-left: auto;
+}
+
+.ov-since:empty {
+  display: none;
+}
+
+/* two columns when the Overview is wide, stacked when it is the narrow list beside a subject */
+.ov-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@container overview (min-width: 1000px) {
+  .ov-cols {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
+}
+
+.ov-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ov-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+}
+
+.ov-section-title {
+  margin: 0;
+  font: 600 var(--fs-label) / 1.4 var(--font-ui);
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-hint {
+  margin-left: auto;
+  font-size: var(--fs-label);
+}
+
+.ov-section .muted {
+  padding: 4px 0;
+}
+
+.ov-sort {
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.ov-more {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.ov-more:hover,
+.ov-more:focus-visible {
+  color: var(--fg);
+}
+
+/* findings: sentence first, then route, saving, n=, location, actions */
+.ov-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.ov-find {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 10px;
+  align-items: baseline;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.ov-find-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ov-find-text {
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.ov-find-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-find-route {
+  color: var(--fg);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-find-meta .ov-actions {
+  margin-left: auto;
+}
+
+.ov-find-once .ov-find-text {
+  color: var(--muted);
+}
+
+.ov-once-tag {
+  color: var(--dim);
+  font-style: italic;
+}
+
+.ov-new {
+  color: var(--accent);
+}
+
+.ov-once {
+  margin-top: 4px;
+}
+
+.ov-once > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-once > summary:hover,
+.ov-once > summary:focus-visible {
+  color: var(--fg);
+}
+
+/* routes table */
+.ov-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.ov-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-table th,
+.ov-table td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.ov-table thead th {
+  border-top: 0;
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--dim);
+  background: var(--panel);
+}
+
+.ov-table .num {
+  text-align: right;
+}
+
+.ov-row:hover {
+  background: var(--panel-2);
+}
+
+.ov-row-on,
+.ov-row-on:hover {
+  background: var(--accent-bg);
+}
+
+.ov-row-on .ov-route {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.ov-route {
+  font-weight: 400;
+  max-width: 0;
+  width: 100%;
+}
+
+.ov-route-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  max-width: 100%;
+  text-align: left;
+}
+
+.ov-route-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-route-btn:hover .ov-route-path,
+.ov-route-btn:focus-visible .ov-route-path {
+  color: var(--accent);
+}
+
+.ov-err-n {
+  color: var(--err);
+}
+
+.ov-col-split {
+  width: 96px;
+  min-width: 72px;
+}
+
+/* narrow (the list beside a subject): drop p95 and the findings badge, keep n / p50 / delta / split */
+@container overview (max-width: 640px) {
+  .ov-col-p95,
+  .ov-col-find {
+    display: none;
+  }
+}
+
+@container overview (max-width: 400px) {
+  .ov-col-split {
+    display: none;
+  }
+}
+
+/* d-epoch: diff colours (delta badges only) */
+.ov-delta {
+  font-weight: 500;
+}
+.ov-delta-worse {
+  color: var(--diff-worse);
+}
+.ov-delta-better {
+  color: var(--diff-better);
+}
+.ov-delta-same {
+  color: var(--diff-same);
+}
+.ov-delta-low {
+  opacity: 0.7;
+}
+
+/* one honest errors line */
+.ov-errors {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-errors-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.ov-errors-parts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+/* route subject */
+.rs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.rs-title {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rs-ex {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 480px;
+}
+
+.rs-ex-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+
+.rs-ex-btn:hover,
+.rs-ex-btn:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.rs-ex-label {
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.rs-all {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+/* ============================================================ traffic rows */
+
+.trace-io {
+  font-size: var(--fs-label);
+}

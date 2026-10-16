@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/hermandinho/hoplens/main/assets/logo-mark.svg" alt="Hoplens logo" width="64" height="64">
+
 # hoplens
 
 [![npm](https://img.shields.io/npm/v/hoplens.svg)](https://www.npmjs.com/package/hoplens)
@@ -8,6 +10,19 @@ The request-journey visualizer for Node.js backends. One command, and
 proxy → router → handler → your functions → fetch/DB → response — with
 errors pinned to the exact `.ts` line and a request builder that pre-fills
 bodies from your Zod schemas.
+
+Each request opens with one sentence saying what made it slow or fail and
+the line to look at. Findings (N+1, duplicate calls, parallelizable chains,
+uncached fetches, swallowed errors, …) are ranked across requests, every dev
+rebuild gets a per-route "did this edit make it slower?" verdict, and any
+two requests can be compared span by span or replayed ×10. Dev responses
+carry `Server-Timing` and `x-hoplens-trace` headers for the browser's
+Network panel. Press `?` in the UI for the keys, `Ctrl/Cmd+K` for the
+command palette.
+
+Options (`insights`, `serverTiming`, `persist`, …), the search language, the
+keyboard map and the JSON API are documented in the
+[repo README](https://github.com/hermandinho/hoplens#readme).
 
 ## Install
 

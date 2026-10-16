@@ -9,6 +9,7 @@ import {
   formatBody,
   lastRunResult,
   removeKvRow,
+  replayBuilder,
   resetBuilder,
   sendError,
   sendRequest,
@@ -18,9 +19,16 @@ import {
   setParam,
   updateBuilder,
 } from "../state/builder";
-import { metaState } from "../state/store";
+import { register } from "../state/keymap";
+import { REPLAY_N, isRunning, replayBusy } from "../state/replay";
+import { builderOpen, metaState } from "../state/store";
+import { BuilderReplayPanel } from "./ReplayPanel";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
+
+// The shortcut accepts both modifiers; the hint shows the one this platform's users expect.
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+const SEND_KEYS = IS_MAC ? "⌘↵" : "Ctrl+↵";
 
 export function RequestBuilder() {
   const route = activeRoute.value;
@@ -30,6 +38,7 @@ export function RequestBuilder() {
   const isSending = sending.value;
   const err = sendError.value;
   const run = lastRunResult.value;
+  const replaying = replayBusy(); // a Changes x10 batch blocks it too (replayBuilder returns early)
 
   // Register ⌘/Ctrl+Enter globally while builder is mounted.
   useEffect(() => {
@@ -43,11 +52,23 @@ export function RequestBuilder() {
     return () => document.removeEventListener("keydown", handler);
   }, []);
 
+  // R: replay the builder's request x10 (the trace's own R stands down while the drawer is open).
+  // Registered only while a route is picked, so the cheatsheet and palette offer it only then.
+  const hasRoute = !!s;
+  useEffect(() => {
+    if (!hasRoute) return;
+    return register("global", "R", `Replay the builder's request x${REPLAY_N}`, () => replayBuilder(), {
+      when: () => builderOpen.peek() && !!builderState.peek() && !sending.peek() && !isRunning(),
+      hint: `replay x${REPLAY_N}`,
+    });
+  }, [hasRoute]);
+
   if (!route || !s) {
     return (
       <div class="builder-empty">
         <b>Pick a route to start</b>
-        Select a method tag in the Routes sidebar. Hoplens pre-fills bodies from Zod schemas when it finds them.
+        Open a route from the Overview, or press Ctrl+K and type its path. Hoplens pre-fills bodies from Zod schemas
+        when it finds them.
       </div>
     );
   }
@@ -79,7 +100,16 @@ export function RequestBuilder() {
 
         <button type="button" class="send" onClick={() => void sendRequest()} disabled={isSending}>
           {isSending ? "Sending…" : "Send"}
-          <kbd class="send-kbd">⌘↵</kbd>
+          <kbd class="send-kbd">{SEND_KEYS}</kbd>
+        </button>
+        <button
+          type="button"
+          class="sbtn builder-replay"
+          onClick={() => replayBuilder()}
+          disabled={isSending || replaying}
+          title={`Send this request ${REPLAY_N} times in a row: warm p50/p95, cold runs left out, vs last run`}
+        >
+          <kbd class="rp-kbd">R</kbd> Replay x{REPLAY_N}
         </button>
       </div>
 
@@ -128,6 +158,7 @@ export function RequestBuilder() {
           ) : null}
         </output>
       )}
+      <BuilderReplayPanel routeKey={s.routeKey} />
     </div>
   );
 }

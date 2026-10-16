@@ -1,15 +1,33 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { installBodyHooks, installConsoleHook, installHttpHook, installOtel, makeWrap, markOwnServer } from "./capture";
+import {
+  installBodyHooks,
+  installConsoleHook,
+  installFetchHook,
+  installHttpHook,
+  installOtel,
+  installPgHook,
+  installRedisHook,
+  makeEmitDb,
+  makeWrap,
+  markOwnServer,
+} from "./capture";
+import { type EpochInfo, type EpochTracker, createEpochTracker } from "./epoch";
 import { HoplensError } from "./errors";
+import { HealthMonitor } from "./health";
 import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
+import { type PersistRow, Persister, type PersisterOptions, persistDir, rowToTrace, traceRow } from "./persist";
+import { QueryStatsStore } from "./queries";
+import { RegressionTracker } from "./regressions";
+import { LastRuns } from "./replay";
 import { type Redactor, makeRedactor } from "./serialize";
-import { handleUi } from "./server";
+import { handleUi, startApiModules } from "./server";
 import { setDistDir } from "./sourcemap";
+import { RouteStatsStore } from "./stats";
 import { TraceStore } from "./store";
-import type { Discovery, DiscoverySource, HttpTap, ProxyInfo, RouteInfo } from "./types";
+import type { Discovery, DiscoverySource, HttpTap, ProxyInfo, RouteInfo, TraceRecord } from "./types";
 
 export interface RuntimeConfig {
   options: ResolvedOptions;
@@ -19,6 +37,8 @@ export interface RuntimeConfig {
   httpTap?: HttpTap;
   /** Pretty-printed banner that runs after the UI port is bound. */
   banner?: (rt: Runtime) => void;
+  /** Tests: persistence tuning (dir, file cap, flush interval). Used only with `options.persist`. */
+  persist?: PersisterOptions & { dir?: string };
 }
 
 /**
@@ -39,15 +59,35 @@ export class Runtime {
   readonly httpTap?: HttpTap;
   readonly log: Logger;
   readonly startedAt = Date.now();
+  /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
+  readonly epochs: EpochTracker;
+  /** Per-route, per-epoch rolling aggregates (GET /api/stats). Survive ring-buffer eviction. */
+  readonly stats = new RouteStatsStore();
+  /** Cross-request query / host aggregates (GET /api/queries). */
+  readonly queries = new QueryStatsStore();
+  /** Event-loop delay, memory, GC and process errors (GET /api/health). Listeners attach in start(). */
+  readonly health = new HealthMonitor();
+  /** WP7 Replay xN: last batch per method+path+profile, for "vs last run" (LRU of 100). */
+  readonly lastRuns = new LastRuns(100);
+  /** Route regressions with their remembered baselines and verdicts (GET /api/regressions). */
+  readonly regressions = new RegressionTracker();
 
   appPort?: number;
   uiPort?: number;
   otel: "own" | "attached" | "none" = "none";
+  /** WP10: the persistence writer, when `options.persist` is on. */
+  persister?: Persister;
+  /** WP10: dev session number (1-based; +1 per restart when persisting, else always 1). */
+  session = 1;
 
   private readonly banner?: (rt: Runtime) => void;
   private cachedDiscovery?: Discovery;
   private discoveredAt = 0;
   private started = false;
+  private stopped = false;
+  private server?: http.Server;
+  private readonly persistCfg?: PersisterOptions & { dir?: string };
+  private unsubEpoch?: () => void;
 
   constructor(cfg: RuntimeConfig) {
     this.options = cfg.options;
@@ -57,8 +97,20 @@ export class Runtime {
     this.discovery = cfg.discovery;
     this.httpTap = cfg.httpTap;
     this.banner = cfg.banner;
+    this.persistCfg = cfg.persist;
     this.log = createLogger("runtime");
     setDistDir(this.root, this.options.distDir);
+    // Rebuild signal from the build output, attribution from a watcher on the project's source dirs.
+    this.epochs = createEpochTracker(this.root, this.options.distDir ?? ".next");
+    // Both aggregates swallow their own errors: a listener that threw would surface in finish()'s timer.
+    this.store.on("done", (t) => {
+      this.stats.add(t);
+      this.queries.add(t);
+    });
+    this.store.on("clear", () => {
+      this.stats.clear();
+      this.queries.clear();
+    });
   }
 
   start(): this {
@@ -68,13 +120,101 @@ export class Runtime {
     installHttpHook(this);
     installBodyHooks(this);
     installConsoleHook(this);
-    (globalThis as any).__hoplens = { wrap: makeWrap(this), version: 1 };
+    installFetchHook(this);
+    installPgHook(this);
+    installRedisHook(this);
+    this.health.start();
+    // Before the API modules start: they read the restored epochs and stats.
+    if (this.options.persist) this.startPersistence();
+    process.once("exit", this.onExit);
+    startApiModules(this);
+    (globalThis as any).__hoplens = { wrap: makeWrap(this), emitDb: makeEmitDb(this), version: 2 };
     this.listen(this.options.port, 0);
     return this;
   }
 
+  /**
+   * Stop background work: health sampling, source and build-output watchers, the persistence timer
+   * (after a final flush) and the standalone UI server. Installed hooks stay (they can't be unpatched)
+   * but do nothing that outlives the process. Idempotent; also runs on process exit.
+   */
+  stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+    process.off("exit", this.onExit);
+    const steps: Array<() => void> = [
+      () => this.health.stop(),
+      () => this.epochs.close(),
+      () => this.unsubEpoch?.(),
+      () => this.store.off("done", this.onPersistDone),
+      () => this.store.off("clear", this.onPersistClear),
+      () => this.persister?.stop(),
+      () => this.server?.close(),
+    ];
+    for (const step of steps) {
+      try {
+        step();
+      } catch (err) {
+        this.log.warn(`stop step failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  private readonly onExit = () => this.stop();
+
+  /** Restore earlier sessions (epochs, then stats) and start writing this one. Never throws. */
+  private startPersistence(): void {
+    try {
+      const dir = this.persistCfg?.dir ?? persistDir(this.root, this.options.distDir);
+      const p = new Persister(dir, {
+        ...this.persistCfg,
+        header: () => this.epochs.list().map((info) => this.epochRow(info)),
+      });
+      const prior = p.load();
+      this.session = prior.session + 1;
+      if (prior.nextEpoch > 0) this.epochs.restore(prior.nextEpoch, prior.epochs);
+      // Replayed in order, judging regressions at each epoch edge as the live session did: the store
+      // keeps few epochs per route, so a verdict whose baseline it drops would otherwise be lost.
+      let edge: number | undefined;
+      for (const row of prior.traces) {
+        const e = row.facts?.epoch;
+        if (e !== undefined && edge !== undefined && e > edge) this.regressions.evaluate(this.stats.snapshot());
+        if (e !== undefined) edge = Math.max(edge ?? e, e);
+        this.stats.add(rowToTrace(row));
+      }
+      p.begin(this.session);
+      // This session's start epoch, so a later restart knows where it began.
+      const infos = this.epochs.list();
+      const start = infos[infos.length - 1];
+      if (start) p.push(this.epochRow(start));
+      this.persister = p;
+      this.unsubEpoch = this.epochs.onEpoch((info) => p.push(this.epochRow(info)));
+      this.store.on("done", this.onPersistDone);
+      this.store.on("clear", this.onPersistClear);
+    } catch (err) {
+      this.log.warn(`persistence off: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private epochRow(info: EpochInfo): PersistRow {
+    const { session, ...rest } = info;
+    return { k: "e", s: session ?? this.session, info: rest };
+  }
+
+  /** Runs in the store's finish timer, off the request path: builds a small row in memory only. */
+  private readonly onPersistDone = (t: TraceRecord) => {
+    try {
+      this.persister?.push(traceRow(t, this.redactor));
+    } catch {
+      /* best effort */
+    }
+  };
+
+  private readonly onPersistClear = () => this.persister?.clear();
+
   private listen(port: number, attempt: number) {
     const server = http.createServer();
+    this.server = server;
     markOwnServer(server);
     server.once("error", (err: NodeJS.ErrnoException) => {
       if (err?.code === "EADDRINUSE" && attempt < 10) this.listen(port + 1, attempt + 1);
@@ -84,6 +224,7 @@ export class Runtime {
       }
     });
     server.listen(port, "127.0.0.1", () => {
+      if (this.stopped) return void server.close();
       this.uiPort = port;
       server.unref();
       this.banner?.(this);

@@ -7,12 +7,24 @@ import { c, fail, ok, skip, warn } from "../style";
  * The exact snippet that `init` inserts into `register()`. We match it verbatim on
  * removal — if the user reformatted it we fall back to a warning instead of guessing.
  */
-const BLOCK = [
+/**
+ * Both forms of the block init may have written. 0.1.2+ uses the hoplens/node
+ * subpath; 0.1.0 / 0.1.1 used @hoplens/next/node directly. remove must undo
+ * either, so we try each in order.
+ */
+const BLOCK_CURRENT = [
+  "  // Hoplens: request journey visualizer at /__hoplens (dev only)",
+  '  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {',
+  '    await import("hoplens/node");',
+  "  }",
+].join("\n");
+const BLOCK_LEGACY = [
   "  // Hoplens: request journey visualizer at /__hoplens (dev only)",
   '  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {',
   '    await import("@hoplens/next/node");',
   "  }",
 ].join("\n");
+const KNOWN_BLOCKS = [BLOCK_CURRENT, BLOCK_LEGACY];
 
 const CONFIG_FILES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"];
 const INSTRUMENTATION_FILES = [
@@ -46,7 +58,10 @@ export async function remove(args: string[]) {
   const ins = unpatchInstrumentation(ts, root);
   if (ins) edits.push(ins);
 
-  if (edits.length === 0) {
+  // Read distDir before the config is rewritten (or deleted) below.
+  const data = hoplensData(root);
+
+  if (edits.length === 0 && data.length === 0) {
     skip("Nothing to remove — Hoplens isn't wired into this project.");
     return;
   }
@@ -67,9 +82,47 @@ export async function remove(args: string[]) {
     }
   }
 
-  console.log(
-    `\n${c.green("Done.")} If you no longer need Hoplens, uninstall it: ${c.bold("npm rm hoplens @hoplens/next")}\n`,
+  for (const rel of data) {
+    if (dryRun) {
+      console.log(`${c.dim(`--- ${rel} (delete)`)}\n`);
+      continue;
+    }
+    try {
+      fs.rmSync(path.join(root, rel), { recursive: true, force: true });
+      ok(`Deleted ${rel}`);
+    } catch (err) {
+      warn(`Couldn't delete ${rel}: ${(err as Error).message}`);
+    }
+  }
+
+  console.log(`\n${c.green("Done.")} If you no longer need Hoplens, uninstall it: ${c.bold("npm rm hoplens")}\n`);
+}
+
+/**
+ * Files Hoplens writes under the build output: the persisted stats (`persist: true`, a directory) and
+ * the resolved options written by withHoplens. Project-relative paths of the ones that exist.
+ */
+export function hoplensData(root: string): string[] {
+  const cache = path.join(readDistDir(root), "cache");
+  return [path.join(cache, "hoplens"), path.join(cache, "hoplens.json")].filter((rel) =>
+    fs.existsSync(path.join(root, rel)),
   );
+}
+
+/** `distDir` from next.config when it's a plain string literal, else Next's default `.next`. */
+export function readDistDir(root: string): string {
+  const name = CONFIG_FILES.find((f) => fs.existsSync(path.join(root, f)));
+  if (name) {
+    try {
+      const m = /\bdistDir\s*:\s*(["'`])([^"'`\r\n]+)\1/.exec(fs.readFileSync(path.join(root, name), "utf8"));
+      const dir = m?.[2]?.trim();
+      // Never follow a distDir out of the project.
+      if (dir && !path.isAbsolute(dir) && !path.normalize(dir).startsWith("..")) return path.normalize(dir);
+    } catch {
+      /* fall back to the default */
+    }
+  }
+  return ".next";
 }
 
 function unpatchConfig(ts: any, root: string): Edit | null {
@@ -143,15 +196,29 @@ function unwrapCall(ts: any, sf: any, src: string, expr: any): string | null {
   return `${src.slice(0, expr.getStart(sf))}${innerText}${src.slice(expr.getEnd())}`;
 }
 
+/**
+ * Matches both the modern `hoplens/next` subpath (0.1.2+) and the legacy
+ * `@hoplens/next` scope (0.1.0 / 0.1.1), so remove undoes an install done
+ * with any version of init.
+ */
+const HOPLENS_IMPORT_SOURCE = /["'](?:hoplens\/next|@hoplens\/next)["']/;
+
 function stripHoplensImport(src: string, isCjs: boolean): string {
   if (isCjs) {
     return src.replace(
-      /^[ \t]*const\s*\{\s*withHoplens\s*\}\s*=\s*require\(\s*["']@hoplens\/next["']\s*\)\s*;?[ \t]*\r?\n?/m,
+      new RegExp(
+        `^[ \\t]*const\\s*\\{\\s*withHoplens\\s*\\}\\s*=\\s*require\\(\\s*${HOPLENS_IMPORT_SOURCE.source}\\s*\\)\\s*;?[ \\t]*\\r?\\n?`,
+        "m",
+      ),
       "",
     );
   }
   // Try `import { withHoplens }` first (sole import), then an aliased form inside a named-import list.
-  let out = src.replace(/^[ \t]*import\s*\{\s*withHoplens\s*\}\s*from\s*["']@hoplens\/next["']\s*;?[ \t]*\r?\n?/m, "");
+  const soleImport = new RegExp(
+    `^[ \\t]*import\\s*\\{\\s*withHoplens\\s*\\}\\s*from\\s*${HOPLENS_IMPORT_SOURCE.source}\\s*;?[ \\t]*\\r?\\n?`,
+    "m",
+  );
+  let out = src.replace(soleImport, "");
   if (out === src) {
     out = src.replace(/\{\s*withHoplens\s*,\s*/g, "{ ").replace(/,\s*withHoplens\s*(?=[},])/g, "");
   }
@@ -168,26 +235,33 @@ function unpatchInstrumentation(ts: any, root: string): Edit | null {
   if (!existing) return null;
 
   const src = fs.readFileSync(path.join(root, existing), "utf8");
-  if (!src.includes("@hoplens/next/node")) {
+  if (!src.includes("hoplens/node") && !src.includes("@hoplens/next/node")) {
     skip(`${existing} doesn't load Hoplens`);
     return null;
   }
 
-  // Try literal block removal first — init writes BLOCK verbatim with surrounding newlines.
+  // Try literal block removal for each known form. init writes the block
+  // verbatim with surrounding newlines; later versions changed the import
+  // path but kept the surrounding comment + if-gate.
   const normalized = src.replace(/\r\n/g, "\n");
-  const marker = `\n${BLOCK}\n`;
-  const idx = normalized.indexOf(marker);
   let out: string | null = null;
-  if (idx >= 0) {
-    out = normalized.slice(0, idx) + normalized.slice(idx + marker.length);
-  } else if (normalized.includes(BLOCK)) {
-    out = normalized.replace(BLOCK, "").replace(/\n{3,}/g, "\n\n");
+  for (const block of KNOWN_BLOCKS) {
+    const marker = `\n${block}\n`;
+    const idx = normalized.indexOf(marker);
+    if (idx >= 0) {
+      out = normalized.slice(0, idx) + normalized.slice(idx + marker.length);
+      break;
+    }
+    if (normalized.includes(block)) {
+      out = normalized.replace(block, "").replace(/\n{3,}/g, "\n\n");
+      break;
+    }
   }
 
   if (!out) {
     warn(
       `Couldn't find the Hoplens block in ${existing} (it was reformatted?). Remove the ${c.bold(
-        '`await import("@hoplens/next/node")`',
+        '`await import("hoplens/node")`',
       )} line by hand.`,
     );
     return null;

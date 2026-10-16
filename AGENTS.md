@@ -9,13 +9,17 @@ Operating guide for anyone (human or agent) touching this repo. Keep this file c
 pnpm install
 
 # build all publishable packages (packages/*)
-pnpm -r build
+pnpm build
+# (`pnpm -r build` also runs `next build` in examples/next16-app, which rewrites its next-env.d.ts)
 
 # strict typecheck, in parallel
 pnpm -r typecheck
 
-# vitest in every package that has tests
+# vitest in every package that has tests (ui also runs the design-token guard first)
 pnpm -r test
+
+# per-request overhead gate: the whole pipeline < 2 ms, Server-Timing < 0.5 ms
+pnpm --filter @hoplens/core bench
 
 # biome: lint + format
 pnpm lint
@@ -78,9 +82,9 @@ Hoplens is split so that **everything downstream of the HTTP tap is framework-ne
 | `@hoplens/core` | Runtime: capture, store, UI server, OTel bridge, source maps, redactor, trace helpers | `@opentelemetry/*`, `@hoplens/ui` |
 | `@hoplens/schema` | Zod static interpreter (framework-neutral); plug-in point for other validators later | `typescript` |
 | `@hoplens/transform` | Exported-function rewriter (no line/column moves), webpack/Turbopack loader entry, Node `register()` hook stub | `typescript` |
-| `@hoplens/ui` | Single inlined HTML (Preact rebuild = Phase 4) | — |
+| `@hoplens/ui` | Preact + signals, built by Vite to one inlined HTML file | — |
 | `@hoplens/next` | `withHoplens()` config wrapper, Next route+proxy scanner (first `DiscoverySource` impl) | `@hoplens/core`, `@hoplens/schema`, `@hoplens/transform` |
-| `@hoplens/cli` | bin `hoplens`: `init` (and later `doctor`/`remove`) | `@hoplens/transform` (for TS loader) |
+| `@hoplens/cli` | bin `hoplens`: `init`, `doctor`, `remove` (also deletes `<distDir>/cache/hoplens`) | `@hoplens/transform` (for TS loader) |
 | `hoplens` (meta) | Unscoped meta — pulls in `@hoplens/cli` + `@hoplens/next` so `npm i -D hoplens` works | — |
 
 ### Composition seams
@@ -91,6 +95,34 @@ Two interfaces in `@hoplens/core` make the multi-framework story possible withou
 - **`HttpTap`** — tells core what to filter out (framework internals), what to classify as the "app's own" port, and how to recognise an in-flight request belongs to this framework.
 
 The runtime never imports a framework. Adapters inject.
+
+A third seam is internal: **`ApiModule`** (`packages/core/src/api/module.ts`). Every newer UI-server endpoint lives in its own `src/api/<name>.ts` exporting `endpoints` (and an optional `start(rt)` hook, run from `Runtime.start()`); `server.ts` lists it in `API_MODULES` and nothing else there changes.
+
+### Core modules (`packages/core/src`)
+
+Everything below `capture.ts` runs **after the response finished** (from `finalize()` or the store's `done` event) or on a UI-server request, never on the app's request path.
+
+| Module | Role |
+|---|---|
+| `capture.ts` | http emit hook, OTel span processor, fetch / `pg` / redis patches, console capture, Server-Timing + `x-hoplens-trace` |
+| `callsite.ts` | Caller frame of a wrapped function (the loop line of an N+1), captured only on the 2nd call under one parent |
+| `facts.ts` | Per-trace facts: interval-union time buckets (`db cache ext fn framework compile idle`), TTFB, bytes, counts, cold; nested-fetch fold; URL normalization |
+| `insights/` | Findings engine: `analyze.ts` runs each rule in `rules/` isolated; `thresholds.ts` holds the `insights` defaults |
+| `store.ts` | Trace ring buffer, SSE events, manual and automatic pins |
+| `stats.ts` | Per-route, per-epoch histograms, findings rollup, exemplars; outlives the ring |
+| `queries.ts` | Cross-request query / host shapes |
+| `query.ts` | Pure search grammar, shipped as `@hoplens/core/query` and bundled by the UI |
+| `epoch.ts` · `sourcewatch.ts` · `importgraph.ts` · `chunkindex.ts` | Dev-rebuild epochs: the rebuild signal, which source files changed, which routes import them, and a module-level diff of the rebuilt chunks |
+| `regressions.ts` | Per-route verdict per epoch on warm p50 over the URL variants both sides share |
+| `compare.ts` | Span / shape / bucket / body diff of two traces |
+| `replay.ts` | `POST /api/run?repeat=N` batches |
+| `health.ts` | Event-loop delay, memory, GC, process errors |
+| `persist.ts` | Opt-in NDJSON persistence of facts and summaries (`persist: true`) |
+| `server.ts` · `api/*` | UI server and the loopback JSON API |
+
+### UI (`packages/ui/src`)
+
+`state/` holds pure logic plus signals (router, keymap, verdict, flame layout, compare, epochs, palette, …) and is where unit tests point; `components/` renders. The hash router (`state/router.ts`) is the only writer of `location.hash`. Every shortcut goes through `register()` in `state/keymap.ts`, which also feeds the `?` sheet, the action bar and the palette, so a key cannot be advertised without working. Colours and type come only from `styles/tokens.css` (enforced by `scripts/check-tokens.mjs`).
 
 ## Supported matrix (v0.1 target)
 
@@ -119,6 +151,17 @@ When refactoring a file called out below, re-read the matching lesson before cha
 12. **Don't depend on Google Fonts or any CDN** in the UI; sandboxed and offline dev environments block them, and a local tool shouldn't phone home. → `packages/ui/`.
 13. **Killing dev servers in scripts:** `pkill -f "next dev"` also matches your own shell; start servers with `setsid` and kill the process group.
 14. **The 500 from a thrown route error has an empty body in dev**; the UI explains that the error lives in the journey. → `packages/ui/` + `packages/core/src/capture.ts`.
+15. **Turbopack rewrites chunk files in place**, so no directory mtime moves on an edit, while Next rewrites `*manifest*` files and touches `app/<route>` dirs with no edit at all. The rebuild probe counts only non-manifest `.js` writes, and a first-ever compile of a route (plus a settle window after it) is absorbed instead of bumping the epoch. → `packages/core/src/epoch.ts` (header).
+16. **A formatter-only save is not an edit.** Turbopack skips unchanged writes, and a rewrite with identical module code is caught by hashing each module with its `sourceMappingURL` and chunk scaffolding stripped. Next builds some `node_modules` modules twice under one id (pnpm peer variants of `next`), so a new hash there counts as added, not edited. → `packages/core/src/chunkindex.ts`.
+17. **Next 15 dev writes `<distDir>/server` itself**, so "no dev dir" doesn't mean production. The chunk index is skipped on `NODE_ENV=production` instead. → `packages/core/src/epoch.ts` (`createEpochTracker`).
+18. **`fs.watch` on Windows** reports an overflowing burst (a checkout, a codemod) as one event with no filename, and misses some Turbopack writes. A nameless event triggers a rescan; each chunk update also sweeps route entries whose mtime moved. Never `return` early on a null filename. → `packages/core/src/sourcewatch.ts`, `epoch.ts`, `chunkindex.ts`.
+19. **Next and Hoplens both wrap `fetch`**, so one outgoing call is a fetch span with a fetch child for the same method + URL. `foldNestedFetches()` folds the pair (Next's timing, our name/attrs/location) before facts and rules run, or every count and finding doubles. → `packages/core/src/facts.ts`.
+20. **`pg.Pool.query` always calls `client.query` in callback form**, which returns `undefined`. End the span in the wrapped callback, not when `query()` returns, or every pooled query reads ~0ms with no row count. → `packages/core/src/capture.ts` (pg patch).
+21. **Windows timers are coarse.** Back-to-back awaits overlap by 1-2ms, so the parallelizable rule treats an overlap up to max(2ms, 15% of the shorter call) as sequential. The event-loop histogram includes the sampler's own interval (rounded up to the 15.625ms tick on win32), so `loopFloorMs` subtracts it or an idle loop reads 20-30ms. → `packages/core/src/insights/rules/parallel.ts` (`follows`), `packages/core/src/health.ts`.
+22. **Headers passed to `res.writeHead()` win over `setHeader()`** in Node. Server-Timing extends a `server-timing` given there in a copy of that argument and appends to an existing value, never overwriting it. → `packages/core/src/capture.ts` (Server-Timing block).
+23. **Request-path work is measured, not assumed.** Facts, findings, stats and persistence run after the response; the bench gates the whole pipeline at < 2ms. Call-site capture keeps a few structured V8 frames only on the 2nd call of a wrapped function under one parent (an N+1 needs repeats), and `.stack` is formatted lazily after the response. → `packages/core/src/callsite.ts`, `test/benchmark.test.ts`.
+24. **Persistence never writes free text.** Finding titles that quote a log line or an error message are rebuilt without it, and URL query values are masked unless they match `^[\w.-]{0,8}$`. → `packages/core/src/persist.ts` (`persistedTitle`, `persistedUrl`).
+25. **The request log is windowed** (visible rows plus overscan). DOM order of `[data-trace-id]` is not screen order, so a probe for "the row under the pointer stays put" must use `elementFromPoint`. → `packages/ui/src/components/RequestLog.tsx`.
 
 ## Working rules (from the project brief)
 

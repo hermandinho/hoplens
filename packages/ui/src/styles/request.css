@@ -1,0 +1,466 @@
+/*
+ * Single-request view: request header, time budget bar, findings strip, copy menu, builder
+ * drawer, waterfall "xN" groups and the Inspector's "Where to look". Bucket colors come from the
+ * --b-* tokens (tokens.css) so this bar matches every other time-mix surface.
+ */
+
+/* ============================================================ builder drawer */
+
+.builder-drawer {
+  border-bottom: 1px solid var(--line-2);
+  background: var(--panel);
+}
+
+.builder-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.builder-drawer-title {
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--muted);
+}
+
+.builder-drawer-note {
+  margin: 0;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+/*
+ * The subject under an open builder is the request that was open before it, not the builder's
+ * result: dimmed (still readable, never hidden) until Send replaces it. Pointing at it or tabbing
+ * into it brings it back to full strength.
+ */
+.builder-drawer.dims-subject ~ :not(.cmp-pick) {
+  opacity: 0.45;
+  transition: opacity 120ms ease-out;
+}
+
+.builder-drawer.dims-subject ~ :not(.cmp-pick):hover,
+.builder-drawer.dims-subject ~ :not(.cmp-pick):focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-drawer.dims-subject ~ :not(.cmp-pick) {
+    transition: none;
+  }
+}
+
+/* ============================================================ request header */
+
+.rh {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rh-empty {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
+
+.rh-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.rh-top .method-tag {
+  font-size: var(--fs-label);
+  padding: 2px 6px;
+}
+
+.rh-path {
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.rh-stats {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.rh-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.rh-stat-k {
+  font: 500 var(--fs-label) var(--font-ui);
+  color: var(--dim);
+}
+
+.rh-stat-v {
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+.rh-vs {
+  font-size: var(--fs-label);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rh-vs-up .mono {
+  color: var(--warn);
+}
+
+.rh-vs-down .mono {
+  color: var(--ok);
+}
+
+.rh-vs.pctl-small .mono {
+  color: var(--dim);
+}
+
+.rh-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+}
+
+/* ============================================================ copy menu */
+
+.copy-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 230px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--raise);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px var(--shadow);
+}
+
+.copy-menu-item {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: var(--fs-sm);
+  color: var(--fg);
+}
+
+.copy-menu-item:hover,
+.copy-menu-item:focus-visible {
+  background: var(--panel-2);
+}
+
+.copy-menu-note {
+  padding: 6px 8px 4px;
+  font-size: var(--fs-label);
+  line-height: 1.4;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
+.copy-menu-msg {
+  font-size: var(--fs-label);
+  color: var(--ok);
+  white-space: nowrap;
+}
+
+/* ============================================================ budget bar */
+
+.budget-none {
+  font-size: var(--fs-sm);
+}
+
+.budget-bar {
+  position: relative;
+  display: flex;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--panel-2);
+}
+
+.budget-seg {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 2px;
+  height: 100%;
+  overflow: visible;
+  outline-offset: 1px;
+}
+
+.budget-seg:first-child {
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+.budget-seg:last-of-type {
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.budget-seg + .budget-seg {
+  box-shadow: inset 1px 0 color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.budget-seg:hover,
+.budget-seg:focus-visible {
+  filter: brightness(1.15);
+}
+
+.budget-seg-label {
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  color: var(--bg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.budget-seg.b-idle .budget-seg-label,
+.budget-seg.b-framework .budget-seg-label {
+  color: var(--fg);
+}
+
+.budget-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.budget-tip-head .mono {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+}
+
+.budget-tip-hint {
+  font-size: var(--fs-label);
+  line-height: 1.4;
+}
+
+.budget-tip-spans {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.budget-tip-span {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  text-align: left;
+  font-size: var(--fs-label);
+  color: var(--fg);
+}
+
+.budget-tip-span:hover .budget-tip-name {
+  text-decoration: underline;
+}
+
+.budget-tip-ms {
+  flex: 0 0 52px;
+  text-align: right;
+  color: var(--muted);
+}
+
+.budget-tip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.budget-ttfb {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 0;
+  border-left: 2px solid var(--fg);
+  pointer-events: auto;
+  z-index: 2;
+}
+
+/* The TTFB label sits above the bar: reserve its height so it can't run into the header buttons. */
+.budget-bar:has(.budget-ttfb) {
+  margin-top: 16px;
+}
+
+.budget-ttfb-label {
+  position: absolute;
+  bottom: 100%;
+  left: -14px;
+  font-size: var(--fs-label);
+  color: var(--fg);
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding-bottom: 1px;
+}
+
+/* Near either edge the centered label would be clipped by the bar: pin it inside. */
+.budget-ttfb-label-end {
+  left: auto;
+  right: 2px;
+}
+
+.budget-ttfb-label-start {
+  left: 2px;
+}
+
+.budget-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.budget-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.budget-legend .mono {
+  font-size: var(--fs-label);
+}
+
+.legend-swatch {
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+/* ============================================================ findings strip */
+
+/* ============================================================ waterfall extras */
+
+.journey-pane-meta {
+  font-size: var(--fs-label);
+}
+
+.journey-pane-warn {
+  color: var(--warn);
+}
+
+.waterfall-bar-col .wf-ttfb-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--fg);
+  opacity: 0.6;
+}
+
+.waterfall-row.wf-hl {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.waterfall-row.wf-hl.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.wf-group-caret {
+  flex: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--fs-label);
+}
+
+.wf-group-count {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.wf-group-track {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 12px;
+  min-width: 2px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+  display: flex;
+  align-items: center;
+}
+
+.wf-group-tick {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 1px;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.85;
+}
+
+.wf-group-tick.jw-kind-db {
+  background: var(--k-db);
+}
+
+.wf-group-tick.jw-kind-fetch {
+  background: var(--k-fetch);
+}
+
+.wf-group-label {
+  position: absolute;
+  left: calc(100% + 6px);
+  color: var(--muted);
+  text-shadow: none;
+}
+
+/* compile spans use the compile bucket color everywhere */
+.jw-kind-pill.jw-kind-compile,
+.jw-bar.jw-kind-compile {
+  background: var(--b-compile);
+}
+
+.kind-compile {
+  color: var(--b-compile);
+  background: color-mix(in srgb, var(--b-compile) 10%, transparent);
+}
+
+.span-snippet.k-compile {
+  border-left-color: var(--b-compile);
+}

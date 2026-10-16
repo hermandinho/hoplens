@@ -1,49 +1,99 @@
-import type { BodyCapture, SpanRecord, TraceRecord } from "../api/types";
-import { detailsCounts, detailsTab, rawRequest, rawRequestError, setDetailsTab } from "../state/details";
-import { selectHop, selectedHopId } from "../state/journey";
+import { useEffect } from "preact/hooks";
+import type { BodyCapture, TraceRecord } from "../api/types";
+import {
+  type DetailsTab,
+  detailsCounts,
+  detailsTab,
+  rawRequest,
+  rawRequestError,
+  setDetailsTab,
+} from "../state/details";
+import { selectedHopId } from "../state/journey";
+import { closeDetailsSheet, detailsSheetOpen, isMobile, openDetailsSheet } from "../state/mobile";
+import { isHandledError, statusClass } from "../state/stats";
 import { selectedTrace } from "../state/store";
+import { SpanDetail } from "./Inspector";
+import { JsonView } from "./JsonView";
+import { Sheet } from "./Mobile";
 
-const TABS = [
+const TABS: readonly { id: DetailsTab; label: string }[] = [
   { id: "response", label: "Response" },
-  { id: "waterfall", label: "Waterfall" },
-  { id: "console", label: "Console" },
   { id: "request", label: "Request" },
-] as const;
+  { id: "console", label: "Console" },
+  { id: "span", label: "Span" },
+];
 
 export function Details() {
   const trace = selectedTrace.value;
-  const tab = detailsTab.value;
+  const picked = detailsTab.value;
   const counts = detailsCounts.value;
+  const hopId = selectedHopId.value;
+  const mobile = isMobile.value;
+  const sheet = detailsSheetOpen.value;
+  const span = hopId ? trace?.spans.find((s) => s.id === hopId) : undefined;
+  // The Span tab exists only while a span is selected; without one it falls back to Response.
+  const tab: DetailsTab = picked === "span" && !span ? "response" : picked;
+
+  // Phones (plan 3.6): the details live in a bottom sheet. Picking a span opens it on the Span tab,
+  // the way the drawer switches to Span on a desktop. The sheet never outlives the request view.
+  useEffect(() => {
+    if (mobile && hopId) openDetailsSheet();
+  }, [mobile, hopId]);
+  useEffect(() => closeDetailsSheet, []);
 
   if (!trace) return null;
 
+  const tabs = (sheetTabs: boolean) => (
+    <div class="details-tabs" role="tablist" aria-label="Trace detail views">
+      {TABS.filter((t) => t.id !== "span" || span).map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={sheetTabs || !mobile ? `details-tab-${t.id}` : undefined}
+          aria-controls={sheetTabs || !mobile ? "details-panel" : undefined}
+          class={`details-tab ${tab === t.id ? "active" : ""}`}
+          aria-selected={tab === t.id}
+          onClick={() => {
+            setDetailsTab(t.id);
+            if (mobile) openDetailsSheet();
+          }}
+        >
+          {t.label}
+          {counts[t.id] > 0 && t.id === "console" && <span class="tab-count">{counts[t.id]}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  const body = (
+    <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
+      {tab === "response" && <ResponsePane trace={trace} />}
+      {tab === "console" && <ConsolePane trace={trace} />}
+      {tab === "request" && <RequestPane />}
+      {tab === "span" && span && (
+        <div class="pane insp">
+          <SpanDetail trace={trace} span={span} />
+        </div>
+      )}
+    </div>
+  );
+
+  if (mobile) {
+    return (
+      <section class="details details-dock" aria-label="Trace details">
+        {tabs(false)}
+        <Sheet open={sheet} label="Trace details" onClose={closeDetailsSheet} head={tabs(true)}>
+          {body}
+        </Sheet>
+      </section>
+    );
+  }
+
   return (
     <section class="details" aria-label="Trace details">
-      <div class="details-tabs" role="tablist" aria-label="Trace detail views">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            id={`details-tab-${t.id}`}
-            aria-controls="details-panel"
-            class={`details-tab ${tab === t.id ? "active" : ""}`}
-            aria-selected={tab === t.id}
-            onClick={() => setDetailsTab(t.id)}
-          >
-            {t.label}
-            {counts[t.id] > 0 && t.id !== "response" && t.id !== "request" && (
-              <span class="tab-count">{counts[t.id]}</span>
-            )}
-          </button>
-        ))}
-      </div>
-      <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
-        {tab === "response" && <ResponsePane trace={trace} />}
-        {tab === "waterfall" && <WaterfallPane trace={trace} />}
-        {tab === "console" && <ConsolePane trace={trace} />}
-        {tab === "request" && <RequestPane />}
-      </div>
+      {tabs(true)}
+      {body}
     </section>
   );
 }
@@ -51,15 +101,14 @@ export function Details() {
 /* ----------------------------------------------------------- panes */
 
 function ResponsePane({ trace }: { trace: TraceRecord }) {
-  const status = trace.status ?? 0;
-  const statusClass = trace.error ? "c5" : `c${Math.floor(status / 100)}`;
   return (
     <div class="pane">
       <div class="response-head">
-        <span class={`status-code ${statusClass}`}>{trace.status ?? (trace.done ? "—" : "…")}</span>
+        <span class={`status-code ${statusClass(trace)}`}>{trace.status ?? (trace.done ? "—" : "…")}</span>
         {trace.duration !== undefined && <span class="dim mono">{Math.round(trace.duration)}ms</span>}
         {trace.error && (
           <span class="pane-issue">
+            {isHandledError(trace) && "Handled: "}
             {trace.error.type}: {trace.error.message}
           </span>
         )}
@@ -67,52 +116,6 @@ function ResponsePane({ trace }: { trace: TraceRecord }) {
       <HeadersTable headers={trace.response.headers} />
       <BodyBlock body={trace.response.body} empty="Empty response body." />
     </div>
-  );
-}
-
-function WaterfallPane({ trace }: { trace: TraceRecord }) {
-  if (trace.spans.length === 0) {
-    return <div class="muted">No spans captured.</div>;
-  }
-  const total = Math.max(1, ...trace.spans.map((s) => s.end));
-  const selected = selectedHopId.value;
-  return (
-    <div class="pane">
-      <div class="waterfall">
-        {trace.spans.map((s) => (
-          <WaterfallRow key={s.id} span={s} total={total} selected={selected === s.id} />
-        ))}
-      </div>
-      <div class="waterfall-foot dim mono">
-        Total {Math.round(total)}ms · {trace.spans.length} spans
-      </div>
-    </div>
-  );
-}
-
-function WaterfallRow({ span, total, selected }: { span: SpanRecord; total: number; selected: boolean }) {
-  const left = (span.start / total) * 100;
-  const width = Math.max(0.5, ((span.end - span.start) / total) * 100);
-  const dur = Math.round(span.end - span.start);
-  const errored = !!span.error;
-  return (
-    <button
-      type="button"
-      class={`wf-row ${selected ? "selected" : ""} ${errored ? "errored" : ""}`}
-      onClick={() => selectHop(span.id)}
-      aria-pressed={selected}
-    >
-      <span class={`wf-kind wf-kind-${span.kind}`} aria-hidden="true" />
-      <span class="wf-name mono" title={span.name}>
-        {span.name}
-      </span>
-      <span class="wf-bar-track">
-        <span class={`wf-bar wf-bar-${span.kind}`} style={`left: ${left}%; width: ${width}%;`} aria-hidden="true" />
-      </span>
-      <span class="wf-dur dim mono" aria-label={`${dur} milliseconds`}>
-        {dur}ms
-      </span>
-    </button>
   );
 }
 
@@ -155,6 +158,8 @@ function RequestPane() {
     );
   }
   if (!req) return <div class="muted">loading…</div>;
+  // Try to parse body as JSON so we can pretty-print it; fall back to raw text.
+  const parsed = tryParseJson(req.body);
   return (
     <div class="pane">
       <div class="request-head">
@@ -165,7 +170,7 @@ function RequestPane() {
       {req.body ? (
         <>
           <div class="section-title">Body</div>
-          <pre class="code-block mono">{req.body}</pre>
+          {parsed !== undefined ? <JsonView value={parsed} /> : <pre class="code-block mono">{req.body}</pre>}
         </>
       ) : (
         <div class="muted">No request body.</div>
@@ -176,6 +181,17 @@ function RequestPane() {
       </div>
     </div>
   );
+}
+
+function tryParseJson(text: string | undefined): unknown {
+  if (!text) return undefined;
+  const trimmed = text.trim();
+  if (!trimmed || !/^[[{"]/.test(trimmed)) return undefined;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
 }
 
 /* ----------------------------------------------------------- shared helpers */
@@ -210,7 +226,10 @@ function BodyBlock({ body, empty }: { body?: BodyCapture; empty: string }) {
       </>
     );
   }
-  const text = body.json !== undefined ? JSON.stringify(body.json, null, 2) : (body.text ?? "");
+  // JSON gets the tree view; text content falls back to the raw block but
+  // first tries to parse as JSON opportunistically (common for text/plain
+  // responses that are actually JSON).
+  const asJson = body.json !== undefined ? body.json : tryParseJson(body.text);
   return (
     <>
       <div class="section-title">
@@ -218,7 +237,7 @@ function BodyBlock({ body, empty }: { body?: BodyCapture; empty: string }) {
         {body.contentType && <span class="dim mono"> {body.contentType}</span>}
         {body.truncated && <span class="pane-issue"> truncated</span>}
       </div>
-      <pre class="code-block mono">{text}</pre>
+      {asJson !== undefined ? <JsonView value={asJson} /> : <pre class="code-block mono">{body.text ?? ""}</pre>}
     </>
   );
 }

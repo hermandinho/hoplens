@@ -1,9 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { type APIResponse, type Page, expect, test } from "@playwright/test";
 
 /**
  * One pass per viewport project (configured in playwright.config.ts): visit /__hoplens, snapshot
- * the empty state, send a real request through the live Next app, snapshot the loaded state, then
- * drive a 500 error path and snapshot the error-state trace.
+ * the empty Overview, send a real request through the live Next app, open it from the Requests
+ * list and snapshot the trace, then drive a 500 error path and snapshot the failed trace.
+ *
+ * The UI is hash-routed (`#/requests`, `#/r/<id>`), so the tests navigate by URL instead of
+ * clicking the view tabs: the desktop top bar and the phone bottom tabs (<= 760px) are different
+ * elements, and the hash works the same on both.
  */
 
 const VALID_ORDER = {
@@ -20,6 +24,26 @@ const VALID_ORDER = {
 // a pinned error location — the exact path the Hoplens UI is designed to showcase.
 const ALREADY_PAID_ORDER_ID = "9c1e7a52-4b0d-4e1a-9a55-1f3c2e8d0b77";
 
+/** Every traced dev response names its trace and carries Hoplens's Server-Timing entries. */
+function traceIdOf(res: APIResponse): string {
+  const headers = res.headers();
+  expect(headers["server-timing"] ?? "").toContain("total;");
+  const id = headers["x-hoplens-trace"];
+  expect(id, "x-hoplens-trace header").toBeTruthy();
+  return id as string;
+}
+
+/** Open the Requests list, wait for the trace's row to stream in over SSE, and open it. */
+async function openFromRequests(page: Page, traceId: string): Promise<void> {
+  await page.goto("/__hoplens#/requests");
+  const row = page.locator(`[data-trace-id="${traceId}"]`);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.click();
+  await expect(page).toHaveURL(new RegExp(`#/r/${traceId}`));
+  // The journey canvas (Tree by default, the only mode on phones) has the `.waterfall` root.
+  await expect(page.locator(".waterfall").first()).toBeVisible();
+}
+
 test.describe("Hoplens UI", () => {
   test("initial / empty state loads and matches snapshot", async ({ page, request }, info) => {
     // Clear traces from any earlier project run.
@@ -28,21 +52,24 @@ test.describe("Hoplens UI", () => {
     await page.goto("/__hoplens");
     await expect(page.locator(".brand-name")).toHaveText("Hoplens");
 
-    // Sidebar routes list populated via the live /api/routes endpoint.
-    await expect(page.locator(".route-row").first()).toBeVisible({ timeout: 15_000 });
+    // The default view is the Overview; with no traffic it says so.
+    await expect(page.getByText("No traffic yet")).toBeVisible({ timeout: 15_000 });
 
-    // Empty traffic state in the sidebar.
-    await page.getByRole("tab", { name: /^Traffic/ }).click();
+    // The Requests list has its own empty state.
+    await page.goto("/__hoplens#/requests");
     await expect(page.getByText("No requests yet.")).toBeVisible();
 
-    // Back to Routes for the screenshot.
-    await page.getByRole("tab", { name: /^Routes$/ }).click();
-    await expect(page.locator(".route-row").first()).toBeVisible();
+    // Back to the Overview for the screenshot.
+    await page.goto("/__hoplens#/");
+    await expect(page.getByText("No traffic yet")).toBeVisible();
 
     await expect(page).toHaveScreenshot(`${info.project.name}-empty.png`, { fullPage: true });
   });
 
-  test("after a real request, journey + details populate and match snapshot", async ({ page, request }, info) => {
+  test("after a real request, the trace opens beside the list and matches snapshot", async ({
+    page,
+    request,
+  }, info) => {
     await request.delete("/__hoplens/api/traces");
 
     // Fire a valid POST through the live app so Hoplens captures a trace with all hop kinds.
@@ -52,18 +79,9 @@ test.describe("Hoplens UI", () => {
     });
     expect(res.status()).toBe(201);
 
-    await page.goto("/__hoplens");
-    await page.getByRole("tab", { name: /^Traffic/ }).click();
+    await openFromRequests(page, traceIdOf(res));
 
-    // Wait for the live SSE to deliver the trace into the sidebar.
-    const firstTrace = page.locator(".trace-row").first();
-    await expect(firstTrace).toBeVisible({ timeout: 15_000 });
-
-    // Click into the trace to drive the journey + details panes.
-    await firstTrace.click();
-    await expect(page.locator(".journey-canvas")).toBeVisible();
-
-    // Give the SVG + response pane a tick to settle before snapshotting.
+    // Give the canvas and the details pane a tick to settle before snapshotting.
     await page.waitForTimeout(400);
 
     await expect(page).toHaveScreenshot(`${info.project.name}-with-trace.png`, { fullPage: true });
@@ -79,16 +97,12 @@ test.describe("Hoplens UI", () => {
     });
     expect(res.status()).toBe(500);
 
-    await page.goto("/__hoplens");
-    await page.getByRole("tab", { name: /^Traffic/ }).click();
+    await openFromRequests(page, traceIdOf(res));
 
-    const firstTrace = page.locator(".trace-row").first();
-    await expect(firstTrace).toBeVisible({ timeout: 15_000 });
+    // The trace leads with a failing verdict sentence.
+    await expect(page.locator("section.verdict.verdict-fail")).toBeVisible();
 
-    await firstTrace.click();
-    await expect(page.locator(".journey-canvas")).toBeVisible();
-
-    // SVG + response + inspector all need a tick to settle.
+    // Canvas, verdict and details all need a tick to settle.
     await page.waitForTimeout(400);
 
     await expect(page).toHaveScreenshot(`${info.project.name}-with-error.png`, { fullPage: true });

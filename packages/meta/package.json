@@ -39,6 +39,11 @@
       "import": "./dist/next.mjs",
       "require": "./dist/next.js"
     },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.mjs",
+      "require": "./dist/node.js"
+    },
     "./trace": {
       "types": "./dist/trace.d.ts",
       "import": "./dist/trace.mjs",

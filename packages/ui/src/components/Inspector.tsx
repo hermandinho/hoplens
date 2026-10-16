@@ -1,42 +1,32 @@
-import type { CapturedError, LogRecord, SpanRecord } from "../api/types";
-import { selectedHopId } from "../state/journey";
+import type { CapturedError, LogRecord, SpanRecord, TraceRecord } from "../api/types";
 import { openSourceAt } from "../state/source";
 import { selectedTrace } from "../state/store";
+import { JsonView } from "./JsonView";
+import { SpanSnippet } from "./SpanSnippet";
+import { WhereToLook } from "./WhereToLook";
 
+/**
+ * The subject's "Where to look" block. The selected span's details live in the drawer's Span tab
+ * (Details), so nothing here depends on the selection and no placeholder is drawn.
+ */
 export function Inspector() {
   const trace = selectedTrace.value;
-  const hopId = selectedHopId.value;
+  if (!trace) return null;
+  return (
+    <aside class="insp" aria-label="Where to look">
+      <WhereToLook trace={trace} />
+    </aside>
+  );
+}
 
-  if (!trace || !hopId) {
-    return (
-      <aside class="insp" aria-label="Hop inspector">
-        <div class="empty">
-          <b>Hop inspector</b>
-          Click a hop in the journey or a row in the waterfall to see its location, duration, args and return value
-          here.
-        </div>
-      </aside>
-    );
-  }
-
-  const span = trace.spans.find((s) => s.id === hopId);
-  if (!span) {
-    return (
-      <aside class="insp" aria-label="Hop inspector">
-        <div class="empty">
-          <b>Hop not in current trace</b>
-          Pick a hop from the current trace to see its details.
-        </div>
-      </aside>
-    );
-  }
-
+/** One span's details (kind, timing, code, error, args/result, attributes, logs): the drawer's Span tab. */
+export function SpanDetail({ trace, span }: { trace: TraceRecord; span: SpanRecord }) {
   const dur = Math.round(span.end - span.start);
   const offset = Math.round(span.start);
   const logs = trace.logs.filter((l) => l.spanId === span.id);
 
   return (
-    <aside class="insp" aria-label="Hop inspector">
+    <>
       <header class="insp-head">
         <KindTag kind={span.kind} />
         <h3 class="insp-name mono" title={span.name}>
@@ -61,29 +51,17 @@ export function Inspector() {
         )}
       </dl>
 
-      {span.location && (
-        <section class="insp-section">
-          <div class="insp-section-title">Location</div>
-          <button
-            type="button"
-            class="src-link mono"
-            onClick={() => openSourceAt(span.location!.file, span.location!.line)}
-            title="Open in source viewer"
-          >
-            <span class="src-link-arrow" aria-hidden="true">
-              ↗
-            </span>
-            {span.location.file}:{span.location.line}
-          </button>
-        </section>
-      )}
+      <section class="insp-section">
+        <div class="insp-section-title">Location</div>
+        <SpanSnippet span={span} spans={trace.spans} />
+      </section>
 
       {span.error && <ErrorBlock err={span.error} />}
       {span.args !== undefined && <JsonSection title="Arguments" value={span.args} />}
       {span.result !== undefined && <JsonSection title="Return value" value={span.result} />}
       <AttrsSection attrs={span.attrs} />
       {logs.length > 0 && <LogsSection logs={logs} />}
-    </aside>
+    </>
   );
 }
 
@@ -138,11 +116,10 @@ function ErrorBlock({ err }: { err: CapturedError }) {
 }
 
 function JsonSection({ title, value }: { title: string; value: unknown }) {
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
     <section class="insp-section">
       <div class="insp-section-title">{title}</div>
-      <pre class="insp-json mono">{text}</pre>
+      <JsonView value={value} />
     </section>
   );
 }

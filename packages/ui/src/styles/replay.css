@@ -1,0 +1,237 @@
+/*
+ * WP7 Replay xN: the confirm / progress / result block in the trace subject and the builder, and
+ * the per-run strip. Bars use the handler bucket fill; a cold run is hatched like compile time; a
+ * failed run keeps the neutral fill with a 3px severity cap. Colors through tokens only.
+ */
+
+.rp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: var(--fs-body);
+}
+
+.rp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.rp-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rp-title .mono,
+.rp-msg .mono {
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+.rp-progress {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-x {
+  margin-left: auto;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rp-x:hover,
+.rp-x:focus-visible {
+  color: var(--fg);
+}
+
+.rp-msg,
+.rp-stats,
+.rp-stop,
+.rp-vs {
+  margin: 0;
+}
+
+.rp-stats {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.rp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.rp-detail {
+  font-size: var(--fs-sm);
+}
+
+.rp-primary {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.rp-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  padding: 0 4px;
+  border: 1px solid var(--line-3);
+  border-radius: 3px;
+  color: var(--fg);
+}
+
+/* chips: severity only here */
+.rp-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line-3);
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.rp-chip-warn {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--fg);
+}
+
+.rp-chip-err {
+  border-color: var(--err);
+  background: var(--err-bg);
+  color: var(--fg);
+}
+
+/* "vs last run": a delta badge, so the diff family */
+.rp-delta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+}
+
+/* tinted badges pad out to the left so their text stays on the panel's text edge */
+.rp-delta-worse,
+.rp-delta-better {
+  margin-left: -6px;
+  padding: 1px 6px;
+}
+
+.rp-delta-worse {
+  background: color-mix(in srgb, var(--diff-worse) 16%, transparent);
+}
+
+.rp-delta-better {
+  background: color-mix(in srgb, var(--diff-better) 16%, transparent);
+}
+
+.rp-delta-same {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------ run strip */
+
+.rp-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 32px;
+  margin: 0;
+  padding: 0 0 4px;
+  list-style: none;
+  border-bottom: 1px solid var(--line-2);
+  overflow-x: auto;
+}
+
+.rp-cell {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 12px;
+  height: 100%;
+}
+
+.rp-bar {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px 3px 0 0;
+  background: var(--b-fn);
+}
+
+button.rp-bar {
+  cursor: pointer;
+}
+
+button.rp-bar:hover,
+button.rp-bar:focus-visible {
+  filter: brightness(1.2);
+}
+
+.rp-bar[aria-current="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rp-cold {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--b-compile) 0 3px,
+    color-mix(in srgb, var(--b-compile) 40%, transparent) 3px 6px
+  );
+}
+
+.rp-fail {
+  background: color-mix(in srgb, var(--b-fn) 45%, transparent);
+  box-shadow: inset 0 3px 0 var(--err);
+}
+
+.rp-pending {
+  height: 3px;
+  background: var(--line-3);
+}
+
+/* the median (p50) run: a tick under its bar */
+.rp-median::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 2px;
+  background: var(--fg);
+}
+
+.rp-running .rp-strip .rp-bar:not(.rp-pending) {
+  transition: height 120ms ease-out;
+}
+
+/* placement */
+.builder > .rp {
+  margin: 0 12px 12px;
+}
+
+.builder-replay {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .builder-replay {
+    order: 3;
+  }
+}

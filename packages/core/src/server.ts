@@ -1,11 +1,25 @@
-import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import * as compareApi from "./api/compare";
+import * as epochsApi from "./api/epochs";
+import * as healthApi from "./api/health";
+import type { ApiModule } from "./api/module";
+import type { QueryKind } from "./queries";
+import { type QueryTarget, inSinceScope, matchQuery, parseQuery, parseSinceParam } from "./query";
+import {
+  type RunInput,
+  RunInputError,
+  batchHttpStatus,
+  parseFlag,
+  parseRepeat,
+  prepareRun,
+  runBatch,
+  runOnce,
+} from "./replay";
 import type { Runtime } from "./runtime";
-import { preview } from "./serialize";
 import { summarize } from "./store";
-import type { TraceRecord } from "./types";
+import type { BodyCapture, TraceRecord } from "./types";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 let uiCache: { mtimeMs: number; html: string } | null = null;
@@ -150,8 +164,48 @@ addRoute("GET", "/api/routes", ({ rt, url, res }) => {
   json(res, 200, rt.discover(url.searchParams.has("fresh")));
 });
 
-addRoute("GET", "/api/traces", ({ rt, res }) => {
-  json(res, 200, rt.store.list());
+addRoute("GET", "/api/traces", ({ rt, url, res }) => {
+  const q = url.searchParams.get("q");
+  // `?since=<epoch>` (or e<n>): only requests in epochs >= since, with or without `q`.
+  const since = parseSinceParam(url.searchParams.get("since"));
+  if (!q || !q.trim()) {
+    const list = rt.store.list();
+    return json(res, 200, since === undefined ? list : list.filter((t) => inSinceScope(t, since)));
+  }
+  // Same array shape as the unfiltered list; dropped terms are reported in a header so the UI can
+  // flag them without a second request.
+  const query = parseQuery(q);
+  const out = rt.store
+    .records()
+    .filter((t) => inSinceScope(t, since) && matchQuery(query, recordTarget(t)))
+    .map(summarize);
+  res.setHeader("x-hoplens-query-errors", encodeURIComponent(JSON.stringify(query.errors)));
+  json(res, 200, out);
+});
+
+addRoute("GET", "/api/stats", ({ rt, url, res }) => {
+  json(
+    res,
+    200,
+    rt.stats.snapshot({
+      buckets: url.searchParams.get("buckets") === "1",
+      since: parseSinceParam(url.searchParams.get("since")),
+    }),
+  );
+});
+
+addRoute("GET", "/api/queries", ({ rt, url, res }) => {
+  const kind = url.searchParams.get("kind");
+  const limit = Number(url.searchParams.get("limit"));
+  json(
+    res,
+    200,
+    rt.queries.snapshot({
+      kind: kind === "db" || kind === "cache" || kind === "fetch" ? (kind as QueryKind) : undefined,
+      limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+      retained: (id) => rt.store.get(id) !== undefined,
+    }),
+  );
 });
 
 addRoute("DELETE", "/api/traces", ({ rt, res }) => {
@@ -211,25 +265,114 @@ addRoute("GET", "/api/events", ({ rt, req, res }) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(t ? summarize(t) : {})}\n\n`);
   const onStart = send("start");
   const onDone = send("done");
+  const onUpdate = send("update");
   const onClear = send("clear");
   rt.store.on("start", onStart);
   rt.store.on("done", onDone);
+  rt.store.on("update", onUpdate);
   rt.store.on("clear", onClear);
+  // WP6: process health (`event: health`, HealthTick) on the same stream, first one right away.
+  const detachHealth = healthApi.attachHealthEvents(
+    rt.health,
+    (chunk) => {
+      if (!res.writableEnded && !res.destroyed) res.write(chunk);
+    },
+    healthApi.HEALTH_EVENT_MIN_GAP_MS,
+    { immediate: true },
+  );
   const beat = setInterval(() => res.write(": ping\n\n"), 15000);
   const stop = () => {
     clearInterval(beat);
+    detachHealth();
     rt.store.off("start", onStart);
     rt.store.off("done", onDone);
+    rt.store.off("update", onUpdate);
     rt.store.off("clear", onClear);
   };
   req.on("close", stop);
   res.on("error", stop);
 });
 
-addRoute("POST", "/api/run", async ({ rt, req, res }) => {
-  const input = JSON.parse((await readBody(req)) || "{}");
-  await run(rt, input, res);
+addRoute("POST", "/api/run", async ({ rt, req, res, url }) => {
+  let input: RunInput;
+  try {
+    input = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    return json(res, 400, { error: "Body must be JSON" });
+  }
+  await run(rt, input, res, url);
 });
+
+/* ------------------------------------------------ per-endpoint modules (plan 4.1) */
+
+/**
+ * Endpoints that live in their own `src/api/<name>.ts` module (contract in api/module.ts). A work
+ * package adds exactly one import above and one entry here; nothing else in this file changes.
+ * Mounted after the built-in routes, so a module can't shadow an existing endpoint.
+ */
+const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi];
+
+/** Mount a per-endpoint module. Exported for tests; production modules go in API_MODULES. */
+export function mountApi(mod: ApiModule): void {
+  for (const ep of mod.endpoints) {
+    addRoute(ep.method, ep.path, ({ rt, req, res, url, method, params }) =>
+      ep.handle(req, res, rt, { url, method, params }),
+    );
+  }
+}
+
+for (const mod of API_MODULES) mountApi(mod);
+
+/** Run each module's `start` hook once for a runtime (Runtime.start calls this). Never throws. */
+export function startApiModules(rt: Runtime): void {
+  for (const mod of API_MODULES) {
+    try {
+      mod.start?.(rt);
+    } catch {
+      /* a module's background state is best effort */
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ search */
+
+function bodyText(b: BodyCapture | undefined): string | undefined {
+  if (!b) return undefined;
+  if (b.text !== undefined) return b.text;
+  if (b.json === undefined) return undefined;
+  try {
+    return JSON.stringify(b.json);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Server-side search target. Free text covers path, url, route, error message, logs and the captured
+ * (already redacted) request/response bodies; the expensive sources are thunks, only evaluated when the
+ * cheaper ones didn't match.
+ */
+export function recordTarget(t: TraceRecord): QueryTarget {
+  return {
+    method: t.method,
+    path: t.path,
+    route: t.route,
+    kind: t.kind,
+    status: t.done ? t.status : undefined,
+    duration: t.duration,
+    cold: t.facts?.cold,
+    rules: t.findings?.map((f) => f.rule),
+    error: !!t.error,
+    text: [
+      t.url,
+      t.route,
+      t.error?.message,
+      () => t.logs.map((l) => l.text).join("\n"),
+      () => bodyText(t.request.body),
+      () => bodyText(t.response.body),
+    ],
+  };
+}
 
 /* -------------------------------------------------------------- entrypoint */
 
@@ -250,80 +393,28 @@ export async function handleUi(rt: Runtime, req: http.IncomingMessage, res: http
 
 /* --------------------------------------------------------------- /api/run */
 
-interface RunInput {
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: string;
-  profile?: string;
-}
-
-async function run(rt: Runtime, input: RunInput, res: http.ServerResponse) {
-  const port = rt.appPort ?? (Number(process.env.PORT) || 3000);
-  if (!input.path || !input.path.startsWith("/")) return json(res, 400, { error: "Path must start with /" });
-  const runId = randomUUID();
-  const headers: Record<string, string> = {};
-  const profile = input.profile ? rt.options.profiles?.[input.profile] : undefined;
-  if (input.profile && !profile) return json(res, 400, { error: `Unknown profile "${input.profile}"` });
-  for (const [k, v] of Object.entries(profile?.headers ?? {})) headers[k.toLowerCase()] = interpolate(v);
-  for (const [k, v] of Object.entries(input.headers ?? {}))
-    if (k.trim()) headers[k.trim().toLowerCase()] = interpolate(String(v));
-  headers["x-hoplens-run"] = runId;
-  const method = (input.method || "GET").toUpperCase();
-  const hasBody = input.body !== undefined && input.body !== "" && method !== "GET" && method !== "HEAD";
-  if (hasBody && !headers["content-type"])
-    headers["content-type"] = /^\s*[[{]/.test(input.body!) ? "application/json" : "text/plain";
-
-  const done = new Promise<TraceRecord | undefined>((resolve) => {
-    const timer = setTimeout(() => {
-      rt.store.off("done", onDone);
-      resolve(rt.store.byRun(runId));
-    }, 60000);
-    const onDone = (t: TraceRecord) => {
-      if (t.runId !== runId) return;
-      clearTimeout(timer);
-      rt.store.off("done", onDone);
-      resolve(t);
-    };
-    rt.store.on("done", onDone);
-  });
-
-  const started = Date.now();
-  let status = 0;
-  let error: string | undefined;
+/**
+ * One run (legacy shape `{runId, traceId, status, error, elapsed}`), or Replay xN when `repeat` is
+ * given in the query (`?repeat=N`) or body (WP7): see replay.ts for the batch response.
+ */
+async function run(rt: Runtime, input: RunInput, res: http.ServerResponse, url?: URL) {
   try {
-    const r = await fetch(`http://127.0.0.1:${port}${input.path}`, {
-      method,
-      headers,
-      body: hasBody ? input.body : undefined,
-      redirect: "manual",
-    });
-    status = r.status;
-    await r.arrayBuffer().catch(() => undefined);
-  } catch (err: any) {
-    error = `Could not reach your app on port ${port}: ${err?.cause?.code ?? err?.message ?? err}`;
-  }
-  const trace = error ? undefined : await done;
-  if (trace) {
-    const internal = rt.store.internal(trace);
-    if (internal && hasBody) internal.rawBody = input.body;
-    if (trace.request.body === undefined && hasBody) {
-      trace.request.body = {
-        contentType: headers["content-type"],
-        size: Buffer.byteLength(input.body!),
-        text: input.body!.slice(0, 20000),
-      };
-      try {
-        trace.request.body.json = preview(JSON.parse(input.body!), rt.redactor);
-        trace.request.body.text = undefined;
-      } catch {
-        /* keep text */
-      }
+    const repeat = parseRepeat(url?.searchParams.get("repeat") ?? input.repeat);
+    if (repeat) {
+      const keepGoing = parseFlag(url?.searchParams.get("keepGoing") ?? input.keepGoing);
+      const r = await runBatch(rt, { ...input, keepGoing }, repeat);
+      return json(res, batchHttpStatus(r), r);
     }
+    const r = await runOnce(rt, prepareRun(rt, input));
+    json(res, r.error ? 502 : 200, {
+      runId: r.runId,
+      traceId: r.trace?.id,
+      status: r.status,
+      error: r.error,
+      elapsed: r.elapsed,
+    });
+  } catch (err) {
+    if (err instanceof RunInputError) return json(res, 400, { error: err.message });
+    throw err;
   }
-  json(res, error ? 502 : 200, { runId, traceId: trace?.id, status, error, elapsed: Date.now() - started });
-}
-
-function interpolate(v: string): string {
-  return v.replace(/\$\{([A-Z0-9_]+)\}/gi, (_, name) => process.env[name] ?? "");
 }

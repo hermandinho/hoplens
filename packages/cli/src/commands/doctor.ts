@@ -99,10 +99,12 @@ export async function doctor(_args: string[]) {
   if (!ins) nope("No instrumentation.* file — run npx hoplens init", true);
   else {
     const src = fs.readFileSync(path.join(root, ins), "utf8");
-    if (!src.includes("@hoplens/next/node")) {
-      nope(`${ins} doesn't load @hoplens/next/node — run npx hoplens init`, true);
+    // Accept both the modern hoplens/node form (0.1.2+) and the legacy
+    // @hoplens/next/node form (0.1.0 / 0.1.1).
+    if (!src.includes("hoplens/node") && !src.includes("@hoplens/next/node")) {
+      nope(`${ins} doesn't load hoplens/node — run npx hoplens init`, true);
     } else {
-      good(`${ins} loads @hoplens/next/node`);
+      good(`${ins} loads the Hoplens runtime`);
       if (!src.includes('NODE_ENV === "development"') && !src.includes("NODE_ENV==='development'")) {
         nope('Hoplens isn\'t gated by NODE_ENV === "development" — it will attach in production too', false);
       }

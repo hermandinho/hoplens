@@ -1,1 +1,1 @@
-export { traced, step } from "@hoplens/core/trace";
+export { traced, step, drizzleLogger } from "@hoplens/core/trace";

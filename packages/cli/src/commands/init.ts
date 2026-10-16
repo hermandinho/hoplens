@@ -7,7 +7,7 @@ import { readJson, safeResolve } from "../util";
 const BLOCK = [
   "  // Hoplens: request journey visualizer at /__hoplens (dev only)",
   '  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {',
-  '    await import("@hoplens/next/node");',
+  '    await import("hoplens/node");',
   "  }",
 ].join("\n");
 
@@ -56,7 +56,7 @@ function patchConfig(ts: any, root: string): [string, string] | null {
   if (!name) {
     const file = fs.existsSync(path.join(root, "tsconfig.json")) ? "next.config.ts" : "next.config.mjs";
     ok(`Created ${file}`);
-    return [file, `import { withHoplens } from "@hoplens/next";\n\nexport default withHoplens({});\n`];
+    return [file, `import { withHoplens } from "hoplens/next";\n\nexport default withHoplens({});\n`];
   }
   const src = fs.readFileSync(path.join(root, name), "utf8");
   if (src.includes("withHoplens")) {
@@ -102,8 +102,8 @@ function patchConfig(ts: any, root: string): [string, string] | null {
     return null;
   }
   out = isCjs
-    ? `const { withHoplens } = require("@hoplens/next");\n${out}`
-    : addImport(out, `import { withHoplens } from "@hoplens/next";`);
+    ? `const { withHoplens } = require("hoplens/next");\n${out}`
+    : addImport(out, `import { withHoplens } from "hoplens/next";`);
   ok(`Wrapped the config in ${name}`);
   return [name, out];
 }
@@ -137,7 +137,9 @@ function patchInstrumentation(ts: any, root: string): [string, string] | null {
     return [file, `export async function register() {\n${BLOCK}\n}\n`];
   }
   const src = fs.readFileSync(path.join(root, existing), "utf8");
-  if (src.includes("@hoplens/next/node")) {
+  // Match the new hoplens/node form plus the legacy @hoplens/next/node form
+  // written by 0.1.0 / 0.1.1 so re-running init on an older install is still idempotent.
+  if (src.includes("hoplens/node") || src.includes("@hoplens/next/node")) {
     skip(`${existing} already loads Hoplens`);
     return null;
   }

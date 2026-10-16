@@ -67,7 +67,8 @@ export function RequestBuilder() {
     return (
       <div class="builder-empty">
         <b>Pick a route to start</b>
-        Select a method tag in the Routes sidebar. Hoplens pre-fills bodies from Zod schemas when it finds them.
+        Open a route from the Overview, or press Ctrl+K and type its path. Hoplens pre-fills bodies from Zod schemas
+        when it finds them.
       </div>
     );
   }

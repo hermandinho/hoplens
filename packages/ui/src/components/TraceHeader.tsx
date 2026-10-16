@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import type { TimeBucket, TraceFacts, TraceRecord } from "../api/types";
 import { selectHop } from "../state/journey";
+import { register } from "../state/keymap";
+import { menuStep } from "../state/menuNav";
 import { formatRoute, route } from "../state/router";
 import { serverStats } from "../state/serverStats";
 import {
@@ -496,6 +498,38 @@ function CopyMenu({ trace }: { trace: TraceRecord }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  /** Opened from the keyboard (`y`): focus the first item once it renders. */
+  const focusFirst = useRef(false);
+  const openRef = useRef(open);
+  openRef.current = open;
+
+  // y (plan 3.9): open the copy menu with its first item focused; y again closes it.
+  useEffect(
+    () =>
+      register(
+        "trace",
+        "y",
+        "Copy menu: curl, fetch() or a Vitest test",
+        () => {
+          if (openRef.current) {
+            setOpen(false);
+            btnRef.current?.focus();
+          } else {
+            focusFirst.current = true;
+            setOpen(true);
+          }
+        },
+        { hint: "copy" },
+      ),
+    [],
+  );
+
+  useEffect(() => {
+    if (!open || !focusFirst.current) return;
+    focusFirst.current = false;
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -503,7 +537,10 @@ function CopyMenu({ trace }: { trace: TraceRecord }) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      // Focus was in the menu: hand it back to the button instead of dropping it on <body>.
+      if (ref.current?.contains(document.activeElement)) btnRef.current?.focus();
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -520,6 +557,7 @@ function CopyMenu({ trace }: { trace: TraceRecord }) {
   }, [msg]);
 
   const copy = async (kind: CopyKind) => {
+    if (ref.current?.contains(document.activeElement)) btnRef.current?.focus();
     setOpen(false);
     try {
       await writeClipboard(await copyText(trace, kind));
@@ -540,17 +578,38 @@ function CopyMenu({ trace }: { trace: TraceRecord }) {
   return (
     <div class="copy-menu" ref={ref}>
       <button
+        ref={btnRef}
         type="button"
         class="sbtn"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-keyshortcuts="y"
         onClick={() => setOpen(!open)}
-        title="Copy this request to replay it elsewhere"
+        onKeyDown={(e) => {
+          // ArrowDown on the closed button opens it on the first item (ARIA menu button).
+          if (e.key === "ArrowDown" && !open) {
+            e.preventDefault();
+            focusFirst.current = true;
+            setOpen(true);
+          }
+        }}
+        title="Copy this request to replay it elsewhere (y)"
       >
         Copy ▾
       </button>
       {open && (
-        <div class="copy-menu-list" role="menu">
+        <div
+          class="copy-menu-list"
+          role="menu"
+          onKeyDown={(e) => {
+            const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+            const next = menuStep(items.indexOf(document.activeElement as HTMLElement), items.length, e.key);
+            if (next !== null) {
+              e.preventDefault();
+              items[next]?.focus();
+            } else if (e.key === "Tab") setOpen(false);
+          }}
+        >
           {COPY_ITEMS.map((it) => (
             <button
               key={it.kind}

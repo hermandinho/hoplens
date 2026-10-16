@@ -58,7 +58,10 @@ export const api = {
     return { traces: (await res.json()) as TraceSummary[], errors };
   },
   /** Per-route, per-epoch aggregates that survive ring eviction. 404 on an older core. */
-  stats: (buckets = false) => get<StatsResponse>(`/stats${buckets ? "?buckets=1" : ""}`),
+  stats: (buckets = false, since?: number) => {
+    const qs = [buckets ? "buckets=1" : "", since !== undefined ? `since=${since}` : ""].filter(Boolean).join("&");
+    return get<StatsResponse>(`/stats${qs ? `?${qs}` : ""}`);
+  },
   /** Cross-request query / host fingerprints. */
   queries: (limit = 500) => get<QueriesResponse>(`/queries?limit=${limit}`),
   trace: (id: string) => get<TraceRecord>(`/traces/${encodeURIComponent(id)}`),

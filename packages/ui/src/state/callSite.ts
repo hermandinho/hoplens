@@ -9,7 +9,8 @@ import type { SourceResponse } from "../api/types";
  * per-item function instead (external.ts:67) by reading the source below the declaration. The
  * Overview, the route subject and the palette only have the finding summary: they resolve the same
  * line here, once per (file, line, callee), and show the declaration until it is known.
- * Follow-up: the core could record the caller frame of the outermost wrapper instead.
+ * A core from r4 on records the loop's call line itself (`location.via === "call-site"`); such a
+ * location is used as is. The search stays for older cores and traces captured before a restart.
  */
 
 /** Lines read below the declaration when looking for the call (as the inline peek does). */
@@ -61,6 +62,7 @@ interface Loc {
   file: string;
   line: number;
   column?: number;
+  via?: "call-site";
 }
 
 /**
@@ -70,7 +72,7 @@ interface Loc {
  */
 export function culpritLoc(f: { rule: string; title: string; location?: Loc }): Loc | undefined {
   const loc = f.location;
-  if (!loc || f.rule !== "n-plus-1") return loc;
+  if (!loc || f.rule !== "n-plus-1" || loc.via === "call-site") return loc;
   const callee = calleeOfTitle(f.title);
   if (!callee) return loc;
   const hit = callSites.value.get(keyOf(loc.file, loc.line, callee));

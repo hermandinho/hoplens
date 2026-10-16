@@ -72,7 +72,54 @@ function moveSelection(delta: number): void {
   moveCursor(delta);
   const r = route.peek();
   const id = logCursor.peek();
-  if (r.view === "trace" && id && id !== r.traceId) void loadTrace(id, "user", { replace: true });
+  if (r.view === "trace" && id && id !== r.traceId) {
+    // Skimming from a peek stays a peek: Space on the request j/k landed on still closes it.
+    if (peekedId === r.traceId) peekedId = id;
+    void loadTrace(id, "user", { replace: true });
+  }
+}
+
+/**
+ * Space on the list (plan 3.9 "peek"): show the row under the cursor as the subject without a
+ * history entry and without moving focus, so j/k + Space skims requests and Back still leaves the
+ * Requests tab in one step. Space again on the request it peeked closes the peek. Pure.
+ * `peeked` = the id the last peek opened (null when the subject was opened another way).
+ */
+export type PeekStep = { kind: "open"; id: string } | { kind: "close" } | null;
+
+export function peekStep(
+  cursor: string | null,
+  rows: readonly { id: string }[],
+  r: Route,
+  peeked: string | null,
+): PeekStep {
+  if (!cursor || !rows.some((t) => t.id === cursor)) return null;
+  if (r.view === "trace" && r.traceId === cursor) return peeked === cursor ? { kind: "close" } : null;
+  return { kind: "open", id: cursor };
+}
+
+/** The id the last Space peek opened (moved along by j/k while the peek is open). */
+let peekedId: string | null = null;
+
+function peek(): void {
+  const step = peekStep(logCursor.peek(), logRows.peek(), route.peek(), peekedId);
+  if (!step) return;
+  if (step.kind === "close") {
+    peekedId = null;
+    const since = route.peek().since;
+    go(since ? { view: "requests", since } : { view: "requests" }, { replace: true });
+    return;
+  }
+  peekedId = step.id;
+  void loadTrace(step.id, "user", { replace: true });
+}
+
+/** Space belongs to a focused control (it clicks buttons, toggles tabs); a log row is the exception. */
+function spaceIsOurs(e?: KeyboardEvent): boolean {
+  const el = targetEl(e);
+  if (!el) return true;
+  if (el.closest("[data-trace-id]")) return true;
+  return !el.closest("button, a, [role=tab], [role=menuitem], summary, [role=separator], [tabindex]");
 }
 
 /** `[` / `]`: the newer / older request beside the open one, without focusing the list. */
@@ -153,15 +200,45 @@ const POPUP_OPEN = '[aria-haspopup][aria-expanded="true"], [role="combobox"][ari
  * window listener runs the DOM no longer shows it: a capture-phase listener (initShellKeys) takes
  * the snapshot first.
  */
-let popupSnap: { e: KeyboardEvent; open: boolean } | null = null;
+let popupSnap: { e: KeyboardEvent; open: boolean; dialog: boolean } | null = null;
+
+/** An open modal dialog (the source viewer). Like a popup, its own Esc handler closes it first. */
+const DIALOG_OPEN = "dialog[open]";
 
 function snapPopups(e: KeyboardEvent): void {
-  popupSnap = e.key === "Escape" ? { e, open: !!document.querySelector(POPUP_OPEN) } : null;
+  popupSnap =
+    e.key === "Escape"
+      ? { e, open: !!document.querySelector(POPUP_OPEN), dialog: !!document.querySelector(DIALOG_OPEN) }
+      : null;
 }
 
 function popupOpenAt(e?: KeyboardEvent): boolean {
   if (e && popupSnap?.e === e) return popupSnap.open;
   return typeof document !== "undefined" && !!document.querySelector(POPUP_OPEN);
+}
+
+function dialogOpenAt(e?: KeyboardEvent): boolean {
+  if (e && popupSnap?.e === e) return popupSnap.dialog;
+  return typeof document !== "undefined" && !!document.querySelector(DIALOG_OPEN);
+}
+
+/**
+ * Whether Esc belongs to something other than the shell's back chain. Pure. The dialog's own keydown
+ * handler closes it and Preact re-renders before the window listener runs, which detaches the focused
+ * element (so `closest("dialog")` on the target finds nothing): the capture-time snapshot decides.
+ */
+export function escapeOwnedElsewhere(s: { inDialog: boolean; dialogOpen: boolean; popupOpen: boolean }): boolean {
+  return s.inDialog || s.dialogOpen || s.popupOpen;
+}
+
+/**
+ * Where Esc goes back to from a subject. Pure. A compare returns to its B (the request `c` / `d` /
+ * `c c` opened it from); a request closes to the list. null = not a subject this handles.
+ */
+export function subjectBack(r: Route): { kind: "trace"; id: string } | { kind: "close" } | null {
+  if (r.view === "compare") return { kind: "trace", id: r.b };
+  if (r.view === "trace") return { kind: "close" };
+  return null;
 }
 
 /**
@@ -171,8 +248,10 @@ function popupOpenAt(e?: KeyboardEvent): boolean {
  */
 function escapeStep(e?: KeyboardEvent): (() => void) | null {
   const el = targetEl(e);
-  if (el?.closest("dialog")) return null;
-  if (popupOpenAt(e)) return null;
+  if (
+    escapeOwnedElsewhere({ inDialog: !!el?.closest("dialog"), dialogOpen: dialogOpenAt(e), popupOpen: popupOpenAt(e) })
+  )
+    return null;
   const r = route.peek();
   if (builderOpen.peek()) return closeBuilder;
   if (r.view === "trace" && (highlight.peek() || selectedHopId.peek())) {
@@ -188,7 +267,9 @@ function escapeStep(e?: KeyboardEvent): (() => void) | null {
     };
   }
   if (r.since) return () => setSince(undefined);
-  if (r.view === "trace" || r.view === "compare") return closeSubject;
+  const back = subjectBack(r);
+  if (back?.kind === "trace") return () => void loadTrace(back.id, "user", { replace: true });
+  if (back) return closeSubject;
   if (r.view === "overview" && r.routeKey) return () => go({ view: "overview" });
   if (r.view === "queries" && r.shape) return closeShape;
   return null;
@@ -341,6 +422,11 @@ export function initShellKeys(): () => void {
       },
       hint: "open",
     }),
+    register("list", " ", "Peek the request under the cursor (Space again closes it)", () => peek(), {
+      when: (e) =>
+        logVisible() && spaceIsOurs(e) && peekStep(logCursor.peek(), logRows.peek(), route.peek(), peekedId) !== null,
+      hint: "peek",
+    }),
     register("subject", "[", "Newer request", () => stepSubject(-1), {
       when: () => route.peek().view === "trace",
       hint: "newer/older",
@@ -360,5 +446,6 @@ export function initShellKeys(): () => void {
     document.removeEventListener("focusout", onBlur);
     window.removeEventListener("keydown", snapPopups, true);
     popupSnap = null;
+    peekedId = null;
   };
 }

@@ -25,6 +25,35 @@
   color: var(--muted);
 }
 
+.builder-drawer-note {
+  margin: 0;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+/*
+ * The subject under an open builder is the request that was open before it, not the builder's
+ * result: dimmed (still readable, never hidden) until Send replaces it. Pointing at it or tabbing
+ * into it brings it back to full strength.
+ */
+.builder-drawer.dims-subject ~ :not(.cmp-pick) {
+  opacity: 0.45;
+  transition: opacity 120ms ease-out;
+}
+
+.builder-drawer.dims-subject ~ :not(.cmp-pick):hover,
+.builder-drawer.dims-subject ~ :not(.cmp-pick):focus-within {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .builder-drawer.dims-subject ~ :not(.cmp-pick) {
+    transition: none;
+  }
+}
+
 /* ============================================================ request header */
 
 .rh {

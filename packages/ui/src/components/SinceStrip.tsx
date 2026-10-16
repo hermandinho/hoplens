@@ -9,6 +9,7 @@ import {
   epochLabel,
   latestEdit,
   nowTick,
+  otherVerdictsByEpoch,
   pctText,
   refreshRegressions,
   regressionId,
@@ -153,6 +154,11 @@ export function VerdictRow({ r, traces }: { r: RouteRegression; traces: readonly
 
 /* ------------------------------------------------------------ overview strip */
 
+/** Verdicts that moved (regressed or improved), in their given order. Pure. */
+export function movedOf(verdicts: readonly RouteRegression[]): RouteRegression[] {
+  return verdicts.filter((r) => r.status === "regressed" || r.status === "improved" || r.fixes !== undefined);
+}
+
 /** The strip's edit dismissed with ×; a newer edit brings it back. */
 const dismissedStrip = signal<number | null>(null);
 const STRIP_ROWS = 3;
@@ -172,10 +178,11 @@ export function SinceStrip() {
   if (scoped === undefined && dismissedStrip.value === id) return null;
   const verdicts = verdictsByEpoch.value.get(id) ?? [];
   const traces = tracesState.value;
-  const moved = verdicts.filter((r) => r.status === "regressed" || r.status === "improved");
+  const moved = movedOf(verdicts);
+  const drift = movedOf(otherVerdictsByEpoch.value.get(id) ?? []).length;
   const shown = moved.slice(0, STRIP_ROWS);
   const count = (s: RouteRegression["status"]) => verdicts.filter((r) => r.status === s).length;
-  const unchanged = count("unchanged");
+  const unchanged = verdicts.filter((r) => r.status === "unchanged" && r.fixes === undefined).length;
   const waiting = count("insufficient");
   const silent = count("no-traffic");
   const added = new Map<string, RouteRegression["findings"]["added"][number]>();
@@ -277,6 +284,16 @@ export function SinceStrip() {
           </span>
         )}
         {silent > 0 && <span class="dim">? {silent} affected, no traffic since</span>}
+        {drift > 0 && (
+          <button
+            type="button"
+            class="link-btn"
+            onClick={() => go({ view: "changes", epoch: String(id) })}
+            title="Routes this edit doesn't touch that still moved (traffic drift, not this edit); Changes lists them"
+          >
+            {drift} other route{drift === 1 ? "" : "s"} moved (not this edit)
+          </button>
+        )}
         {verdicts.length === 0 && (
           <span class="dim">
             No route compared yet: each needs {regressionRule.value?.minN ?? 3} warm requests on both sides of the edit.

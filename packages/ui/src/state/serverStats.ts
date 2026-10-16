@@ -1,4 +1,4 @@
-import { effect, signal } from "@preact/signals";
+import { batch, effect, signal } from "@preact/signals";
 import { HoplensApiError, api } from "../api/client";
 import type {
   EpochStats,
@@ -10,6 +10,7 @@ import type {
   TimeBucket,
 } from "../api/types";
 import { clearedAt, liveActivity, throttle } from "./activity";
+import { route } from "./router";
 import {
   type ErrorTally,
   type FindingGroup,
@@ -33,6 +34,35 @@ export type ServerStatsState = "idle" | "loading" | "ready" | "error" | "unavail
 export const serverStats = signal<StatsResponse | null>(null);
 export const serverStatsState = signal<ServerStatsState>("idle");
 
+/**
+ * The core's own scoped snapshot (GET /api/stats?since=<epoch>, r4) for the route's since scope.
+ * null when the scope is off, the core predates the parameter, or the last scoped fetch failed
+ * (then `sinceScope` merges the unscoped snapshot's per-epoch stats itself).
+ */
+export const scopedServerStats = signal<StatsResponse | null>(null);
+/** Feature detection: false once a core answered a `?since=` request without `scope`. */
+let sinceSupported = true;
+
+function scopeEpoch(): number | undefined {
+  const s = route.peek().since;
+  if (s === undefined || s === "") return undefined;
+  const n = Number(s.split(":").pop());
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * The server's scoped stats for `since` when the core answered that exact scope, else null (the
+ * caller falls back to merging epochs client-side). Pure.
+ */
+export function coreScopedStats(
+  scoped: StatsResponse | null,
+  since: number,
+): { stats: StatsResponse; partial: boolean } | null {
+  const sc = scoped?.scope;
+  if (!scoped || !sc || sc.sinceEpoch !== since) return null;
+  return { stats: scoped, partial: sc.partial };
+}
+
 const REFRESH_MS = 1500;
 let inflight = false;
 let again = false;
@@ -45,10 +75,22 @@ export async function refreshServerStats(): Promise<void> {
   }
   inflight = true;
   if (!serverStats.value) serverStatsState.value = "loading";
+  // With a since scope on, ask the core for its own scoped snapshot alongside (best effort).
+  const since = sinceSupported ? scopeEpoch() : undefined;
+  const scopedReq = since === undefined ? null : api.stats(true, since).catch(() => null);
   try {
     const s = await api.stats(true);
-    serverStats.value = s;
-    serverStatsState.value = "ready";
+    const scoped = scopedReq ? await scopedReq : null;
+    batch(() => {
+      serverStats.value = s;
+      serverStatsState.value = "ready";
+      if (since === undefined) scopedServerStats.value = null;
+      else if (scoped) {
+        // A core that ignores `?since=` answers without `scope`: stop asking, the UI merges per epoch.
+        if (!scoped.scope) sinceSupported = false;
+        scopedServerStats.value = scoped.scope ? scoped : null;
+      }
+    });
   } catch (err) {
     // 404: a core without /api/stats. Stop asking; the client stats carry on.
     if (err instanceof HoplensApiError && err.status === 404) {
@@ -78,6 +120,16 @@ effect(() => {
 effect(() => {
   if (clearedAt.value === 0) return;
   serverStats.value = null;
+  scopedServerStats.value = null;
+});
+// A new since scope: fetch its scoped snapshot now rather than at the next request.
+effect(() => {
+  const since = route.value.since;
+  if (since === undefined) {
+    scopedServerStats.value = null;
+    return;
+  }
+  if (sinceSupported && serverStats.peek()) scheduleStatsRefresh();
 });
 
 /* ----------------------------------------------------------- pure helpers */
@@ -249,6 +301,7 @@ export function mergeFindingGroups(
       latestAt: Math.max(f.lastSeen, c?.latestAt ?? 0),
       firstAt: c?.firstAt ?? f.lastSeen,
       isNew: c?.isNew ?? false,
+      lastEpoch: Math.max(f.lastEpoch, c?.lastEpoch ?? Number.NEGATIVE_INFINITY),
     });
   }
   for (const c of byFp.values()) out.push(c);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { editsOnly, scopesFor, stepEpoch } from "../src/state/shellKeys";
+import { editsOnly, escapeOwnedElsewhere, scopesFor, stepEpoch, subjectBack } from "../src/state/shellKeys";
 
 /* WP1b shell keys: e / E scope stepping and the scopes a route makes live.
  * Run: pnpm --filter @hoplens/ui exec vitest run test/shellKeys.test.ts */
@@ -43,5 +43,19 @@ describe("scopes from the route", () => {
   test("queries is a list, with a subject when a shape is open", () => {
     expect(s({ view: "queries" })).toEqual(["list"]);
     expect(s({ view: "queries", shape: "db:SELECT 1" })).toEqual(["list", "subject"]);
+  });
+});
+
+describe("Esc: dialogs own it, a compare goes back to its request", () => {
+  test("a dialog open when Esc started owns the key even after its focused node was detached", () => {
+    expect(escapeOwnedElsewhere({ inDialog: false, dialogOpen: true, popupOpen: false })).toBe(true);
+    expect(escapeOwnedElsewhere({ inDialog: false, dialogOpen: false, popupOpen: false })).toBe(false);
+  });
+  test("Esc from a compare (c / d / c c) returns to B, the request it was opened from", () => {
+    expect(subjectBack({ view: "compare", a: "tA", b: "tB" })).toEqual({ kind: "trace", id: "tB" });
+  });
+  test("Esc from a request closes it to the list", () => {
+    expect(subjectBack({ view: "trace", traceId: "t1" })).toEqual({ kind: "close" });
+    expect(subjectBack({ view: "requests" })).toBeNull();
   });
 });

@@ -20,6 +20,8 @@ export interface SourceLocation {
   file: string;
   line: number;
   column?: number;
+  /** "call-site": core captured the caller line (r4), so the UI must not re-search the source. */
+  via?: "call-site";
 }
 
 export interface CapturedError {
@@ -588,6 +590,8 @@ export interface EpochView {
   /** Route templates the change affects ("/api/orders/[id]"). */
   routes: string[];
   routesVia: EpochAffectedVia;
+  /** WP10: set on epochs restored from an earlier dev session (`persist: true`); absent for this one. */
+  session?: number;
 }
 
 export interface EpochsResponse {
@@ -619,6 +623,11 @@ export interface RegressionBucketDelta {
 }
 
 export interface RouteRegression {
+  /**
+   * UI-derived (state/epochs annotateFixes), never sent by core: this verdict brought the route back
+   * after a regression at that epoch (between the baseline and this edit): "fixed the e5 regression".
+   */
+  fixes?: number;
   /** "GET /api/products" (RouteStats.key). */
   key: string;
   method: string;
@@ -893,4 +902,11 @@ export interface PinsResponse {
 export interface ServerRouteStats {
   /** Requests counted in epochs this route no longer keeps (`all` leaves them out). Absent when none. */
   evicted?: number;
+}
+
+// r4 follow-ups -- GET /api/stats?since=<epoch> (core stats.ts snapshot({since})). A core that knows the
+// parameter echoes `scope`; an older one ignores it and answers the unscoped snapshot without it.
+export interface StatsResponse {
+  /** Present only on a `?since=` request a core understood: epochs >= sinceEpoch are counted. */
+  scope?: { sinceEpoch: number; partial: boolean };
 }

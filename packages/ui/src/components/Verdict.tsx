@@ -101,7 +101,7 @@ export function Verdict({ trace }: { trace: TraceRecord }) {
           file={v.location.file}
           line={v.location.line}
           note={note}
-          seek={v.callee}
+          seek={v.location.via === "call-site" ? undefined : v.callee}
           rev={trace.facts?.epoch ?? ""}
           onResolve={setHitLine}
         />

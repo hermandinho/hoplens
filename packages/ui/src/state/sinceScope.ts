@@ -2,7 +2,7 @@ import { computed } from "@preact/signals";
 import type { TraceSummary } from "../api/types";
 import { epochById, epochLabel, scopeStatsSince, sinceNumber, tracesSince } from "./epochs";
 import { route } from "./router";
-import { serverErrorTally, serverRouteStats, serverStats } from "./serverStats";
+import { coreScopedStats, scopedServerStats, serverErrorTally, serverRouteStats, serverStats } from "./serverStats";
 import {
   type ErrorTally,
   type FindingGroup,
@@ -53,8 +53,9 @@ export const scopedTraces = computed<TraceSummary[] | null>(() => {
 });
 
 /**
- * The Overview's numbers inside the scope: routes and errors from the server's per-epoch stats
- * (merged over the epochs in scope), else this tab's requests; findings from this tab's requests.
+ * The Overview's numbers inside the scope: routes and errors from the server's scoped snapshot
+ * (GET /api/stats?since=, which also scopes the exemplars) when the core supports it, else from its
+ * per-epoch stats merged here, else this tab's requests; findings from this tab's requests.
  * null when the scope is off.
  */
 export const overviewScope = computed<OverviewScope | null>(() => {
@@ -64,7 +65,7 @@ export const overviewScope = computed<OverviewScope | null>(() => {
   const findings = rankFindingGroups(groupFindings(traces));
   const s = serverStats.value;
   if (statsSource.value === "server" && s) {
-    const scoped = scopeStatsSince(s, since);
+    const scoped = coreScopedStats(scopedServerStats.value, since) ?? scopeStatsSince(s, since);
     const last = new Map<string, string>();
     for (const r of clientRouteStats.value) last.set(r.key, r.lastTraceId);
     return {

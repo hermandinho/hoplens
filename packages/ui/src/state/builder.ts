@@ -2,7 +2,8 @@ import { computed, effect, signal } from "@preact/signals";
 import { api } from "../api/client";
 import type { MethodInfo, RouteInfo, RunResult, SchemaInfo } from "../api/types";
 import { REPLAY_N, type ReplayRequest, startReplay } from "./replay";
-import { loadTrace, metaState, routesState, selectedRouteKey } from "./store";
+import { type Route, route } from "./router";
+import { builderOpen, loadTrace, metaState, routesState, selectedRouteKey } from "./store";
 
 export interface KV {
   key: string;
@@ -261,6 +262,22 @@ export async function sendRequest(): Promise<void> {
     sending.value = false;
   }
 }
+
+/**
+ * Does the open builder dim the subject under it (plan 5: "the builder dims the old trace")? A
+ * request or compare that was open before the drawer is not this request's result, so it is shown
+ * dimmed until Send replaces it with the builder's own trace. Pure.
+ */
+export function builderDimsSubject(open: boolean, r: Route, ownTraceId: string | undefined): boolean {
+  if (!open) return false;
+  if (r.view === "compare") return true;
+  return r.view === "trace" && r.traceId !== ownTraceId;
+}
+
+/** The live form of `builderDimsSubject`. */
+export const builderDims = computed(() =>
+  builderDimsSubject(builderOpen.value, route.value, lastRunResult.value?.traceId),
+);
 
 export function setBuilderTab(tab: BuilderTab): void {
   builderTab.value = tab;

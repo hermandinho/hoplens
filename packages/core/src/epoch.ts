@@ -20,6 +20,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { type ChunkDiff, ChunkIndex, type ChunkUpdate, dirIdent, serverDirs } from "./chunkindex";
 import { type SourceChange, type SourceWatcher, watchSources } from "./sourcewatch";
 
 /**
@@ -27,10 +28,21 @@ import { type SourceChange, type SourceWatcher, watchSources } from "./sourcewat
  * the build-output files it saw change since the last call (`drainNames`), used as attribution
  * candidates when no source change was seen.
  */
-export type MtimeProbe = (() => number) & { drainNames?: () => string[] };
+export type MtimeProbe = (() => number) & {
+  drainNames?: () => string[];
+  /** WP9c: absolute paths of the build-output files written since the last call (for the chunk diff). */
+  drainPaths?: () => { paths: string[]; overflow: boolean };
+};
 
 /** Build-output names kept between two drains. */
 const MAX_PROBE_NAMES = 100;
+/** Build-output paths kept between two drains for the chunk diff; past this the diff is untrusted. */
+const MAX_PROBE_PATHS = 2000;
+
+export interface DistProbeOptions {
+  /** Called when a watcher on an output dir is (re)armed, e.g. after `rm -rf .next`. */
+  onArm?: (dir: string) => void;
+}
 
 /** True for a changed file that means "server code was rebuilt". Exported for tests. */
 export function isRebuildFile(filename: string): boolean {
@@ -43,36 +55,62 @@ export function distMtimeProbe(
   distDir: string,
   clock: () => number = Date.now,
   retryMs = 2000,
+  opts: DistProbeOptions = {},
 ): MtimeProbe {
-  const base = path.join(root, distDir);
-  const dirs = [path.join(base, "dev", "server"), path.join(base, "server")];
-  const watchers = new Map<string, fs.FSWatcher>();
+  const dirs = serverDirs(root, distDir);
+  const watchers = new Map<string, { w: fs.FSWatcher; ident: string }>();
   const names = new Set<string>();
+  const paths = new Set<string>();
+  let overflow = false;
   let last = 0;
   let armedAt = Number.NEGATIVE_INFINITY;
+  const drop = (dir: string) => {
+    const cur = watchers.get(dir);
+    if (!cur) return;
+    try {
+      cur.w.close();
+    } catch {
+      /* already closed */
+    }
+    watchers.delete(dir);
+  };
   const arm = () => {
     for (const dir of dirs) {
-      if (watchers.has(dir)) continue;
+      const ident = dirIdent(dir);
+      const cur = watchers.get(dir);
+      // `rm -rf .next` doesn't always error the watcher (Linux just stops delivering events): a dir
+      // whose identity changed is a new dir and gets a new watcher.
+      if (cur && cur.ident === ident) continue;
+      if (cur) drop(dir);
+      if (!ident) continue; // not created yet: retried later
       let w: fs.FSWatcher;
       try {
         w = fs.watch(dir, { persistent: false, recursive: true }, (_ev, f) => {
           if (f == null || !isRebuildFile(String(f))) return;
           last = clock();
           if (names.size < MAX_PROBE_NAMES) names.add(String(f).replace(/\\/g, "/"));
+          if (paths.size < MAX_PROBE_PATHS) paths.add(path.join(dir, String(f)));
+          else overflow = true;
         });
       } catch {
-        continue; // not created yet (or recursive watch unsupported): retried later
+        continue; // recursive watch unsupported, or gone again: retried later
       }
       w.on("error", () => {
-        w.close();
-        watchers.delete(dir); // e.g. `rm -rf .next`: re-armed by a later probe
+        // e.g. `rm -rf .next` on Windows: re-armed by a later probe
+        if (watchers.get(dir)?.w === w) drop(dir);
       });
-      watchers.set(dir, w);
+      watchers.set(dir, { w, ident });
+      try {
+        opts.onArm?.(dir);
+      } catch {
+        /* best effort */
+      }
     }
   };
   const probe: MtimeProbe = () => {
     const t = clock();
-    if (watchers.size < dirs.length && t - armedAt >= retryMs) {
+    // Throttled: also re-checks the identity of armed dirs, so a wiped and recreated dir is re-armed.
+    if (t - armedAt >= retryMs) {
       armedAt = t;
       arm();
     }
@@ -81,6 +119,12 @@ export function distMtimeProbe(
   probe.drainNames = () => {
     const out = [...names];
     names.clear();
+    return out;
+  };
+  probe.drainPaths = () => {
+    const out = { paths: [...paths], overflow };
+    paths.clear();
+    overflow = false;
     return out;
   };
   return probe;
@@ -120,6 +164,8 @@ export type EpochVia =
   | "start"
   /** Source files saved (content changed) before this rebuild, seen by the source watcher. */
   | "src-watch"
+  /** No confirmed source save; the changed modules in the rebuilt chunks name the files (WP9c). */
+  | "chunk-diff"
   /** No source change seen; hints derived from the rebuilt chunk names. */
   | "candidates"
   /** A rebuild with nothing to attribute it to. */
@@ -141,6 +187,12 @@ export interface EpochInfo {
   via: EpochVia;
   /** Build-output hints (route or module paths) from rebuilt chunk names. */
   candidates: string[];
+  /**
+   * WP9c: set when the module-level chunk diff was trusted. `routes` = compiled routes whose chunks
+   * contain a changed module; `compiled` = every route compiled at that point. Internal: api/epochs
+   * turns it into `routes` / `routesVia: "chunks"` and leaves it out of the response.
+   */
+  chunkScope?: { routes: string[]; compiled: string[] };
 }
 
 /** Files listed per epoch. */
@@ -153,6 +205,15 @@ export interface EpochTrackerOptions {
   sources?: SourceWatcher;
   /** EpochInfo entries kept (newest win). Default 50. */
   maxInfos?: number;
+  /** WP9c: module-level diff of the rebuilt chunks (no-op rebuilds create no epoch; chunk-diff attribution). */
+  chunks?: ChunkDiffer;
+}
+
+/** The part of ChunkIndex the tracker uses (stubbed in tests). */
+export interface ChunkDiffer {
+  update(paths: readonly string[], overflow?: boolean): ChunkUpdate;
+  describe(ids: Iterable<string>, trusted?: boolean): ChunkDiff;
+  close?(): void;
 }
 
 export interface EpochObservation {
@@ -173,6 +234,10 @@ export class EpochTracker {
   private readonly infos: EpochInfo[] = [];
   private readonly listeners = new Set<EpochListener>();
   private readonly sources?: SourceWatcher;
+  private readonly chunks?: ChunkDiffer;
+  /** Edits (modified/removed modules) seen in absorbed rebuilds, owed to the next bump decision. */
+  private readonly carried = new Set<string>();
+  private carriedUntrusted = false;
   private readonly maxInfos: number;
 
   constructor(
@@ -184,6 +249,7 @@ export class EpochTracker {
     opts: EpochTrackerOptions = {},
   ) {
     this.sources = opts.sources;
+    this.chunks = opts.chunks;
     this.maxInfos = Math.max(1, opts.maxInfos ?? 50);
     this.infos.push({
       id: 0,
@@ -224,32 +290,90 @@ export class EpochTracker {
   /** Release the source watcher (tests, shutdown). */
   close(): void {
     this.sources?.close();
+    this.chunks?.close?.();
   }
 
-  private bump(t: number, mtime: number, names: string[]): void {
-    this.epoch++;
-    let changes: SourceChange[] = [];
+  private drainSources(t: number): SourceChange[] {
     try {
-      changes = this.sources?.drain(t) ?? [];
+      return this.sources?.drain(t) ?? [];
     } catch {
-      /* attribution is best effort */
+      return []; /* attribution is best effort */
     }
-    const files = changes.map((c) => c.file).sort();
-    const candidates = candidatesFromChunks(names);
+  }
+
+  /**
+   * Diff the written chunks. Returns the module ids that changed for this decision and whether that's
+   * trustworthy, or undefined without a chunk index. `absorb` = this rebuild won't bump: its edits are
+   * carried to the next decision (a new-route compile can be the first to write an edited module).
+   */
+  private chunkDiff(absorb: boolean): { edits: string[]; added: string[]; trusted: boolean } | undefined {
+    if (!this.chunks) return undefined;
+    let u: ChunkUpdate;
+    try {
+      const d = this.probe.drainPaths?.();
+      if (!d) return undefined;
+      u = this.chunks.update(d.paths, d.overflow);
+    } catch {
+      return undefined;
+    }
+    if (absorb) {
+      for (const id of [...u.modified, ...u.removed]) this.carried.add(id);
+      if (!u.trusted) this.carriedUntrusted = true;
+      return undefined;
+    }
+    const edits = new Set([...u.modified, ...u.removed, ...this.carried]);
+    const trusted = u.trusted && !this.carriedUntrusted;
+    this.carried.clear();
+    this.carriedUntrusted = false;
+    return { edits: [...edits], added: u.added, trusted };
+  }
+
+  private bump(
+    t: number,
+    mtime: number,
+    names: string[],
+    diff?: { edits: string[]; added: string[]; trusted: boolean },
+  ): void {
+    this.epoch++;
+    const changes = this.drainSources(t);
+    let files = changes.map((c) => c.file).sort();
+    let deleted = changes.filter((c) => c.kind === "delete").map((c) => c.file);
+    let candidates = candidatesFromChunks(names);
+    let via: EpochVia = files.length ? "src-watch" : candidates.length ? "candidates" : "unknown";
+    let chunkScope: EpochInfo["chunkScope"];
+    if (diff?.trusted && this.chunks) {
+      let d: ChunkDiff | undefined;
+      try {
+        // Files and routes come from edited modules only. Added ones (seen for the first time: a new
+        // import, or a chunk the watcher missed) only confirm a save the watcher saw.
+        d = this.chunks.describe(diff.edits, true);
+      } catch {
+        d = undefined;
+      }
+      if (d) {
+        // A save the watcher saw is kept only if the rebuilt code confirms it (or it deleted a file); a
+        // save that changed no server module (formatting, a client-only file) is dropped.
+        const confirmed = new Set(d.files);
+        if (diff.added.length) for (const f of this.chunks.describe(diff.added, true).files) confirmed.add(f);
+        const saved = new Set(changes.filter((c) => c.kind === "delete" || confirmed.has(c.file)).map((c) => c.file));
+        files = [...new Set([...d.files, ...saved])].sort();
+        deleted = deleted.filter((f) => saved.has(f));
+        if (!files.length) candidates = [...new Set([...d.external, ...candidates])].sort();
+        via = saved.size ? "src-watch" : files.length ? "chunk-diff" : candidates.length ? "candidates" : "unknown";
+        chunkScope = { routes: d.routes, compiled: d.compiled };
+      }
+    }
     const info: EpochInfo = {
       id: this.epoch,
       at: t,
       rebuiltAt: mtime,
       files: files.slice(0, MAX_EPOCH_FILES),
-      deleted: changes
-        .filter((c) => c.kind === "delete")
-        .map((c) => c.file)
-        .sort()
-        .slice(0, MAX_EPOCH_FILES),
+      deleted: deleted.sort().slice(0, MAX_EPOCH_FILES),
       moreFiles: Math.max(0, files.length - MAX_EPOCH_FILES),
-      via: files.length ? "src-watch" : candidates.length ? "candidates" : "unknown",
+      via,
       candidates,
     };
+    if (chunkScope) info.chunkScope = chunkScope;
     this.infos.push(info);
     if (this.infos.length > this.maxInfos) this.infos.shift();
     for (const fn of this.listeners) {
@@ -283,7 +407,17 @@ export class EpochTracker {
         const settling = after(t) || after(m);
         // Chunk names collected since the last change belong to this one, bump or not.
         const names = this.probe.drainNames?.() ?? [];
-        if (!newCompile && !settling) this.bump(t, m, names);
+        const absorb = newCompile || settling;
+        const diff = this.chunkDiff(absorb);
+        if (!absorb) {
+          if (diff?.trusted && diff.edits.length === 0) {
+            // WP9c: chunks were rewritten but no existing module's code changed (format-on-save,
+            // `touch`, a client-only edit, or the late writes of a route compiled for the first time,
+            // which only add modules): no epoch. The saves behind it are dropped so they can't be pinned on
+            // the next real rebuild.
+            this.drainSources(Math.min(t, m));
+          } else this.bump(t, m, names, diff);
+        }
       }
     }
     if (newCompile) this.lastNewCompileAt = t;
@@ -303,7 +437,12 @@ export class EpochTracker {
  * The runtime's tracker: the built-chunk detector as the rebuild signal plus a source watcher for
  * attribution. `sources: false` skips the watcher (tests, or a project where watching isn't wanted).
  */
-export function createEpochTracker(root: string, distDir: string, opts: { sources?: boolean } = {}): EpochTracker {
+export function createEpochTracker(
+  root: string,
+  distDir: string,
+  /** `chunks`: build the module-level chunk index. Default: on, except when NODE_ENV=production. */
+  opts: { sources?: boolean; chunks?: boolean } = {},
+): EpochTracker {
   let sources: SourceWatcher | undefined;
   if (opts.sources !== false) {
     try {
@@ -312,5 +451,16 @@ export function createEpochTracker(root: string, distDir: string, opts: { source
       sources = undefined; // attribution is best effort; epochs and cold facts work without it
     }
   }
-  return new EpochTracker(distMtimeProbe(root, distDir), 250, Date.now, 2000, 5000, { sources });
+  let chunks: ChunkIndex | undefined;
+  // A production server (HOPLENS_FORCE=1) never rewrites its build output, so the index could never
+  // diff anything: don't spend the background prime (up to 96 MB read) on it.
+  if (opts.chunks ?? process.env.NODE_ENV !== "production") {
+    try {
+      chunks = new ChunkIndex(root, distDir);
+    } catch {
+      chunks = undefined; // the module diff is best effort; the chunk detector alone still bumps
+    }
+  }
+  const probe = distMtimeProbe(root, distDir, Date.now, 2000, { onArm: (dir) => chunks?.rearm(dir) });
+  return new EpochTracker(probe, 250, Date.now, 2000, 5000, { sources, chunks });
 }

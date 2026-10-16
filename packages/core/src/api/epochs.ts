@@ -22,13 +22,18 @@ import { type ApiEndpoint, type ApiHandle, sendJson } from "./module";
 
 /** How the affected routes of an epoch were found. */
 export type AffectedVia =
+  /**
+   * WP9c: compiled routes whose chunks contain a changed module (route -> chunks -> modules), plus the
+   * import closure for routes Next hasn't compiled yet.
+   */
+  | "chunks"
   /** Import closure of each route file contains a changed source file. */
   | "imports"
   /** Route files named by rebuilt chunks (no source change seen). */
   | "candidates"
   | "none";
 
-export interface EpochView extends EpochInfo {
+export interface EpochView extends Omit<EpochInfo, "chunkScope"> {
   /** Route templates ("/api/orders/[id]") the change affects, sorted. */
   routes: string[];
   routesVia: AffectedVia;
@@ -72,7 +77,8 @@ class EpochsService {
 
   view(info: EpochInfo): EpochView {
     const a = this.affected(info);
-    return { ...info, routes: a.routes, routesVia: a.via };
+    const { chunkScope: _internal, ...rest } = info;
+    return { ...rest, routes: a.routes, routesVia: a.via };
   }
 
   list(limit?: number): EpochsResponse {
@@ -134,10 +140,23 @@ class EpochsService {
   }
 
   private computeAffected(info: EpochInfo): { routes: string[]; via: AffectedVia } {
-    if (info.id === 0 || (!info.files.length && !info.candidates.length)) return { routes: [], via: "none" };
+    if (info.id === 0) return { routes: [], via: "none" };
     const routes = this.rt.discover().routes;
     const byFile = new Map(routes.map((r) => [r.file.replace(/\\/g, "/"), r.nextRoute]));
     const out = new Set<string>();
+    if (info.chunkScope) {
+      // The bundler's own answer for every compiled route; routes not compiled yet (never hit, or
+      // disposed) can still import the change, so they go through the import graph.
+      const hit = new Set(info.chunkScope.routes);
+      const compiled = new Set(info.chunkScope.compiled);
+      for (const r of routes) if (hit.has(r.nextRoute)) out.add(r.nextRoute);
+      if (info.files.length) {
+        const rest = [...byFile].filter(([, route]) => !compiled.has(route)).map(([f]) => f);
+        if (rest.length) for (const f of this.graph.affected(rest, info.files)) out.add(byFile.get(f)!);
+      }
+      return { routes: [...out].sort(), via: "chunks" };
+    }
+    if (!info.files.length && !info.candidates.length) return { routes: [], via: "none" };
     if (info.files.length) {
       for (const f of this.graph.affected([...byFile.keys()], info.files)) out.add(byFile.get(f)!);
       return { routes: [...out].sort(), via: "imports" };

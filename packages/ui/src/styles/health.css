@@ -1,0 +1,216 @@
+/* WP6 health strip in the top bar's status slot: loop p99, rss, process errors, live rate. */
+
+.health-strip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.health-stale .health-loop,
+.health-stale .health-mem {
+  opacity: 0.55;
+}
+
+.health-key {
+  color: var(--dim);
+}
+
+.health-loop .mono,
+.health-mem .mono,
+.health-rate {
+  color: var(--muted);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Severity only as a dot plus the value in a tinted chip (plan 3.10). */
+.health-loop-warn,
+.health-loop-err {
+  padding: 0 6px;
+  border-radius: 999px;
+}
+
+.health-loop-warn {
+  background: var(--warn-bg);
+}
+
+.health-loop-err {
+  background: var(--err-bg);
+}
+
+.health-loop-warn .mono {
+  color: var(--warn);
+}
+
+.health-loop-err .mono {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.health-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.health-dot-warn {
+  background: var(--warn);
+}
+
+.health-dot-err {
+  background: var(--err);
+}
+
+.health-rate {
+  margin-left: 2px;
+}
+
+.health-errors {
+  position: relative;
+  display: inline-flex;
+}
+
+.health-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--err-bg);
+  color: var(--fg);
+  font: 500 var(--fs-label) / 18px var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.health-chip:hover {
+  border-color: var(--line-3);
+}
+
+.health-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.health-chip[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.health-chip-unseen {
+  color: var(--err);
+}
+
+.health-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(520px, 90vw);
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--raise);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px var(--shadow);
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  text-align: left;
+}
+
+.health-pop:focus {
+  outline: none;
+}
+
+.health-pop:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.health-pop-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.health-pop-head b {
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.health-pop-esc {
+  margin-left: auto;
+  font-size: var(--fs-label);
+}
+
+.health-pop-note {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+}
+
+.health-pop-note code {
+  font: var(--fs-label) var(--font-mono);
+}
+
+.health-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.health-err {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--err);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.health-err-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-label);
+}
+
+.health-err-kind {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.health-err-msg {
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.health-err-stack summary {
+  cursor: pointer;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.health-err-stack pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--panel-2);
+  border-radius: 4px;
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  white-space: pre;
+}

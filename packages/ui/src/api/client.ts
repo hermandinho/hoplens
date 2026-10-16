@@ -1,5 +1,7 @@
 import type {
   Discovery,
+  HealthSnapshot,
+  HealthTick,
   Meta,
   QueriesResponse,
   RunInput,
@@ -60,6 +62,8 @@ export const api = {
   /** Cross-request query / host fingerprints. */
   queries: (limit = 500) => get<QueriesResponse>(`/queries?limit=${limit}`),
   trace: (id: string) => get<TraceRecord>(`/traces/${encodeURIComponent(id)}`),
+  /** Process health (event loop, memory, GC, process errors). 404 on an older core. */
+  health: () => get<HealthSnapshot>("/health"),
   rawRequest: (id: string) =>
     get<{ method: string; url: string; headers: Record<string, string>; body?: string }>(
       `/traces/${encodeURIComponent(id)}/request`,
@@ -87,7 +91,23 @@ export type LiveEvent =
   | { type: "done"; trace: TraceSummary }
   /** A finished trace changed (late spans; facts.droppedSpans updated). Throttled server-side to 1 per 250 ms per trace. */
   | { type: "update"; trace: TraceSummary }
-  | { type: "clear" };
+  | { type: "clear" }
+  /** Process health tick (WP6), about every 2s while connected. */
+  | { type: "health"; tick: HealthTick };
+
+/*
+ * Extra subscribers to the one live stream, so a feature (state/health.ts) can read its own events
+ * without a second EventSource and without routing through the store's handler.
+ */
+const liveTaps = new Set<(ev: LiveEvent) => void>();
+
+/** Receive every live event (including `hello` after each reconnect). Returns the unsubscribe. */
+export function tapLive(fn: (ev: LiveEvent) => void): () => void {
+  liveTaps.add(fn);
+  return () => {
+    liveTaps.delete(fn);
+  };
+}
 
 export interface LiveConnection {
   close(): void;
@@ -99,9 +119,19 @@ export interface LiveConnection {
  * handle closes both the EventSource and any pending reconnect timer.
  */
 export function openLive(
-  onEvent: (ev: LiveEvent) => void,
+  onEventMain: (ev: LiveEvent) => void,
   onStatus?: (status: "live" | "reconnecting") => void,
 ): LiveConnection {
+  const onEvent = (ev: LiveEvent) => {
+    onEventMain(ev);
+    for (const tap of liveTaps) {
+      try {
+        tap(ev);
+      } catch {
+        /* a tap must not break the stream */
+      }
+    }
+  };
   let source: EventSource | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let delay = 1000;
@@ -134,6 +164,13 @@ export function openLive(
       }
     });
     source.addEventListener("clear", () => onEvent({ type: "clear" }));
+    source.addEventListener("health", (e) => {
+      try {
+        onEvent({ type: "health", tick: JSON.parse((e as MessageEvent).data) });
+      } catch {
+        /* ignore malformed */
+      }
+    });
     source.onopen = () => {
       delay = 1000;
     };

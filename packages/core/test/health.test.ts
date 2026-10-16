@@ -12,6 +12,7 @@ import { attachHealthEvents } from "../src/api/health";
 import { HealthMonitor } from "../src/health";
 import type { Runtime } from "../src/runtime";
 import { handleUi } from "../src/server";
+import { TraceStore } from "../src/store";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function block(ms: number) {
@@ -258,7 +259,7 @@ describe("attachHealthEvents", () => {
 
 describe("GET /api/health and /api/health/stream", () => {
   const health = new HealthMonitor({ enabled: true, sampleMs: 100 });
-  const rt = { options: {}, health } as unknown as Runtime;
+  const rt = { options: {}, health, store: new TraceStore(10) } as unknown as Runtime;
   let server: http.Server;
   let base: string;
 
@@ -308,5 +309,32 @@ describe("GET /api/health and /api/health/stream", () => {
     const until = Date.now() + 2000;
     while (health.listenerCount("sample") > 0 && Date.now() < until) await wait(20);
     expect(health.listenerCount("sample")).toBe(0);
+  });
+
+  test("the main /api/events stream carries health ticks too, and detaches on close", async () => {
+    const ac = new AbortController();
+    const res = await fetch(`${base}/api/events`, { signal: ac.signal });
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let text = "";
+    const deadline = Date.now() + 3000;
+    while (!/event: health\ndata: .*\n\n/.test(text) && Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      text += dec.decode(value);
+    }
+    expect(text).toContain("event: hello");
+    const data = /event: health\ndata: (.*)\n\n/.exec(text)?.[1];
+    expect(data).toBeDefined();
+    const tick = JSON.parse(data!);
+    expect(tick.current.rss).toBeGreaterThan(0);
+    expect(tick.errorCounts).toEqual({ uncaughtException: 0, unhandledRejection: 0 });
+    expect(health.listenerCount("processError")).toBe(1);
+    ac.abort();
+    await reader.cancel().catch(() => {});
+    const until = Date.now() + 2000;
+    while (health.listenerCount("processError") > 0 && Date.now() < until) await wait(20);
+    expect(health.listenerCount("processError")).toBe(0);
   });
 });

@@ -24,7 +24,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'UI tested via Playwright in the e2e workspace — pnpm --filter hoplens-e2e e2e'"
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "test": "node scripts/check-tokens.mjs && vitest run"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

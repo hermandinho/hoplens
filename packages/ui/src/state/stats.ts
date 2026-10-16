@@ -464,9 +464,10 @@ export function sparkSeries(
 
 export function fmtMs(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms)) return "—";
-  if (ms >= 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
-  if (ms >= 10) return `${Math.round(ms)}ms`;
+  // Thresholds on the rounded value, so 999.6 reads "1.00s", not "1000ms" (and 9.96 "10ms").
+  if (ms >= 9_995) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms >= 999.5) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms >= 9.95) return `${Math.round(ms)}ms`;
   return `${ms.toFixed(1)}ms`;
 }
 

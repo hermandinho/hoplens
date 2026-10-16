@@ -24,7 +24,7 @@ import {
   statusClass,
   worseSeverity,
 } from "../state/stats";
-import { loadStatus, loadTrace, mainView, routesState, selectedTraceId, tracesState } from "../state/store";
+import { followLive, loadStatus, loadTrace, mainView, routesState, selectedTraceId, tracesState } from "../state/store";
 import { Skeleton } from "./Skeleton";
 
 /*
@@ -306,6 +306,25 @@ export function RequestLog({ variant, label }: { variant: LogVariant; label: str
     }, 40);
   });
 
+  // The open request's row in view: a deep link (#/r/<id>), Back/Forward or a click elsewhere
+  // (Overview, a finding) can select a request far down the list. Once per selection, and only
+  // once its row exists (a deep link lands before the list loads). Follow keeps to the live tail
+  // itself, so it is left alone.
+  const revealed = useRef<string | null>(null);
+  useSignalEffect(() => {
+    const id = selectedTraceId.value;
+    const list = logRows.value;
+    const el = scrollRef.current;
+    if (!id || revealed.current === id || !el || followLive.peek()) return;
+    const i = list.findIndex((t) => t.id === id);
+    if (i < 0) return;
+    revealed.current = id;
+    const top = i * rowH;
+    const header = variant === "dense" ? rowH : 0;
+    if (top < el.scrollTop || top + rowH > el.scrollTop + el.clientHeight - header)
+      el.scrollTop = Math.max(0, top - (el.clientHeight - header) / 2);
+  });
+
   // Scroll anchoring. New traces are prepended and rows are absolutely positioned, so the browser's
   // own anchoring can't help: without this every arrival slides the rows a scrolled-down reader is on.
   // Keep the row that was at the top of the viewport there. At scrollTop 0 the live tail flows in.
@@ -322,10 +341,13 @@ export function RequestLog({ variant, label }: { variant: LogVariant; label: str
     if (now >= 0 && now !== was) el.scrollTop += (now - was) * rowH;
   }, [rows, rowH]);
 
-  // A query change starts the list from the top again.
+  // A query change starts the list from the top again (not the mount: a remounted list may just
+  // have scrolled to the open request).
   const q = logQuery.value;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `q` is the trigger, not a value read
+  const lastQ = useRef(q);
   useEffect(() => {
+    if (lastQ.current === q) return;
+    lastQ.current = q;
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [q]);
 

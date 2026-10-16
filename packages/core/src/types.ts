@@ -19,6 +19,11 @@ export interface SourceLocation {
   file: string;
   line: number;
   column?: number;
+  /**
+   * How the line was found. "call-site": the caller frame captured at runtime (an N+1 through a
+   * per-item function points at its loop call), so consumers need not search the source for it.
+   */
+  via?: "call-site";
 }
 
 export interface CapturedError {

@@ -6,7 +6,7 @@ import * as epochsApi from "./api/epochs";
 import * as healthApi from "./api/health";
 import type { ApiModule } from "./api/module";
 import type { QueryKind } from "./queries";
-import { type QueryTarget, matchQuery, parseQuery } from "./query";
+import { type QueryTarget, inSinceScope, matchQuery, parseQuery, parseSinceParam } from "./query";
 import {
   type RunInput,
   RunInputError,
@@ -166,20 +166,32 @@ addRoute("GET", "/api/routes", ({ rt, url, res }) => {
 
 addRoute("GET", "/api/traces", ({ rt, url, res }) => {
   const q = url.searchParams.get("q");
-  if (!q || !q.trim()) return json(res, 200, rt.store.list());
+  // `?since=<epoch>` (or e<n>): only requests in epochs >= since, with or without `q`.
+  const since = parseSinceParam(url.searchParams.get("since"));
+  if (!q || !q.trim()) {
+    const list = rt.store.list();
+    return json(res, 200, since === undefined ? list : list.filter((t) => inSinceScope(t, since)));
+  }
   // Same array shape as the unfiltered list; dropped terms are reported in a header so the UI can
   // flag them without a second request.
   const query = parseQuery(q);
   const out = rt.store
     .records()
-    .filter((t) => matchQuery(query, recordTarget(t)))
+    .filter((t) => inSinceScope(t, since) && matchQuery(query, recordTarget(t)))
     .map(summarize);
   res.setHeader("x-hoplens-query-errors", encodeURIComponent(JSON.stringify(query.errors)));
   json(res, 200, out);
 });
 
 addRoute("GET", "/api/stats", ({ rt, url, res }) => {
-  json(res, 200, rt.stats.snapshot({ buckets: url.searchParams.get("buckets") === "1" }));
+  json(
+    res,
+    200,
+    rt.stats.snapshot({
+      buckets: url.searchParams.get("buckets") === "1",
+      since: parseSinceParam(url.searchParams.get("since")),
+    }),
+  );
 });
 
 addRoute("GET", "/api/queries", ({ rt, url, res }) => {

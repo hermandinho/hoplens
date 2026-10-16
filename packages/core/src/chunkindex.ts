@@ -197,6 +197,8 @@ export interface ChunkIndexOptions {
   maxPrimeBytes?: number;
   /** Prime the existing output in the background (setImmediate batches). Default true. */
   prime?: boolean;
+  /** Directory entries the overflow sweep may visit before giving up (diff untrusted). Default 20000. */
+  maxSweepEntries?: number;
 }
 
 interface Entry {
@@ -220,12 +222,15 @@ export class ChunkIndex {
   private readonly chunkMods = new Map<string, Map<string, string>>();
   /** entry abs path -> route + chunks. */
   private readonly entries = new Map<string, Entry>();
+  /** chunk / entry abs path -> mtime when last read (the overflow sweep re-reads files whose mtime moved). */
+  private readonly mtimes = new Map<string, number>();
   /** dir -> prime state. */
   private readonly priming = new Map<string, { done: boolean; ident: string }>();
   private readonly fileOf = new Map<string, string | null>();
   private readonly dirs: string[];
   private readonly maxFileBytes: number;
   private readonly maxPrimeBytes: number;
+  private readonly maxSweepEntries: number;
   private closed = false;
 
   constructor(
@@ -236,6 +241,7 @@ export class ChunkIndex {
     this.dirs = serverDirs(root, distDir);
     this.maxFileBytes = opts.maxFileBytes ?? 8 * 1024 * 1024;
     this.maxPrimeBytes = opts.maxPrimeBytes ?? 96 * 1024 * 1024;
+    this.maxSweepEntries = opts.maxSweepEntries ?? 20000;
     if (opts.prime !== false) for (const d of this.dirs) this.prime(d);
   }
 
@@ -264,6 +270,7 @@ export class ChunkIndex {
     const prefix = abs + path.sep;
     for (const k of [...this.chunkMods.keys()]) if (k.startsWith(prefix)) this.chunkMods.delete(k);
     for (const k of [...this.entries.keys()]) if (k.startsWith(prefix)) this.entries.delete(k);
+    for (const k of [...this.mtimes.keys()]) if (k.startsWith(prefix)) this.mtimes.delete(k);
     this.prime(dir);
   }
 
@@ -293,16 +300,22 @@ export class ChunkIndex {
     const read = (f: string) => {
       if (this.chunkMods.has(f) || this.entries.has(f)) return;
       let text: string;
+      let mtimeMs: number;
       try {
         const st = fs.statSync(f);
-        if (st.size > this.maxFileBytes || st.size > budget) return;
+        if (st.size > this.maxFileBytes || st.size > budget) {
+          // Not read, but known as of this mtime: the overflow sweep only revisits it once rewritten.
+          this.mtimes.set(f, st.mtimeMs);
+          return;
+        }
         budget -= st.size;
         stepBytes += st.size;
+        mtimeMs = st.mtimeMs;
         text = fs.readFileSync(f, "utf8");
       } catch {
         return;
       }
-      this.ingest(f, parseChunk(text, f), true);
+      this.ingest(f, parseChunk(text, f), true, mtimeMs);
     };
     // Order matters: entries first, then the chunks they load, then the rest. Next leaves stale chunks
     // from earlier builds (another pnpm peer variant, say) next to live ones under the same module ids,
@@ -358,16 +371,23 @@ export class ChunkIndex {
 
   /**
    * Re-read the build-output files written since the last call and diff their modules against what was
-   * seen before. `overflow` = the watcher dropped names, so the set is incomplete (untrusted).
+   * seen before. `overflow` = the watcher dropped names, so the set is incomplete: every output file is
+   * then swept by mtime (`sweepAll`), and the diff stays trusted only if that sweep finished.
    */
   update(paths: readonly string[], overflow = false): ChunkUpdate {
-    let trusted = !overflow && this.primed;
+    let trusted = this.primed;
+    // On Windows a burst of more than ~40 writes overflows the watcher's change buffer: fs.watch then
+    // reports ONE event with no file name and every name in the burst is lost (reproduced with Node 22:
+    // 50 synchronous writes -> 1 nameless event, 0 names). Turbopack's rebuilds are such bursts.
+    const swept = overflow ? this.sweepAll() : [];
+    if (swept === undefined) trusted = false;
     const added = new Set<string>();
     const modified = new Set<string>();
     const removed = new Set<string>();
     // fs.watch can miss writes (measured on Windows under Turbopack's write bursts). Route entries are
     // few and small: re-read any whose mtime moved, then any chunk an entry loads that was never read.
     const todo = new Set(paths.map((p) => path.resolve(p)));
+    for (const f of swept ?? []) todo.add(f);
     for (const e of this.sweepEntries()) todo.add(e);
     const seenFiles = new Set<string>();
     let pass = 0;
@@ -383,6 +403,47 @@ export class ChunkIndex {
     }
     for (const id of removed) this.known.delete(id);
     return { trusted, added: [...added].sort(), modified: [...modified].sort(), removed: [...removed].sort() };
+  }
+
+  /**
+   * Every output file (chunks and entries) under the primed dev output dirs that is new or whose mtime
+   * moved since it was read. Undefined when the walk ran past its budget (then nothing can be trusted).
+   * Readdir + stat only; the reads happen in update() for what this returns.
+   */
+  sweepAll(maxEntries = this.maxSweepEntries): string[] | undefined {
+    const out: string[] = [];
+    let budget = maxEntries;
+    for (const [dir, state] of this.priming) {
+      if (dir === path.resolve(this.dirs[1]!) && dirIdent(this.dirs[0]!)) continue; // prod output
+      if (!state.done) return undefined;
+      const stack = [dir];
+      while (stack.length) {
+        const d = stack.pop()!;
+        let list: fs.Dirent[];
+        try {
+          list = fs.readdirSync(d, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const e of list) {
+          if (budget-- <= 0) return undefined;
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) {
+            stack.push(p);
+            continue;
+          }
+          if (!e.isFile() || !/\.[cm]?js$/i.test(e.name) || /manifest/i.test(e.name)) continue;
+          let m: number;
+          try {
+            m = fs.statSync(p).mtimeMs;
+          } catch {
+            continue;
+          }
+          if (this.mtimes.get(p) !== m) out.push(p);
+        }
+      }
+    }
+    return out;
   }
 
   /** Entry files under the primed output dirs that are new or whose mtime moved. */
@@ -423,9 +484,14 @@ export class ChunkIndex {
   private updateFile(f: string, added: Set<string>, modified: Set<string>, removed: Set<string>): boolean {
     if (!/\.[cm]?js$/i.test(f) || /manifest/i.test(path.basename(f))) return true;
     let text: string | undefined;
+    let mtimeMs = 0;
     try {
       const st = fs.statSync(f);
-      if (st.size > this.maxFileBytes) return false;
+      mtimeMs = st.mtimeMs;
+      if (st.size > this.maxFileBytes) {
+        this.mtimes.set(f, mtimeMs);
+        return false;
+      }
       text = fs.readFileSync(f, "utf8");
     } catch {
       text = undefined; // deleted
@@ -434,6 +500,7 @@ export class ChunkIndex {
       // A deleted chunk: a real removal also rewrites the importer, so a delete alone changes nothing.
       this.chunkMods.delete(f);
       this.entries.delete(f);
+      this.mtimes.delete(f);
       return true;
     }
     const parsed = parseChunk(text, f);
@@ -456,7 +523,7 @@ export class ChunkIndex {
     }
     if (before)
       for (const id of before.keys()) if (!parsed.modules.has(id) && !this.stillLoaded(id, f)) removed.add(id);
-    this.ingest(f, parsed, false);
+    this.ingest(f, parsed, false, mtimeMs);
     return true;
   }
 
@@ -542,9 +609,10 @@ export class ChunkIndex {
     return false;
   }
 
-  private ingest(f: string, parsed: ParsedChunk, fromPrime: boolean): void {
+  private ingest(f: string, parsed: ParsedChunk, fromPrime: boolean, mtimeMs: number): void {
+    if (fromPrime && (this.chunkMods.has(f) || this.entries.has(f))) return; // update() saw a newer copy meanwhile
+    this.mtimes.set(f, mtimeMs);
     if (parsed.format === "turbopack-chunk" || parsed.format === "webpack") {
-      if (fromPrime && this.chunkMods.has(f)) return; // update() saw a newer copy meanwhile
       this.chunkMods.set(f, parsed.modules);
       for (const [id, h] of parsed.modules) {
         let seen = this.known.get(id);
@@ -561,12 +629,6 @@ export class ChunkIndex {
         parsed.format === "webpack" ? path.join(this.serverDirOf(f) ?? base, `${l}.js`) : path.join(base, l),
       );
       if (parsed.format === "webpack") chunks.push(f);
-      let mtimeMs = 0;
-      try {
-        mtimeMs = fs.statSync(f).mtimeMs;
-      } catch {
-        /* gone again */
-      }
       this.entries.set(f, { route, chunks, mtimeMs });
     }
   }

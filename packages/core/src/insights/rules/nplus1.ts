@@ -1,3 +1,4 @@
+import { firstCallSite } from "../../callsite";
 import { unionLength } from "../../facts";
 import type { Finding, SpanRecord } from "../../types";
 import { type Rule, type RuleContext, dur, fingerprint, labelOf, pickLocation, roundMs, shapeOf } from "../context";
@@ -91,6 +92,7 @@ export const nPlusOne: Rule = (ctx) => {
               spans,
               chain.map((w) => w.name),
               wrappers[0],
+              wrappers,
             ),
           );
         }
@@ -117,8 +119,14 @@ function wrappersOf(ctx: RuleContext, s: SpanRecord): SpanRecord[] | undefined {
   return chain;
 }
 
-/** `wrappers` = wrapper fn names, nearest first; `top` = one outermost wrapper span. */
-function toFinding(ctx: RuleContext, list: SpanRecord[], wrappers: string[], top?: SpanRecord): Finding {
+/** `wrappers` = wrapper fn names, nearest first; `top` = one outermost wrapper span, `tops` = all of them. */
+function toFinding(
+  ctx: RuleContext,
+  list: SpanRecord[],
+  wrappers: string[],
+  top?: SpanRecord,
+  tops?: readonly SpanRecord[],
+): Finding {
   const first = list[0]!;
   const shape = shapeOf(first)!;
   // With wrappers, the owner is whoever called the outermost wrapper in a loop.
@@ -146,7 +154,10 @@ function toFinding(ctx: RuleContext, list: SpanRecord[], wrappers: string[], top
     count: list.length,
   };
   if (owner.fn) f.fn = owner.fn;
-  const loc = pickLocation(first.location, owner.location);
+  // Through wrappers, point at the loop: the line that called the outermost wrapper (captured on
+  // its first repeat, see callsite.ts), else the query's own line, else the owning function.
+  const site = tops ? firstCallSite(tops) : undefined;
+  const loc = site?.file ? { ...site, via: "call-site" as const } : pickLocation(first.location, owner.location);
   if (loc) f.location = loc;
   if (total > longest) f.estSavedMs = roundMs(total - longest);
   return f;

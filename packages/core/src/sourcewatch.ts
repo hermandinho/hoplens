@@ -9,6 +9,11 @@
 // Cost: nothing per request. fs.watch callbacks only record a path and arm one unref'd timer; hashing
 // runs in that timer (or when the epoch tracker drains, which is off the request path). A one-time,
 // chunked pre-hash of existing files runs at startup so the first save of an unchanged file is caught.
+//
+// Windows: a burst of more than ~40 writes (a git checkout, a codemod) overflows the watcher's change
+// buffer and fs.watch reports one event with no file name: every name in the burst is lost. Such an
+// event triggers a rescan in the flush: the watched dirs are walked and files modified since the last
+// flush are hashed like any save (readdir + stat, capped by RESCAN_MAX_ENTRIES).
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -116,6 +121,10 @@ function hashFile(abs: string, maxBytes: number): string | null | undefined {
 
 /** Files hashed per flush; past this a burst is accepted as changed without reading the files. */
 const FLUSH_HASH_BUDGET = 64;
+/** Directory entries an overflow rescan may visit. */
+const RESCAN_MAX_ENTRIES = 20000;
+/** mtime slack for the rescan (coarse filesystem clocks, a save landing during the previous flush). */
+const RESCAN_SLACK_MS = 2000;
 
 export function watchSources(root: string, opts: SourceWatchOptions = {}): SourceWatcher {
   const clock = opts.clock ?? Date.now;
@@ -136,10 +145,55 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
   let timer: NodeJS.Timeout | undefined;
   let closed = false;
   let armedAt = Number.NEGATIVE_INFINITY;
+  /** Wall-clock ms (file mtimes are wall clock) of the last flush; an overflow rescans from here. */
+  let flushedAt = Date.now();
+  /** Set by a nameless (overflow) event: rescan files modified at or after this wall-clock ms. */
+  let rescanFrom: number | undefined;
+
+  const rescan = (from: number) => {
+    const at = clock();
+    let budget = RESCAN_MAX_ENTRIES;
+    const visit = (rel: string) => {
+      if (!isSourceFile(rel) || dirty.has(rel)) return;
+      try {
+        if (fs.statSync(path.join(root, rel)).mtimeMs >= from) dirty.set(rel, at);
+      } catch {
+        /* gone again */
+      }
+    };
+    try {
+      for (const e of fs.readdirSync(root, { withFileTypes: true })) if (e.isFile()) visit(e.name);
+    } catch {
+      /* ignore */
+    }
+    const stack = [...dirs];
+    while (stack.length && budget > 0) {
+      const dir = stack.pop()!;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(path.join(root, dir), { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (budget-- <= 0) break;
+        const rel = path.posix.join(dir.replace(/\\/g, "/"), e.name);
+        if (e.isDirectory()) {
+          if (!e.name.startsWith(".") && !SKIP_SEGMENTS.has(e.name)) stack.push(rel);
+        } else if (e.isFile()) visit(rel);
+      }
+    }
+  };
 
   const flush = () => {
     if (timer) clearTimeout(timer);
     timer = undefined;
+    if (rescanFrom !== undefined) {
+      const from = rescanFrom;
+      rescanFrom = undefined;
+      rescan(from);
+    }
+    flushedAt = Date.now();
     // Hashing is sync fs + crypto on the app's main thread. A branch switch can dirty thousands of
     // files at once: hash the first FLUSH_HASH_BUDGET (a no-op save must stay a no-op), and take the
     // rest as changed unhashed (their old hash is dropped, so the next save hashes them afresh).
@@ -190,7 +244,12 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
   };
 
   const onEvent = (dirRel: string, f: string | Buffer | null) => {
-    if (f == null) return;
+    if (f == null) {
+      // Overflow (see the header): the names are gone, rescan by mtime.
+      rescanFrom = Math.min(rescanFrom ?? Number.POSITIVE_INFINITY, flushedAt - RESCAN_SLACK_MS);
+      schedule();
+      return;
+    }
     const rel = path.posix.join(dirRel.replace(/\\/g, "/"), String(f).replace(/\\/g, "/"));
     if (!isSourceFile(rel)) return;
     dirty.set(rel, clock());
@@ -217,7 +276,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
     if (!watchers.has(".")) {
       try {
         const w = fs.watch(root, { persistent: false }, (_ev, f) => {
-          if (f != null && !String(f).includes("/") && !String(f).includes("\\")) onEvent("", f);
+          if (f == null || (!String(f).includes("/") && !String(f).includes("\\"))) onEvent("", f);
         });
         w.on("error", () => {
           w.close();
@@ -252,7 +311,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
 
   return {
     drain(t: number) {
-      if (dirty.size) flush();
+      if (dirty.size || rescanFrom !== undefined) flush();
       rearm();
       const out: SourceChange[] = [];
       for (const [rel, c] of pending) {
@@ -263,7 +322,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
       return out;
     },
     peek() {
-      if (dirty.size) flush();
+      if (dirty.size || rescanFrom !== undefined) flush();
       return [...pending.values()];
     },
     get active() {

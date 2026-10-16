@@ -436,3 +436,21 @@ export function compileQuery(input: string): { query: ParsedQuery; test: (t: Que
   const query = parseQuery(input);
   return { query, test: (t) => matchQuery(query, t) };
 }
+
+/**
+ * `?since=` on /api/traces and /api/stats: an epoch number, `7` or `e7` (the UI's `?since=e7` form).
+ * Undefined when absent or not a non-negative integer (the parameter is then ignored).
+ */
+export function parseSinceParam(v: string | null | undefined): number | undefined {
+  if (v == null) return undefined;
+  const m = /^\s*e?(\d{1,9})\s*$/i.exec(v);
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * In the "since edit" scope: epoch >= since. A trace with no epoch yet (still running) is out, the
+ * same rule as the UI's tracesSince.
+ */
+export function inSinceScope(t: { facts?: { epoch?: number } }, since: number | undefined): boolean {
+  return since === undefined || (t.facts?.epoch ?? -1) >= since;
+}

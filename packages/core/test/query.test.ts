@@ -1,5 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { type QueryTarget, compileGlob, compileQuery, matchQuery, parseQuery, summaryTarget } from "../src/query";
+import {
+  type QueryTarget,
+  compileGlob,
+  compileQuery,
+  inSinceScope,
+  matchQuery,
+  parseQuery,
+  parseSinceParam,
+  summaryTarget,
+} from "../src/query";
 
 const base: QueryTarget = {
   method: "GET",
@@ -242,5 +251,23 @@ describe("matchQuery", () => {
       findings: [{ rule: "swallowed-error" }],
     });
     expect(matchQuery(parseQuery("method:post status:5xx cold:true has:swallowed declined retry"), target)).toBe(true);
+  });
+});
+
+describe("?since=<epoch>", () => {
+  test("parseSinceParam takes 7 or e7; anything else is ignored", () => {
+    expect(parseSinceParam("7")).toBe(7);
+    expect(parseSinceParam("e7")).toBe(7);
+    expect(parseSinceParam(" E0 ")).toBe(0);
+    for (const bad of [null, undefined, "", "e", "-1", "1.5", "e7x", "abc"])
+      expect(parseSinceParam(bad)).toBeUndefined();
+  });
+
+  test("inSinceScope: epoch >= since; no epoch yet is out; no since keeps everything", () => {
+    expect(inSinceScope({ facts: { epoch: 3 } }, 3)).toBe(true);
+    expect(inSinceScope({ facts: { epoch: 4 } }, 3)).toBe(true);
+    expect(inSinceScope({ facts: { epoch: 2 } }, 3)).toBe(false);
+    expect(inSinceScope({}, 0)).toBe(false);
+    expect(inSinceScope({}, undefined)).toBe(true);
   });
 });

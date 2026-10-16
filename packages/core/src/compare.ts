@@ -5,6 +5,7 @@
 import { TIME_BUCKETS, bucketOf, cappedSpans, computeFacts, normalizeUrl, unionLength } from "./facts";
 import { dur, labelOf, shapeOf } from "./insights/context";
 import { DEFAULT_REDACT } from "./options";
+import { REGRESSION_RULE } from "./regressions";
 import { type Redactor, makeRedactor } from "./serialize";
 import { urlVariantKey } from "./stats";
 import type {
@@ -169,6 +170,7 @@ export interface CompareSummary {
   deltaMs: number;
   /** Relative to A, percent; undefined when A took 0ms. */
   deltaPct?: number;
+  /** "same" within the regression rule's noise floor, max(20% of A, 5ms), as the UI's tones (see summaryDirection). */
   direction: "slower" | "faster" | "same";
   /** Bucket with the largest change (same sign as the total when there is one). */
   largestBucket?: BucketDelta;
@@ -553,6 +555,17 @@ const BUCKET_LABEL: Record<TimeBucket, string> = {
   idle: "wait",
 };
 
+/**
+ * The whole request's direction, B against A: "same" unless it moved by at least max(20% of A, 5ms),
+ * the regression rule's floor, which the UI also uses for its diff tones (state/compare.ts isSame),
+ * so the sentence and the colors agree. Rows keep their finer 1ms / 10% status. Pure; exported for tests.
+ */
+export function summaryDirection(aMs: number, bMs: number): CompareSummary["direction"] {
+  const d = Math.abs(bMs - aMs);
+  if (d < REGRESSION_RULE.minMs || d < REGRESSION_RULE.minPct * Math.max(0, aMs)) return "same";
+  return bMs > aMs ? "slower" : "faster";
+}
+
 function summarize(
   a: CompareSide,
   b: CompareSide,
@@ -562,12 +575,7 @@ function summarize(
 ): CompareSummary {
   const deltaMs = round(b.duration - a.duration);
   const deltaPct = a.duration > 0 ? Math.round((deltaMs / a.duration) * 100) : undefined;
-  const direction: CompareSummary["direction"] =
-    Math.abs(deltaMs) < SAME_MS || (a.duration > 0 && Math.abs(deltaMs) / a.duration < 0.02)
-      ? "same"
-      : deltaMs > 0
-        ? "slower"
-        : "faster";
+  const direction = summaryDirection(a.duration, b.duration);
   const sign = Math.sign(deltaMs);
 
   // Largest bucket move, preferring one that moved the same way as the total.
@@ -595,11 +603,13 @@ function summarize(
 
   const head =
     direction === "same"
-      ? `B takes about the same time (${fmtSigned(deltaMs)}ms)`
+      ? `B takes about the same time (${fmtSigned(deltaMs)}ms, within noise)`
       : `B is ${fmtMs(Math.abs(deltaMs))}ms ${direction}${deltaPct !== undefined ? ` (${deltaPct > 0 ? "+" : ""}${deltaPct}%)` : ""}`;
+  // "About the same" is within noise: listing its deltas as causes would contradict it.
   const reasons: string[] = [];
-  if (largestBucket) reasons.push(`${BUCKET_LABEL[largestBucket.bucket]} ${fmtSigned(largestBucket.delta)}ms`);
-  if (driver) reasons.push(rowPhrase(driver));
+  if (largestBucket && direction !== "same")
+    reasons.push(`${BUCKET_LABEL[largestBucket.bucket]} ${fmtSigned(largestBucket.delta)}ms`);
+  if (driver && direction !== "same") reasons.push(rowPhrase(driver));
   const finding =
     direction === "faster"
       ? findings.resolved[0] && `fixed: ${findingPhrase(findings.resolved[0])}`

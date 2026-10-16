@@ -245,7 +245,7 @@ describe("ChunkIndex", () => {
     expect(d.routes).toEqual(["/api/feed", "/api/products"]);
   });
 
-  test("an unknown written file, an overflowed path list or an unprimed index make the diff untrusted", async () => {
+  test("an unknown written file, an unprimed index or an overflow sweep past its budget make the diff untrusted", async () => {
     const p = tpProject();
     const idx = new ChunkIndex(p.root, ".next", { prime: false });
     // Not primed: everything is "added" and nothing is trusted.
@@ -255,7 +255,11 @@ describe("ChunkIndex", () => {
     expect(idx2.primed).toBe(false);
     expect(idx2.update([]).trusted).toBe(false);
     await until(() => idx2.primed);
-    expect(idx2.update([], true).trusted).toBe(false);
+    // An overflow is swept by mtime (see the Windows test below); only a sweep past its budget is untrusted.
+    expect(idx2.update([], true).trusted).toBe(true);
+    const small = new ChunkIndex(p.root, ".next", { maxSweepEntries: 3 });
+    await until(() => small.primed);
+    expect(small.update([], true).trusted).toBe(false);
     const odd = path.join(p.server, "chunks", "weird.js");
     write(odd, "console.log('not a chunk')");
     expect(idx2.update([odd]).trusted).toBe(false);
@@ -304,6 +308,25 @@ describe("ChunkIndex", () => {
     p.chunk("[root-of-the-server]__x1._.js", ["store"], { store: "const list = () => [4];" });
     const d = idx.diff([path.join(p.server, "chunks", "[root-of-the-server]__p1._.js")]);
     expect(d.routes).toEqual(["/api/extra", "/api/orders", "/api/products"]);
+  });
+
+  test("Windows watcher overflow (no names at all): the mtime sweep still finds the edit, trusted", async () => {
+    const p = tpProject();
+    const idx = new ChunkIndex(p.root, ".next");
+    await until(() => idx.primed);
+    expect(idx.sweepAll()).toEqual([]); // nothing moved since the prime
+    await wait(20); // a distinct mtime even on coarse clocks
+    p.writeAll({ store: "const list = () => [9];" }, "o");
+    const u = idx.update([], true);
+    expect(u).toMatchObject({ trusted: true, modified: [p.mods.store], added: [], removed: [] });
+    expect(idx.describe(u.modified).routes).toEqual(["/api/orders", "/api/products"]);
+    // Read once: the next overflow with nothing written sweeps nothing and changes nothing.
+    expect(idx.sweepAll()).toEqual([]);
+    expect(idx.update([], true)).toMatchObject({ trusted: true, modified: [] });
+    // A formatter-only rebuild seen only as an overflow is still "no change".
+    await wait(20);
+    p.writeAll({ store: "const list = () => [9];" }, "fmt");
+    expect(idx.update([], true)).toMatchObject({ trusted: true, modified: [], added: [], removed: [] });
   });
 
   test("rearm after the output dir is wiped and recreated: unchanged code stays unchanged", async () => {
@@ -476,7 +499,9 @@ describe("EpochTracker with the chunk diff", () => {
     const s = await setup();
     s.sources.push({ file: "src/lib/store.ts", at: s.now(), kind: "change" });
     s.rebuild({}, "same");
+    s.probe.written.length = 0; // the names were lost too
     s.probe.overflow = true;
+    (s.idx as unknown as { maxSweepEntries: number }).maxSweepEntries = 1; // and the sweep can't recover
     expect(s.tr.observe("GET /api/products", false).epoch).toBe(1);
     expect(s.tr.info(1)).toMatchObject({ files: ["src/lib/store.ts"], via: "src-watch" });
     expect(s.tr.info(1)?.chunkScope).toBeUndefined();
@@ -565,6 +590,27 @@ describe("distMtimeProbe re-arms after rm -rf .next", () => {
     write(path.join(server, "chunks", "b._.js"), "2");
     await until(() => probe() > before);
     expect(probe.drainPaths!().paths).toContain(path.join(server, "chunks", "b._.js"));
+  });
+
+  test("a write burst is never silently lost: every name arrives, or the drain says overflow", async () => {
+    // On Windows, ~50 synchronous writes overflow the watcher's buffer: one event with no file name.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-wp9c-burst-"));
+    tmpDirs.push(root);
+    const server = path.join(root, ".next", "dev", "server");
+    fs.mkdirSync(path.join(server, "chunks"), { recursive: true });
+    const probe = distMtimeProbe(root, ".next", Date.now, 0);
+    probe();
+    await wait(50);
+    const n = 300;
+    const body = "x".repeat(4000);
+    for (let i = 0; i < n; i++) fs.writeFileSync(path.join(server, "chunks", `c${i}._.js`), body);
+    await until(() => probe() > 0);
+    await wait(300);
+    const d = probe.drainPaths!();
+    const got = new Set(d.paths);
+    const all = Array.from({ length: n }, (_, i) => path.join(server, "chunks", `c${i}._.js`)).every((p) => got.has(p));
+    expect(all || d.overflow, `${got.size}/${n} names, overflow ${d.overflow}`).toBe(true);
+    probe.close?.();
   });
 });
 

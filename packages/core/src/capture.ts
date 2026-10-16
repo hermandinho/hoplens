@@ -9,6 +9,7 @@ import zlib from "node:zlib";
 import { type Span, context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider, type ReadableSpan, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { captureCallSite, moveCallSite, noteSpanCallSite, shouldCapture } from "./callsite";
 import type { EpochTracker } from "./epoch";
 import { MAX_ANALYZED_SPANS, computeFacts, depths, foldNestedFetches, normalizeUrl, timeBudget } from "./facts";
 import { analyze, resolveThresholds } from "./insights";
@@ -516,6 +517,7 @@ class HoplensProcessor implements SpanProcessor {
         rec.attrs["hoplens.late"] = true;
         if (ctx.trace.facts) ctx.trace.facts.droppedSpans++;
       }
+      moveCallSite(span, rec, this.rt.root);
       ctx.trace.spans.push(rec);
       if (late) {
         // The list / Overview only hear about the trace through events: tell them it changed. A trace
@@ -1084,9 +1086,14 @@ export function makeWrap(rt: Runtime) {
   return function wrap<F extends (...args: any[]) => any>(fn: F, meta: WrapMeta): F {
     if (typeof fn !== "function" || (fn as any).__hoplens) return fn;
     const location = resolveMeta(meta, rt);
-    const wrapped = function (this: any, ...args: any[]) {
+    const wrapped = function hoplensWrapped(this: any, ...args: any[]) {
       const ctx = als.getStore();
       if (!ctx) return new.target ? Reflect.construct(fn, args, new.target) : fn.apply(this, args);
+      // The caller's frames (the loop line of an N+1), captured unformatted on the first repeat under
+      // one parent only; see callsite.ts.
+      const site = shouldCapture(trace.getActiveSpan() ?? ctx.trace, hoplensWrapped)
+        ? captureCallSite(hoplensWrapped)
+        : undefined;
       return tracer.startActiveSpan(
         meta.name,
         {
@@ -1098,6 +1105,7 @@ export function makeWrap(rt: Runtime) {
           },
         },
         (span) => {
+          noteSpanCallSite(span, site);
           const fail = (err: unknown) => {
             if (err instanceof Error) span.recordException(err);
             else span.recordException({ name: "Thrown", message: String(err) });

@@ -363,6 +363,11 @@ export interface StatsResponse {
   since: number;
   /** Findings rolled up across routes and kept epochs, ranked by `rankFindings`. */
   findings: FindingRollup[];
+  /**
+   * Present when scoped with `?since=<epoch>`: only epochs >= sinceEpoch are counted. `partial` = a
+   * route dropped epochs the scope reaches back into, so the scoped counts are a lower bound.
+   */
+  scope?: { sinceEpoch: number; partial: boolean };
 }
 
 class VariantAgg {
@@ -880,8 +885,17 @@ export class RouteStatsStore {
     return this.routes.size;
   }
 
-  snapshot(opts: { buckets?: boolean } = {}): StatsResponse {
+  /**
+   * `since`: scope to epochs >= since (GET /api/stats?since=<epoch>). Each route keeps only those
+   * epochs (merged into `all`), routes without traffic in the scope are left out, totals and findings
+   * are re-summed over what is left, and exemplars come from the scope. `delta` stays the route's
+   * newest-vs-previous epoch. `scope.partial` = some route dropped epochs the scope reaches back into,
+   * so its counts are a lower bound (the same rule as the UI's scopeStatsSince).
+   */
+  snapshot(opts: { buckets?: boolean; since?: number } = {}): StatsResponse {
     const withBuckets = !!opts.buckets;
+    const since = opts.since !== undefined && Number.isFinite(opts.since) ? opts.since : undefined;
+    let partial = false;
     const routes: RouteStats[] = [];
     const totals: StatsTotals = {
       requests: 0,
@@ -892,7 +906,9 @@ export class RouteStatsStore {
       errorKinds: { fivexx: 0, thrown: 0, swallowed: 0 },
     };
     for (const r of this.routes.values()) {
-      const kept = [...r.epochs.values()];
+      const every = [...r.epochs.values()];
+      const kept = since === undefined ? every : every.filter((e) => e.epoch >= since);
+      if (since !== undefined && every.length > 0 && r.evicted > 0 && since < every[0]!.epoch) partial = true;
       const newest = kept[kept.length - 1];
       if (!newest) continue;
       const all = new EpochAgg(-1);
@@ -913,16 +929,21 @@ export class RouteStatsStore {
         epochs: [...asc].reverse(),
       };
       if (r.evicted > 0) row.evicted = r.evicted;
-      const delta = epochDelta(row, asc, this.newestEpoch);
+      const delta = epochDelta(row, since === undefined ? asc : every.map((e) => e.toJSON(false)), this.newestEpoch);
       if (delta) row.delta = delta;
-      // Exemplars from the kept epochs only, so they agree with the percentiles beside them.
-      const ex = pickExemplars(r.recent.filter((x) => r.epochs.has(x.epoch)));
+      // Exemplars from the kept (and scoped) epochs only, so they agree with the percentiles beside them.
+      const ex = pickExemplars(
+        r.recent.filter((x) => r.epochs.has(x.epoch) && (since === undefined || x.epoch >= since)),
+      );
       if (ex) row.exemplars = ex;
       routes.push(row);
     }
     routes.sort((a, b) => b.lastSeen - a.lastSeen);
     totals.droppedSpans = this.droppedSpans;
+    if (since !== undefined) totals.routes = routes.length;
     const findings = rollupFindings(routes.filter((r) => r.kind !== "asset"));
-    return { routes, totals, epoch: this.newestEpoch, since: this.since, findings };
+    const out: StatsResponse = { routes, totals, epoch: this.newestEpoch, since: this.since, findings };
+    if (since !== undefined) out.scope = { sinceEpoch: since, partial };
+    return out;
   }
 }

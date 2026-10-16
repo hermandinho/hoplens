@@ -223,6 +223,49 @@ describe("RouteStatsStore", () => {
     expect(fresh.snapshot().routes[0]!.evicted).toBeUndefined();
   });
 
+  test("snapshot({ since }) scopes routes, totals, findings and exemplars to epochs >= since", () => {
+    const s = new RouteStatsStore({ maxEpochs: 3 });
+    const n1: Finding = {
+      rule: "n-plus-1",
+      severity: "warn",
+      title: "n1",
+      detail: "",
+      fingerprint: "fp-old",
+      spanIds: [],
+    };
+    for (let e = 0; e < 4; e++)
+      for (let i = 0; i < 3; i++)
+        s.add(trace(10 * (e + 1), { route: "/a", findings: e === 1 ? [n1] : [] }, { epoch: e }));
+    s.add(trace(5, { route: "/b" }, { epoch: 1 })); // only before the scope
+    s.add(trace(7, { route: "/c", status: 500 }, { epoch: 3 }));
+
+    const full = s.snapshot();
+    expect(full.scope).toBeUndefined();
+    expect(full.totals.routes).toBe(3);
+
+    const at3 = s.snapshot({ since: 3 });
+    expect(at3.scope).toEqual({ sinceEpoch: 3, partial: false });
+    expect(at3.routes.map((r) => r.route).sort()).toEqual(["/a", "/c"]);
+    expect(at3.totals).toMatchObject({ requests: 4, errors: 1, routes: 2 });
+    const a = at3.routes.find((r) => r.route === "/a")!;
+    expect(a.epochs.map((e) => e.epoch)).toEqual([3]);
+    expect(a.all.count).toBe(3);
+    expect(a.all.p50).toBe(40);
+    expect(a.exemplars?.slow.epoch).toBe(3);
+    expect(a.exemplars?.fast.epoch).toBe(3);
+    // The delta is still the route's newest epoch against its previous one.
+    expect(a.delta?.baselineEpoch).toBe(2);
+    // The epoch-1 finding is out of the scope.
+    expect(at3.findings.map((f) => f.fingerprint)).not.toContain("fp-old");
+    expect(s.snapshot({ since: 1 }).findings.map((f) => f.fingerprint)).toContain("fp-old");
+
+    // /a dropped epoch 0 (keeps 1..3): a scope reaching back to 0 is a lower bound.
+    expect(s.snapshot({ since: 0 }).scope).toEqual({ sinceEpoch: 0, partial: true });
+    expect(s.snapshot({ since: 1 }).scope?.partial).toBe(false);
+    // Past every epoch: empty, not an error.
+    expect(s.snapshot({ since: 9 })).toMatchObject({ routes: [], totals: { requests: 0, routes: 0 } });
+  });
+
   test("routes capped, least recently seen dropped", () => {
     const s = new RouteStatsStore({ maxRoutes: 3 });
     for (const p of ["/a", "/b", "/c"]) s.add(trace(1, { route: p }));

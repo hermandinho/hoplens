@@ -220,6 +220,29 @@ describe("EpochTracker attribution", () => {
     expect(tr.watchingSources).toBe(false);
   });
 
+  test("a save the bundler scoped to other routes leaves an untouched route warm", () => {
+    const probe = fakeProbe();
+    probe.drainPaths = () => ({ paths: ["/x/.next/server/chunk.js"], overflow: false });
+    let clock = 0;
+    const scope = { routes: ["/api/products"], compiled: ["/api/feed", "/api/products"] };
+    const chunks = {
+      update: () => ({ trusted: true, added: [], modified: ["[project]/src/lib/store.ts"], removed: [] }),
+      describe: () => ({ trusted: true, changed: ["m"], files: ["src/lib/store.ts"], external: [], ...scope }),
+    };
+    const tr = new EpochTracker(probe, 0, () => (clock += 10_000), 2000, 5000, { chunks });
+    tr.observe("GET /api/feed", false);
+    tr.observe("GET /api/products", false);
+    tr.observe("GET /api/orders", false);
+    probe.mtime += 100_000;
+    const products = tr.observe("GET /api/products", false);
+    expect(products).toEqual({ epoch: 1, firstInEpoch: true });
+    expect(tr.info(1)?.chunkScope).toEqual(scope);
+    // Compiled and not rebuilt: warm.
+    expect(tr.observe("GET /api/feed", false)).toEqual({ epoch: 1, firstInEpoch: false });
+    // The scope doesn't list it as compiled: unknown, so cold as before.
+    expect(tr.observe("GET /api/orders", false).firstInEpoch).toBe(true);
+  });
+
   test("candidatesFromChunks", () => {
     expect(
       candidatesFromChunks([
@@ -289,6 +312,18 @@ describe("watchSources", () => {
         .map((c) => `${c.kind}:${c.file}`)
         .sort(),
     ).toEqual(["change:proxy.ts", "delete:src/a.ts"]);
+  });
+
+  test("a save burst (a git checkout) is not lost when the watcher overflows (Windows: no names)", async () => {
+    const files: Record<string, string> = {};
+    for (let i = 0; i < 80; i++) files[`src/gen/m${i}.ts`] = `export const v = ${i};\n`;
+    const root = tmpProject(files);
+    w = watchSources(root, { debounceMs: 30 });
+    await wait(200); // pre-hash
+    for (let i = 0; i < 80; i++) fs.writeFileSync(path.join(root, `src/gen/m${i}.ts`), `export const v = ${i + 1};\n`);
+    await until(() => w!.peek().length > 0);
+    await wait(150);
+    expect(w.peek().length).toBe(80);
   });
 
   test("without src/, existing fallback dirs are watched", async () => {
@@ -469,10 +504,12 @@ describe("regressions", () => {
       tr.evaluate(stats.snapshot()); // as after every epoch bump
     }
     const items = tr.evaluate(stats.snapshot()).items;
-    // Kept epochs are 2 and 3; both still compared with epoch 0 (the last good one).
+    // Kept epochs are 2 and 3; both still compared with epoch 0 (the last good one). e1, no longer
+    // kept, is listed with the verdict it got while it was.
     expect(items.map((i) => [i.epoch, i.baselineEpoch, i.status])).toEqual([
       [3, 0, "regressed"],
       [2, 0, "regressed"],
+      [1, 0, "regressed"],
     ]);
     expect(tr.baseline("GET /api/products")?.epoch).toBe(0);
     // A fix: back to 40ms becomes the new baseline.
@@ -480,6 +517,32 @@ describe("regressions", () => {
     const after = tr.evaluate(stats.snapshot()).items;
     expect(after[0]).toMatchObject({ epoch: 4, baselineEpoch: 0, status: "unchanged" });
     expect(tr.baseline("GET /api/products")?.epoch).toBe(4);
+  });
+
+  test("a verdict outlives its baseline: e1 regressed vs e0, then e0 left the store", () => {
+    const restartLike = new RegressionTracker();
+    const s2 = new RouteStatsStore({ maxEpochs: 3 });
+    for (let i = 0; i < 3; i++) s2.add(trace(40, 0));
+    for (const [e, ms] of [
+      [1, 100],
+      [2, 40],
+      [3, 40],
+    ] as const) {
+      restartLike.evaluate(s2.snapshot());
+      for (let i = 0; i < 3; i++) s2.add(trace(ms, e));
+    }
+    // Kept e1..e3, e0 dropped (and the remembered baseline moved on to e2): without the remembered
+    // verdict e1 would become the baseline itself and its regression would vanish.
+    const v1 = restartLike.evaluate(s2.snapshot()).items.find((i) => i.epoch === 1);
+    expect(v1).toMatchObject({ baselineEpoch: 0, status: "regressed" });
+    // Two more edits push e1 itself out of the store: its verdict is still listed.
+    for (const e of [4, 5]) {
+      restartLike.evaluate(s2.snapshot());
+      for (let i = 0; i < 3; i++) s2.add(trace(40, e));
+    }
+    const items = restartLike.evaluate(s2.snapshot()).items;
+    expect(items.find((i) => i.epoch === 1)).toMatchObject({ baselineEpoch: 0, status: "regressed" });
+    expect(items.filter((i) => i.epoch === 1)).toHaveLength(1);
   });
 
   test("affected routes without traffic since the edit are listed as no-traffic", () => {

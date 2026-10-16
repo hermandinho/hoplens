@@ -32,6 +32,8 @@ export type MtimeProbe = (() => number) & {
   drainNames?: () => string[];
   /** WP9c: absolute paths of the build-output files written since the last call (for the chunk diff). */
   drainPaths?: () => { paths: string[]; overflow: boolean };
+  /** Close the build-output watchers (Runtime.stop). */
+  close?: () => void;
 };
 
 /** Build-output names kept between two drains. */
@@ -86,7 +88,14 @@ export function distMtimeProbe(
       let w: fs.FSWatcher;
       try {
         w = fs.watch(dir, { persistent: false, recursive: true }, (_ev, f) => {
-          if (f == null || !isRebuildFile(String(f))) return;
+          if (f == null) {
+            // Windows: a write burst (> ~40 files) overflowed the change buffer and every name in it
+            // was lost. It is a rebuild; the chunk index sweeps the output by mtime (ChunkIndex.update).
+            last = clock();
+            overflow = true;
+            return;
+          }
+          if (!isRebuildFile(String(f))) return;
           last = clock();
           if (names.size < MAX_PROBE_NAMES) names.add(String(f).replace(/\\/g, "/"));
           if (paths.size < MAX_PROBE_PATHS) paths.add(path.join(dir, String(f)));
@@ -126,6 +135,10 @@ export function distMtimeProbe(
     paths.clear();
     overflow = false;
     return out;
+  };
+  probe.close = () => {
+    for (const dir of [...watchers.keys()]) drop(dir);
+    armedAt = Number.POSITIVE_INFINITY; // never re-arm
   };
   return probe;
 }
@@ -193,6 +206,8 @@ export interface EpochInfo {
    * turns it into `routes` / `routesVia: "chunks"` and leaves it out of the response.
    */
   chunkScope?: { routes: string[]; compiled: string[] };
+  /** WP10: set on epochs restored from an earlier dev session (`persist: true`); absent for this one. */
+  session?: number;
 }
 
 /** Files listed per epoch. */
@@ -287,10 +302,27 @@ export class EpochTracker {
     return this.sources?.active ?? false;
   }
 
-  /** Release the source watcher (tests, shutdown). */
+  /** Release the source and build-output watchers (tests, shutdown). */
   close(): void {
     this.sources?.close();
     this.chunks?.close?.();
+    try {
+      this.probe.close?.();
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /**
+   * WP10: continue after a persisted session. This session starts at epoch `base` and `prior` (earlier
+   * sessions' epochs, each with `session` set) go before it in the ring. Only before the first bump.
+   */
+  restore(base: number, prior: readonly EpochInfo[]): void {
+    if (this.epoch !== 0 || this.infos.length !== 1 || base <= 0) return;
+    this.epoch = base;
+    this.infos[0]!.id = base;
+    const keep = prior.filter((i) => i.id < base).slice(-(this.maxInfos - 1));
+    this.infos.unshift(...keep);
   }
 
   private drainSources(t: number): SourceChange[] {
@@ -421,7 +453,11 @@ export class EpochTracker {
       }
     }
     if (newCompile) this.lastNewCompileAt = t;
-    const firstInEpoch = this.seen.get(routeKey) !== this.epoch;
+    const last = this.seen.get(routeKey);
+    // First in this epoch, unless the bundler said every edit since it was last seen left its chunks
+    // alone (and it ran no compile now): a route a save did not rebuild serves warm.
+    const firstInEpoch =
+      last !== this.epoch && (compiled || last === undefined || !this.untouchedSince(routeKey, last));
     // Re-insert so the Map's order tracks recency, then evict the least recently seen.
     this.seen.delete(routeKey);
     this.seen.set(routeKey, this.epoch);
@@ -430,6 +466,20 @@ export class EpochTracker {
       if (oldest !== undefined) this.seen.delete(oldest);
     }
     return { epoch: this.epoch, firstInEpoch };
+  }
+
+  /**
+   * True when every epoch after `since` (up to the current one) has a trusted chunk scope in which the
+   * route was compiled but not rebuilt. Unknown (an evicted epoch, no chunk diff, a route the scope
+   * doesn't list) is false: cold, as before.
+   */
+  private untouchedSince(routeKey: string, since: number): boolean {
+    const template = routeKey.slice(routeKey.indexOf(" ") + 1);
+    for (let id = since + 1; id <= this.epoch; id++) {
+      const scope = this.info(id)?.chunkScope;
+      if (!scope || !scope.compiled.includes(template) || scope.routes.includes(template)) return false;
+    }
+    return true;
   }
 }
 

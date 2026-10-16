@@ -15,6 +15,7 @@ import {
   findBaselines,
   identityOf,
   matchTrees,
+  summaryDirection,
 } from "../src/compare";
 import { DEFAULT_REDACT } from "../src/options";
 import type { Runtime } from "../src/runtime";
@@ -158,6 +159,26 @@ describe("span matching and folded groups", () => {
     expect(r.rows.every((row) => row.status === "same")).toBe(true);
     expect(r.summary.direction).toBe("same");
     expect(r.summary.sentence).toMatch(/^B takes about the same time/);
+  });
+
+  test("an 'about the same' sentence lists no deltas as causes (-37ms on ~400ms is noise)", async () => {
+    const { db: q, makeTrace: mk, span: sp } = await import("./helpers");
+    const side = (id: string, ext: number) => {
+      const root = sp({ kind: "request", name: "GET /api/feed", start: 0, end: 400 + ext });
+      const h = sp({ kind: "handler", name: "GET /api/feed", parentId: root.id, start: 1, end: 399 + ext });
+      const f = sp({
+        kind: "fetch",
+        name: "fetch GET https://x.dev/users/1",
+        parentId: h.id,
+        start: 5,
+        end: 300 + ext,
+        attrs: { "url.full": "https://x.dev/users/1", "http.method": "GET" },
+      });
+      return mk([root, h, f, q(h.id, 301 + ext, 320 + ext, "SELECT 1")], { id, duration: 400 + ext });
+    };
+    const r = compareTraces(side("a", 0), side("b", -37));
+    expect(r.summary.direction).toBe("same");
+    expect(r.summary.sentence).toBe("B takes about the same time (-37ms, within noise).");
   });
 
   test("broken parent links become roots instead of vanishing", () => {
@@ -536,5 +557,22 @@ describe("GET /api/compare", () => {
     expect(list.pinned).toContain("A");
     expect(list.manual).toEqual(["A"]);
     expect((await fetch(`${base}/api/compare/pins/nope`, { method: "POST" })).status).toBe(404);
+  });
+});
+
+describe("summaryDirection (aligned with the UI tones: max(20%, 5ms))", () => {
+  test("under 5ms is the same, however large in percent", () => {
+    expect(summaryDirection(2, 6.9)).toBe("same");
+    expect(summaryDirection(2, 7)).toBe("slower");
+  });
+  test("under 20% of A is the same, however large in ms", () => {
+    expect(summaryDirection(1000, 1199)).toBe("same");
+    expect(summaryDirection(1000, 1200)).toBe("slower");
+    expect(summaryDirection(1000, 800)).toBe("faster");
+    expect(summaryDirection(1000, 801)).toBe("same");
+  });
+  test("A = 0 falls back to the 5ms floor", () => {
+    expect(summaryDirection(0, 4)).toBe("same");
+    expect(summaryDirection(0, 5)).toBe("slower");
   });
 });

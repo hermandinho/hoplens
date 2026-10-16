@@ -7,17 +7,28 @@ snapshots the result at three viewport breakpoints:
 - `tablet-1100` — 1100×820
 - `mobile-420` — 420×820 (Pixel 7 UA)
 
-Each project runs two tests:
+Each project runs three tests:
 
-1. **initial / empty state** — asserts the shell renders, the Routes sidebar fills via
-   `GET /api/routes`, and the Traffic tab shows the empty state. Then full-page snapshot.
-2. **after a real request** — fires a valid `POST /api/orders` through the live app, waits
-   for the SSE-driven trace row to arrive in the sidebar, clicks it, waits for the journey
-   canvas to render, and takes a full-page snapshot of the loaded state.
+1. **initial / empty state** — asserts the shell renders, the Overview shows "No traffic yet"
+   and the Requests list (`#/requests`) shows its empty state. Then a full-page snapshot of
+   the Overview.
+2. **after a real request** — fires a valid `POST /api/orders` through the live app, checks
+   the response carries `x-hoplens-trace` and a `Server-Timing` `total` entry, waits for that
+   trace's row to arrive over SSE in `#/requests`, clicks it, checks the hash is `#/r/<id>`
+   and the journey canvas rendered, and takes a full-page snapshot.
+3. **after a 500 handler throw** — PATCHes an already-paid order so `payOrder()` throws,
+   opens the trace the same way, checks the verdict reads as a failure, and snapshots it.
+
+The tests navigate by hash rather than by clicking view tabs, because the desktop top bar
+and the phone bottom tabs (<= 760px) are different elements.
 
 Baselines are OS-specific (Playwright appends `-{platform}` to each file). The committed
 baselines in `snapshots/screenshots.spec.ts-snapshots/` were generated on `win32`.
 Regenerate for another platform with `pnpm --filter hoplens-e2e snapshots` on that OS.
+
+The committed baselines still show the pre-redesign UI (sidebar + Traffic tab). Regenerate
+them with `pnpm --filter hoplens-e2e snapshots` before relying on the comparison; until then
+the three screenshot assertions fail by design.
 
 ## Commands
 

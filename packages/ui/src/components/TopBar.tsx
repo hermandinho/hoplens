@@ -1,9 +1,7 @@
-import { useComputed } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
 import { IS_MAC, formatKey } from "../state/keymap";
 import { toggleCheatsheet, togglePalette } from "../state/palette";
 import { QUERY_INPUT_MAIN } from "../state/requestLog";
-import { go, route } from "../state/router";
 import {
   type MainView,
   actionError,
@@ -24,13 +22,14 @@ import {
   tracesState,
   tracesWithErrors,
 } from "../state/store";
+import { EpochRail } from "./EpochRail";
 import { HealthStrip, LiveRate } from "./HealthStrip";
 import { QueryBar } from "./RequestLog";
 
 /*
  * The top bar (plan 3.2): brand, the four view tabs, the request filter, the live controls, then a
  * thin status line holding two slots other work packages fill in:
- *   <EpochRail/>  edit ticks (WP9b draws the real rail; this one marks the dev-rebuild epochs seen)
+ *   <EpochRail/>  edit ticks, the newest edit, the rebuild toast (components/EpochRail, WP9b)
  *   <StatusSlot/> runtime status (WP6 adds loop p99 and RSS next to the live dot)
  * Problems that used to be a full-width banner (StatusBanner) now render as one notice line here.
  */
@@ -154,52 +153,6 @@ export function TopBar() {
 
       <TopNotice />
     </header>
-  );
-}
-
-/**
- * Edit ticks: one segment per dev-rebuild epoch seen in the retained requests (oldest left), sized
- * by its request count. Clicking one opens Changes at that epoch. WP9b replaces this with the
- * attributed rail (file names, regression caps) once /api/epochs exists.
- */
-export function EpochRail() {
-  const epochs = useComputed(() => {
-    const counts = new Map<number, number>();
-    for (const t of tracesState.value) {
-      const e = t.facts?.epoch;
-      if (e === undefined || t.kind === "asset") continue;
-      counts.set(e, (counts.get(e) ?? 0) + 1);
-    }
-    return [...counts.entries()].sort((a, b) => a[0] - b[0]).slice(-24);
-  }).value;
-  const r = route.value;
-  if (epochs.length === 0) return <div class="epoch-rail epoch-rail-empty" />;
-  const total = epochs.reduce((s, [, n]) => s + n, 0);
-  const current = epochs[epochs.length - 1]?.[0];
-  return (
-    <div class="epoch-rail">
-      <ol class="epoch-ticks" aria-label="Dev rebuilds (edits) seen in the retained requests">
-        {epochs.map(([e, n]) => {
-          const on = (r.view === "changes" && r.epoch === String(e)) || r.since === String(e);
-          return (
-            <li key={e} style={{ flexGrow: 1 + (n / total) * 10 }}>
-              <button
-                type="button"
-                class={`epoch-tick ${on ? "epoch-tick-on" : ""}`}
-                title={`e${e}: ${n} request${n === 1 ? "" : "s"}`}
-                aria-label={`Edit e${e}, ${n} requests`}
-                onClick={() => go({ view: "changes", epoch: String(e) })}
-              />
-            </li>
-          );
-        })}
-      </ol>
-      {current !== undefined && (
-        <span class="epoch-now mono" title="Current dev-rebuild epoch">
-          e{current}
-        </span>
-      )}
-    </div>
   );
 }
 

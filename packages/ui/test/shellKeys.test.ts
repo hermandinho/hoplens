@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { scopesFor, stepEpoch } from "../src/state/shellKeys";
+import { editsOnly, scopesFor, stepEpoch } from "../src/state/shellKeys";
 
 /* WP1b shell keys: e / E scope stepping and the scopes a route makes live.
  * Run: pnpm --filter @hoplens/ui exec vitest run test/shellKeys.test.ts */
@@ -23,6 +23,11 @@ describe("e / E: step the since scope through the edits", () => {
   });
   test("no edits: nowhere to go", () => {
     expect(stepEpoch([], undefined, -1)).toBeUndefined();
+  });
+  test("session start (e0) is not an edit: e at a fresh session does nothing, and never lands on e0", () => {
+    expect(stepEpoch(editsOnly([0]), undefined, -1)).toBeUndefined();
+    expect(stepEpoch(editsOnly([0, 3]), 3, -1)).toBeUndefined();
+    expect(stepEpoch(editsOnly([0, 3]), 0, 1)).toBe(3); // a deep-linked ?since=e0 still steps forward
   });
 });
 

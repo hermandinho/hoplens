@@ -2,6 +2,7 @@ import { batch } from "@preact/signals";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { callSites, culpritLoc } from "../state/callSite";
+import { epochLabel, epochList } from "../state/epochs";
 import { openErrorsPanel, processErrorTotal } from "../state/health";
 import { type KeyBinding, formatKey, register, runBinding, usableBindings } from "../state/keymap";
 import {
@@ -179,6 +180,7 @@ export function Palette() {
   const findings = overviewFindings.value;
   const routes = routeStats.value;
   const shapes = queriesData.value?.queries;
+  const serverEdits = epochList.value;
   // Resolved N+1 call lines (culpritLoc reads them): a trigger to rebuild the finding rows.
   const sites = callSites.value;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `sites` is a trigger, see above
@@ -191,7 +193,15 @@ export function Palette() {
               routes,
               traces,
               shapes: shapes ?? [],
-              edits: editsOf(traces),
+              edits: editsOf(
+                traces,
+                serverEdits.map((e) => ({
+                  id: e.id,
+                  at: e.at,
+                  label: epochLabel(e),
+                  files: [...e.files, ...e.deleted],
+                })),
+              ),
               search: hits && hits.q === query.trim() ? hits : undefined,
               extra,
               locOf: culpritLoc,
@@ -199,7 +209,7 @@ export function Palette() {
             ACTS,
           )
         : [],
-    [open, findings, routes, traces, shapes, hits, query, extra, sites],
+    [open, findings, routes, traces, shapes, serverEdits, hits, query, extra, sites],
   );
   const sections = useMemo(() => rankItems(items, query, { recents }), [items, query, recents]);
   const rows = flatRows(sections);

@@ -1,6 +1,7 @@
 import { batch, effect } from "@preact/signals";
 import { toggleListRail } from "../components/Split";
 import { highlight } from "./canvas";
+import { epochList, knownEpochIds } from "./epochs";
 import { clearHighlight, selectHop, selectedHopId } from "./journey";
 import { type KeyScope, activeScopes, handleKeydown, modalScope, register } from "./keymap";
 import { cheatsheetOpen, paletteOpen, toggleCheatsheet, togglePalette } from "./palette";
@@ -33,13 +34,14 @@ import {
 /** Scopes from the route and the focused element. Pure apart from reading `document.activeElement`. */
 export function scopesFor(r: Route, focused: Element | null): Set<KeyScope> {
   const next = new Set<KeyScope>();
-  // Views with a keyboard list (Overview routes, Requests, Queries); their list keys guard on which list is shown.
+  // Views with a keyboard list (Overview routes, Requests, Queries, Changes); their list keys guard on which list is shown.
   if (
     r.view === "overview" ||
     r.view === "requests" ||
     r.view === "trace" ||
     r.view === "compare" ||
-    r.view === "queries"
+    r.view === "queries" ||
+    r.view === "changes"
   )
     next.add("list");
   if (r.view === "trace" || r.view === "compare") next.add("subject");
@@ -92,14 +94,18 @@ function targetEl(e?: KeyboardEvent): HTMLElement | null {
 
 /* ---------------------------------------------------------------------- edits */
 
-/** Dev-rebuild epochs seen in the retained requests, ascending. */
+/** Dev-rebuild epochs: the server's edits (/api/epochs) plus any seen on a retained request, ascending. */
 function knownEpochs(): number[] {
-  const set = new Set<number>();
-  for (const t of tracesState.peek()) {
-    const e = t.facts?.epoch;
-    if (e !== undefined && t.kind !== "asset") set.add(e);
-  }
-  return [...set].sort((a, b) => a - b);
+  return knownEpochIds(epochList.value, tracesState.value);
+}
+
+/** Edits after the session start (epoch 0 is the whole session: scoping to it would hide nothing). Pure. */
+export function editsOnly(epochs: readonly number[]): number[] {
+  return epochs.filter((e) => e > 0);
+}
+
+function knownEdits(): number[] {
+  return editsOnly(knownEpochs());
 }
 
 function sinceNum(): number | undefined {
@@ -125,7 +131,7 @@ export function stepEpoch(epochs: readonly number[], cur: number | undefined, di
 }
 
 function moveSince(dir: -1 | 1): void {
-  const next = stepEpoch(knownEpochs(), sinceNum(), dir);
+  const next = stepEpoch(knownEdits(), sinceNum(), dir);
   if (next === undefined) return;
   setSince(next === null ? undefined : String(next));
 }
@@ -266,19 +272,19 @@ export function initShellKeys(): () => void {
       "s",
       "Toggle the since-last-edit scope",
       () => {
-        const epochs = knownEpochs();
+        const epochs = knownEdits();
         const last = epochs[epochs.length - 1];
         if (route.peek().since !== undefined) setSince(undefined);
         else if (last !== undefined) setSince(String(last));
       },
-      { when: () => route.peek().since !== undefined || knownEpochs().length > 0, hint: "since edit" },
+      { when: () => route.peek().since !== undefined || knownEdits().length > 0, hint: "since edit" },
     ),
     register("global", "e", "Scope to the previous (older) edit", () => moveSince(-1), {
-      when: () => stepEpoch(knownEpochs(), sinceNum(), -1) !== undefined,
+      when: () => stepEpoch(knownEdits(), sinceNum(), -1) !== undefined,
       hint: "older edit",
     }),
     register("global", "E", "Scope to the next (newer) edit", () => moveSince(1), {
-      when: () => stepEpoch(knownEpochs(), sinceNum(), 1) !== undefined,
+      when: () => stepEpoch(knownEdits(), sinceNum(), 1) !== undefined,
       hint: "newer edit",
     }),
     register(

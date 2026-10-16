@@ -240,8 +240,12 @@ export interface PaletteEdit {
   epoch: number;
   /** Retained requests in it. */
   n: number;
-  /** First request seen in it (ms epoch). */
+  /** First request seen in it (ms epoch); for an edit with no traffic yet, when it was noticed. */
   first: number;
+  /** What changed, from /api/epochs ("store.ts", "one of: a, b"). */
+  label?: string;
+  /** Saved files (search keywords). */
+  files?: readonly string[];
 }
 
 /** Everything the palette lists, as plain data (components/Palette.tsx reads the signals). */
@@ -401,9 +405,9 @@ export function buildItems(d: PaletteData, act: PaletteActs): PaletteItem[] {
     out.push({
       id: `edit:${e.epoch}`,
       group: "edits",
-      title: `e${e.epoch}`,
+      title: e.label ? `e${e.epoch} ${e.label}` : `e${e.epoch}`,
       detail: `${e.n} request${e.n === 1 ? "" : "s"} · from ${clock(e.first)}`,
-      keywords: "edit rebuild epoch change",
+      keywords: `edit rebuild epoch change${e.files?.length ? ` ${e.files.join(" ")}` : ""}`,
       primary: { label: "Open in Changes", run: () => act.openEdit(e.epoch) },
       secondary: { label: "Scope lists since this edit", run: () => act.scopeSince(e.epoch) },
     });
@@ -413,9 +417,19 @@ export function buildItems(d: PaletteData, act: PaletteActs): PaletteItem[] {
   return out;
 }
 
-/** Edits (dev-rebuild epochs) seen in the retained requests, newest first. */
-export function editsOf(traces: readonly TraceSummary[]): PaletteEdit[] {
+/**
+ * Edits (dev-rebuild epochs) seen in the retained requests, newest first. With the server's edits
+ * (/api/epochs, WP9b) they carry what changed, and an edit with no traffic yet is listed too.
+ */
+export function editsOf(
+  traces: readonly TraceSummary[],
+  server: readonly { id: number; at: number; label: string; files: readonly string[] }[] = [],
+): PaletteEdit[] {
   const m = new Map<number, PaletteEdit>();
+  for (const e of server) {
+    if (e.id === 0) continue;
+    m.set(e.id, { epoch: e.id, n: 0, first: e.at, label: e.label, files: e.files });
+  }
   for (const t of traces) {
     const e = t.facts?.epoch;
     if (e === undefined || t.kind === "asset") continue;

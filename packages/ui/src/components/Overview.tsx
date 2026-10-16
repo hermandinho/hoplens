@@ -8,6 +8,7 @@ import { findingQuery, quoteValue } from "../state/querySuggest";
 import { prefillQuery } from "../state/requestLog";
 import { go, route } from "../state/router";
 import { serverErrorTally, serverStats, serverStatsState } from "../state/serverStats";
+import { overviewScope } from "../state/sinceScope";
 import { openSourceAt } from "../state/source";
 import {
   ERROR_QUERIES,
@@ -46,6 +47,7 @@ import {
 } from "../state/store";
 import { findingSentence, shortLoc } from "../state/verdict";
 import { MixBar, Pctl, SevBadge } from "./Charts";
+import { SinceChip } from "./SinceChip";
 
 /*
  * Overview (plan 3.3): cause first. One hero sentence (the #1 repeatable finding by impact), a slot
@@ -87,10 +89,14 @@ export function Overview() {
   const k = kpis.value;
   const cold = includeCold.value;
   const status = loadStatus.value;
-  const findings = overviewFindings.value;
-  const errors = overviewErrors.value;
-  const routes = routeStats.value;
-  const hero = overviewHero(findings, routes, errors, k.requests);
+  // The since scope (WP9b): every number below is narrowed to the edit and later, and the header
+  // carries the chip saying so.
+  const scope = overviewScope.value;
+  const findings = scope ? scope.findings : overviewFindings.value;
+  const errors = scope ? scope.errors : overviewErrors.value;
+  const routes = scope ? scope.routes : routeStats.value;
+  const requests = scope ? scope.requests : k.requests;
+  const hero = overviewHero(findings, routes, errors, requests);
   const Strip = sinceStripSlot.value;
 
   return (
@@ -100,7 +106,10 @@ export function Overview() {
           Overview
         </h2>
         <span class="ov-sub dim">
-          <SourceNote requests={k.requests} />
+          <SourceNote
+            requests={k.requests}
+            scope={scope ? { since: scope.since, requests, partial: scope.partial } : undefined}
+          />
         </span>
         <button
           type="button"
@@ -111,14 +120,36 @@ export function Overview() {
         >
           Include cold{k.coldExcluded > 0 && !cold ? ` (${k.coldExcluded})` : ""}
         </button>
+        {scope && (
+          <SinceChip
+            detail={`${requests}${scope.partial ? "+" : ""}/${k.requests}`}
+            title={`Requests built by edit e${scope.since} and later: routes, percentiles and errors ${statsSource.value === "server" ? "from the server's per-edit stats" : "from this tab's requests"}${scope.partial ? " (at least: the server keeps the last 5 edits per route)" : ""}; findings from the ${scope.findingsFrom} retained request${scope.findingsFrom === 1 ? "" : "s"} in scope.`}
+          />
+        )}
       </header>
 
-      {k.requests === 0 ? (
-        <div class="ov-empty">
-          <b>{status === "loading" ? "Loading…" : "No traffic yet"}</b>
-          Use your app, or open Requests and send one. Each finished request feeds this page: the problem worth fixing
-          first, where the time went per route, and what changed since your last edit.
-        </div>
+      {requests === 0 ? (
+        <>
+          {scope && Strip && (
+            <div class="ov-since">
+              <Strip />
+            </div>
+          )}
+          <div class="ov-empty">
+            {scope && k.requests > 0 ? (
+              <>
+                <b>No requests since e{scope.since} yet</b>
+                Send one to an affected route, or clear the scope (Esc) to see the whole session.
+              </>
+            ) : (
+              <>
+                <b>{status === "loading" ? "Loading…" : "No traffic yet"}</b>
+                Use your app, or open Requests and send one. Each finished request feeds this page: the problem worth
+                fixing first, where the time went per route, and what changed since your last edit.
+              </>
+            )}
+          </div>
+        </>
       ) : (
         <>
           <HeroBlock hero={hero} />
@@ -137,8 +168,24 @@ export function Overview() {
   );
 }
 
-/** Where the numbers come from, honestly: server aggregates or this tab's retained summaries. */
-function SourceNote({ requests }: { requests: number }) {
+/**
+ * Where the numbers come from, honestly: server aggregates or this tab's retained summaries. Under a
+ * since scope it counts the scope (the same number as the chip), not the session.
+ */
+function SourceNote({
+  requests,
+  scope,
+}: { requests: number; scope?: { since: number; requests: number; partial: boolean } }) {
+  if (scope) {
+    const n = scope.requests;
+    return (
+      <span title={`Every number on this page is narrowed to edit e${scope.since} and later (the chip on the right).`}>
+        {n}
+        {scope.partial ? "+" : ""} request{n === 1 ? "" : "s"} since e{scope.since} ·{" "}
+        {statsSource.value === "server" ? "server stats" : "computed in this tab"}
+      </span>
+    );
+  }
   const plural = requests === 1 ? "" : "s";
   if (statsSource.value === "server") {
     const since = serverStats.value?.since;

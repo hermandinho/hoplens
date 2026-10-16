@@ -9,7 +9,7 @@ import path from "node:path";
 import ts from "typescript";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import { attachHealthEvents } from "../src/api/health";
-import { HealthMonitor } from "../src/health";
+import { HealthMonitor, loopFloorMs } from "../src/health";
 import type { Runtime } from "../src/runtime";
 import { handleUi } from "../src/server";
 import { TraceStore } from "../src/store";
@@ -46,6 +46,25 @@ describe("HealthMonitor", () => {
     // The histogram resets per window.
     await wait(30);
     expect(h.sample().loopP99).toBeLessThan(90);
+  });
+
+  test("the sampler's own timer interval is not reported as loop delay", async () => {
+    const h = monitor({ resolutionMs: 20, sampleMs: 60_000 }).start();
+    await wait(250);
+    const s = h.sample();
+    // Raw values read ~20ms (Linux) / ~31ms (Windows) on an idle loop.
+    expect(s.loopP50).toBeLessThan(10);
+  });
+
+  test("loopFloorMs: lowest window p50, clamped to [resolution, the platform's timer interval + 1]", () => {
+    expect(loopFloorMs(undefined, 31.3, 20, "win32")).toBe(31.3);
+    expect(loopFloorMs(31.3, 20.4, 20, "win32")).toBe(20.4);
+    expect(loopFloorMs(20.4, 300, 20, "win32")).toBe(20.4);
+    expect(loopFloorMs(undefined, 300, 20, "win32")).toBe(32.25);
+    expect(loopFloorMs(undefined, 300, 10, "win32")).toBe(16.625);
+    expect(loopFloorMs(undefined, 300, 20, "linux")).toBe(21);
+    expect(loopFloorMs(undefined, 20.3, 20, "linux")).toBe(20.3);
+    expect(loopFloorMs(undefined, 5, 20, "linux")).toBe(20);
   });
 
   test("keeps a ring of samples", () => {

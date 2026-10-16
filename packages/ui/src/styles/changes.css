@@ -431,6 +431,18 @@ button.epoch-now:focus-visible {
   background: var(--accent-bg);
 }
 
+/* Restored from an earlier dev session (persist: true): history, greyed. */
+.chg-epoch-past:not(.chg-epoch-on) {
+  opacity: 0.6;
+}
+
+.chg-past-tag {
+  font-size: var(--fs-label);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
 .chg-epoch-head {
   display: flex;
   flex-wrap: wrap;

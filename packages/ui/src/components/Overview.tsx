@@ -380,7 +380,7 @@ function NextFindings({ groups, hero }: { groups: FindingGroup[]; hero?: string 
           {once.length > 0 && (
             <details class="ov-once">
               <summary>
-                Seen once or dev compile <span class="count">{once.length}</span>
+                Seen once, dev compile or gone since an edit <span class="count">{once.length}</span>
                 <span class="dim"> · ranked after the rest</span>
               </summary>
               <ol class="ov-list">
@@ -436,6 +436,14 @@ function FindingRow({ g }: { g: FindingGroup }) {
             </span>
           )}
           {g.isNew && <span class="ov-new">new since last rebuild</span>}
+          {g.goneSince !== undefined && (
+            <span
+              class="ov-once-tag"
+              title={`Its route${g.routes.length === 1 ? " was" : "s were"} hit again after e${g.goneSince} without it: likely fixed by a later edit`}
+            >
+              not seen since e{g.goneSince}
+            </span>
+          )}
           <FindingLoc g={g} />
           <FindingActions g={g} />
         </div>

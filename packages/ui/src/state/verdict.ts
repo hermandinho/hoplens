@@ -87,12 +87,27 @@ export function preHandlerWait(t: TraceRecord): number | undefined {
   return h ? Math.max(0, h.start) : undefined;
 }
 
-/** Top finding by estimated saving (ties: more spans first). */
+/**
+ * How much of the request a finding accounts for, in ms: its estimated saving, else (slow-fn, which
+ * claims no saving) the function's own time from its title. Without the fallback a 1.2s cold compile
+ * outranked a function that took 12.6s of a 14s request, and the verdict blamed the compile while
+ * "Where to look" led with the function.
+ */
+export function impactMs(f: Pick<Finding, "rule" | "title" | "estSavedMs">): number {
+  if (f.estSavedMs !== undefined) return f.estSavedMs;
+  if (f.rule === "slow-fn") {
+    const m = / spent (\d+(?:\.\d+)?)ms in its own code/.exec(f.title);
+    if (m) return Number(m[1]);
+  }
+  return 0;
+}
+
+/** Top finding by impact (estimated saving, else a slow function's own time; ties: more spans first). */
 export function topFinding(findings: readonly Finding[] | undefined): Finding | undefined {
   let best: Finding | undefined;
   for (const f of findings ?? []) {
-    const a = f.estSavedMs ?? 0;
-    const b = best?.estSavedMs ?? 0;
+    const a = impactMs(f);
+    const b = best ? impactMs(best) : 0;
     if (!best || a > b || (a === b && f.spanIds.length > best.spanIds.length)) best = f;
   }
   return best;
@@ -145,7 +160,7 @@ export function verdictFor(t: TraceRecord): Verdict {
 
   // 3. The finding that would save the most.
   const top = topFinding(t.findings);
-  if (top && (top.estSavedMs ?? 0) >= VERDICT_MIN_SAVE_MS) {
+  if (top && impactMs(top) >= VERDICT_MIN_SAVE_MS) {
     const v: Verdict = {
       rule: "finding",
       tone: failed ? "fail" : "slow",
@@ -435,7 +450,14 @@ export function lookGroups(t: TraceRecord, limit = 5): LookGroup[] {
   }
 
   const ruleOf = new Map<string, FindingRule>();
-  for (const f of t.findings ?? []) for (const id of f.spanIds) if (!ruleOf.has(id)) ruleOf.set(id, f.rule);
+  /** A loop finding's location (the call site the verdict names) per member span. */
+  const loopLoc = new Map<string, SourceLocation>();
+  for (const f of t.findings ?? [])
+    for (const id of f.spanIds) {
+      if (!ruleOf.has(id)) ruleOf.set(id, f.rule);
+      if ((f.rule === "n-plus-1" || f.rule === "duplicate") && f.location && !loopLoc.has(id))
+        loopLoc.set(id, f.location);
+    }
 
   const out: LookGroup[] = [];
   for (const [key, g] of groups) {
@@ -453,7 +475,9 @@ export function lookGroups(t: TraceRecord, limit = 5): LookGroup[] {
       spanIds: g.members.map((s) => s.id),
     };
     if (shape) row.detail = shapeLabel(shape);
-    const loc = commonLocation(g.members);
+    // The repeated calls of a loop point where the verdict does (the loop's call site), not at the
+    // shared helper's own fetch line.
+    const loc = g.members.map((m) => loopLoc.get(m.id)).find(Boolean) ?? commonLocation(g.members);
     if (loc) row.location = loc;
     for (const s of g.members) {
       const r = ruleOf.get(s.id);

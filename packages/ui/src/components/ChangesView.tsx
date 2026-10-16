@@ -8,14 +8,18 @@ import {
   epochAt,
   epochList,
   epochsState,
+  isSessionEdit,
+  labelGap,
   nowTick,
   otherVerdictsByEpoch,
   regressionId,
+  requestsByEpoch,
   verdictsByEpoch,
   viaLabel,
 } from "../state/epochs";
 import { register } from "../state/keymap";
 import { type Route, go, route, setSince } from "../state/router";
+import { serverStats } from "../state/serverStats";
 import { sinceEpoch } from "../state/sinceScope";
 import { tracesState } from "../state/store";
 import { SinceChip } from "./SinceChip";
@@ -35,8 +39,10 @@ const onlyRegressions = signal(false);
 interface EpochRowData {
   id: number;
   info?: EpochView;
-  /** Retained requests built by this edit. */
+  /** Requests built by this edit (retained, or the server's count when it says more). */
   n: number;
+  /** Retained requests built by this edit (what the "requests" link lists). */
+  retained: number;
   /** Verdicts for the routes this edit affects (all of them when its routes aren't known). */
   verdicts: RouteRegression[];
   /** Verdicts for routes the edit doesn't touch: traffic drift, listed muted. */
@@ -48,12 +54,8 @@ let rowOrder: number[] = [];
 
 export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
   const all = useComputed<EpochRowData[]>(() => {
-    const counts = new Map<number, number>();
-    for (const t of tracesState.value) {
-      const e = t.facts?.epoch;
-      if (e === undefined || t.kind === "asset") continue;
-      counts.set(e, (counts.get(e) ?? 0) + 1);
-    }
+    const retained = requestsByEpoch(tracesState.value);
+    const counts = requestsByEpoch(tracesState.value, serverStats.value?.routes);
     const verdicts = verdictsByEpoch.value;
     const others = otherVerdictsByEpoch.value;
     const byId = new Map(epochList.value.map((e) => [e.id, e]));
@@ -64,6 +66,7 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
         id,
         info: byId.get(id),
         n: counts.get(id) ?? 0,
+        retained: retained.get(id) ?? 0,
         verdicts: verdicts.get(id) ?? [],
         others: others.get(id) ?? [],
       }));
@@ -73,8 +76,11 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
   const inScope = since === undefined ? all : all.filter((x) => x.id >= since);
   const rows = only ? inScope.filter((x) => x.verdicts.some((v) => v.status === "regressed")) : inScope;
   rowOrder = rows.map((x) => x.id);
-  const edits = all.filter((x) => x.id > 0).length;
-  const regressedEdits = all.filter((x) => x.verdicts.some((v) => v.status === "regressed")).length;
+  // "This session": a restart with `persist: true` restores the earlier sessions' edits (greyed below).
+  const mine = all.filter((x) => isSessionEdit(x.id, x.info));
+  const edits = mine.length;
+  const earlier = all.filter((x) => x.info?.session !== undefined && x.info.via !== "start" && x.id > 0).length;
+  const regressedEdits = mine.filter((x) => x.verdicts.some((v) => v.status === "regressed")).length;
   const traces = tracesState.value;
   const selected = r.epoch !== undefined ? Number(r.epoch) : undefined;
   const listRef = useRef<HTMLOListElement>(null);
@@ -99,6 +105,7 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
           {edits === 0
             ? "no edits yet this session"
             : `${edits} edit${edits === 1 ? "" : "s"} this session${regressedEdits ? ` · ${regressedEdits} made a route slower` : ""}`}
+          {earlier > 0 && ` · ${earlier} from earlier sessions`}
         </span>
         <SinceChip detail={`${inScope.length}/${all.length}`} title={`Edits e${since} and later only.`} />
         <fieldset class="chips chg-filter">
@@ -176,6 +183,7 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
 function filesText(info: EpochView | undefined): { text: string; title: string } {
   if (!info) return { text: "epoch seen on requests", title: "" };
   if (info.id === 0) return { text: "session start", title: "The baseline for the first edit" };
+  if (info.via === "start") return { text: "dev server restarted", title: "A new dev session began here" };
   const files = [...info.files, ...info.deleted.map((f) => `${f} (deleted)`)];
   if (files.length) {
     const more = files.length - 2 + info.moreFiles;
@@ -205,22 +213,31 @@ function EpochRow({
   traces,
   only,
 }: { row: EpochRowData; on: boolean; traces: readonly TraceSummary[]; only: boolean }) {
-  const { id, info, n } = row;
+  const { id, info, n, retained } = row;
+  const past = info?.session !== undefined;
   const verdicts = only ? row.verdicts.filter((v) => v.status === "regressed") : row.verdicts;
   const bad = row.verdicts.some((v) => v.status === "regressed");
   const f = filesText(info);
   const routes = info?.routes ?? [];
   const since = sinceEpoch.value;
+  // A restored edit older than every route's kept epochs: its requests were counted, but no longer
+  // per epoch (the server keeps each route's newest few), so "0 req" would be wrong.
+  const aged = past && n === 0;
   const none =
-    id === 0
+    id === 0 || info?.via === "start"
       ? "Session start: what the first edit is compared with."
-      : routes.length > 0
-        ? "No affected traffic yet."
-        : n > 0
-          ? `${n} request${n === 1 ? "" : "s"}; no route compared yet (each needs 3 warm requests on both sides).`
-          : "No traffic in this edit.";
+      : aged
+        ? "From an earlier session; its requests are older than the per-route stats window."
+        : routes.length > 0 && n === 0
+          ? "No affected traffic yet."
+          : n > 0
+            ? `${n} request${n === 1 ? "" : "s"}; no route compared yet (each needs 3 warm requests on both sides).`
+            : "No traffic in this edit.";
   return (
-    <li class={`chg-epoch ${on ? "chg-epoch-on" : ""} ${bad ? "chg-epoch-bad" : ""}`} data-epoch={String(id)}>
+    <li
+      class={`chg-epoch ${on ? "chg-epoch-on" : ""} ${bad ? "chg-epoch-bad" : ""} ${past ? "chg-epoch-past" : ""}`}
+      data-epoch={String(id)}
+    >
       <div class="chg-epoch-head">
         <button
           type="button"
@@ -236,6 +253,11 @@ function EpochRow({
           {f.text}
         </span>
         {info && id > 0 && <span class="dim chg-via">({viaLabel(info)})</span>}
+        {past && (
+          <span class="chg-past-tag dim" title="Restored from an earlier dev session (persist: true)">
+            session {info.session}
+          </span>
+        )}
         {routes.length > 0 && (
           <span class="chg-affects dim" title={routes.join("\n")}>
             affects {routes.slice(0, 3).join(", ")}
@@ -243,8 +265,17 @@ function EpochRow({
           </span>
         )}
         <span class="chg-epoch-actions">
-          <span class="mono dim" title="Retained requests built by this edit">
-            {n} req
+          <span
+            class="mono dim"
+            title={
+              aged
+                ? "Not known any more: the server keeps each route's newest epochs only"
+                : n > retained
+                  ? `${n} requests built by this edit (${retained} still retained to open)`
+                  : "Retained requests built by this edit"
+            }
+          >
+            {aged ? "–" : n} req
           </span>
           {since !== id && (
             <button
@@ -256,7 +287,7 @@ function EpochRow({
               since e{id}
             </button>
           )}
-          {n > 0 && (
+          {retained > 0 && (
             <button
               type="button"
               class="link-btn"
@@ -313,8 +344,22 @@ function ChangesTrack({ selected }: { selected?: number }) {
   const verdicts = verdictsByEpoch.value;
   const now = nowTick.value;
   const since = sinceEpoch.value;
-  const tl = useMemo(() => buildTimeline(epochs, traces, verdicts, now), [epochs, traces, verdicts, now]);
   const ref = useRef<HTMLDivElement>(null);
+  // Labels need ~150px each (labelGap): at phone width the fixed 7% gap let close edits overlap.
+  const width = useSignal(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => (width.value = el.clientWidth));
+    ro.observe(el);
+    width.value = el.clientWidth;
+    return () => ro.disconnect();
+  }, [width]);
+  const w = width.value;
+  const tl = useMemo(
+    () => buildTimeline(epochs, traces, verdicts, now, { minLabelGap: labelGap(w) }),
+    [epochs, traces, verdicts, now, w],
+  );
   const brush = useSignal<{ x0: number; x1: number } | null>(null);
 
   const frac = (e: PointerEvent) => {

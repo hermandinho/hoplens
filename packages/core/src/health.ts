@@ -107,6 +107,27 @@ function nsToMs(ns: number): number {
   return Number.isFinite(ns) ? round(ns / NS_PER_MS) : 0;
 }
 
+/** Windows timers fire on a 15.625ms system tick. */
+const WIN_TICK_MS = 15.625;
+
+/**
+ * monitorEventLoopDelay records the whole timer interval, resolution included: an idle loop reads
+ * ~20ms at resolution 20 on Linux and ~31ms on Windows, where the interval rounds up to the 15.6ms
+ * system tick. The floor to subtract is the lowest per-window p50 seen so far (an idle window's p50 is
+ * that interval), clamped to [resolution, the platform's interval + 1ms], so a busy first window can't
+ * make it swallow real delay. Pure; ms.
+ */
+export function loopFloorMs(
+  prevFloor: number | undefined,
+  windowP50: number,
+  resolutionMs: number,
+  platform: string = process.platform,
+): number {
+  const interval = platform === "win32" ? Math.ceil(resolutionMs / WIN_TICK_MS) * WIN_TICK_MS : resolutionMs;
+  const lowest = Math.min(prevFloor ?? Number.POSITIVE_INFINITY, windowP50);
+  return Math.max(resolutionMs, Math.min(interval + 1, lowest));
+}
+
 /** Node's --unhandled-rejections mode, as far as we can tell from flags. Default is "throw". */
 function rejectionMode(): string {
   const flags = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/)];
@@ -145,6 +166,8 @@ export class HealthMonitor extends EventEmitter {
 
   private startedAt = 0;
   private histogram?: IntervalHistogram;
+  /** The timer interval the histogram includes, in ms (loopFloorMs); undefined before the first window. */
+  private loopFloor?: number;
   private gcObserver?: PerformanceObserver;
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -217,12 +240,16 @@ export class HealthMonitor extends EventEmitter {
   sample(): HealthSample {
     const h = this.histogram;
     const mem = process.memoryUsage();
+    const has = !!h && h.count > 0;
+    if (has) this.loopFloor = loopFloorMs(this.loopFloor, nsToMs(h.percentile(50)), this.resolutionMs);
+    // Delay beyond the sampler's own interval (see loopFloorMs).
+    const delay = (ns: number) => (has ? round(Math.max(0, nsToMs(ns) - (this.loopFloor ?? this.resolutionMs))) : 0);
     const s: HealthSample = {
       t: Date.now(),
-      loopP50: h && h.count > 0 ? nsToMs(h.percentile(50)) : 0,
-      loopP99: h && h.count > 0 ? nsToMs(h.percentile(99)) : 0,
-      loopMax: h && h.count > 0 ? nsToMs(h.max) : 0,
-      loopMean: h && h.count > 0 ? nsToMs(h.mean) : 0,
+      loopP50: has ? delay(h.percentile(50)) : 0,
+      loopP99: has ? delay(h.percentile(99)) : 0,
+      loopMax: has ? delay(h.max) : 0,
+      loopMean: has ? delay(h.mean) : 0,
       rss: mem.rss,
       heapUsed: mem.heapUsed,
       heapTotal: mem.heapTotal,

@@ -162,6 +162,46 @@ describe("parallelizable", () => {
   });
 });
 
+describe("parallelizable: one cause, one finding", () => {
+  const loop = (fnId: string, n: number, overlap: number) =>
+    Array.from({ length: n }, (_, i) =>
+      span({
+        kind: "function",
+        name: "getOrder",
+        parentId: fnId,
+        start: 1 + i * (16 - overlap),
+        end: 17 + i * (16 - overlap),
+      }),
+    );
+  test("1ms timer overlap between awaited calls (Windows) keeps a 6-call loop as one run", () => {
+    const { root, handler, fn } = skeleton(200);
+    const out = only(run(makeTrace([root, handler, fn, ...loop(fn.id, 6, 1)], { duration: 200 })), "parallelizable");
+    expect(out).toHaveLength(1);
+    expect(out[0]!.count).toBe(6);
+  });
+  test("the fingerprint does not depend on how many calls the run had", () => {
+    const a = skeleton(200);
+    const b = skeleton(200);
+    const six = only(
+      run(makeTrace([a.root, a.handler, a.fn, ...loop(a.fn.id, 6, 0)], { duration: 200 })),
+      "parallelizable",
+    );
+    const four = only(
+      run(makeTrace([b.root, b.handler, b.fn, ...loop(b.fn.id, 4, 0)], { duration: 200 })),
+      "parallelizable",
+    );
+    expect(six[0]!.fingerprint).toBe(four[0]!.fingerprint);
+  });
+  test("a loop split by a real gap reports one finding (the longer run)", () => {
+    const { root, handler, fn } = skeleton(400);
+    const first = loop(fn.id, 4, 0);
+    const second = loop(fn.id, 3, 0).map((s) => ({ ...s, id: `${s.id}b`, start: s.start + 200, end: s.end + 200 }));
+    const out = only(run(makeTrace([root, handler, fn, ...first, ...second], { duration: 400 })), "parallelizable");
+    expect(out).toHaveLength(1);
+    expect(out[0]!.count).toBe(4);
+  });
+});
+
 describe("slow-fn", () => {
   test("function self time >= 100ms fires", () => {
     const { root, handler, fn } = skeleton(400);

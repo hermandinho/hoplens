@@ -376,3 +376,59 @@ describe("errors line queries", () => {
     expect(errorQueryFor(onlyThrown)).toBe(ERROR_QUERIES.thrown);
   });
 });
+
+describe("NEXT is epoch-aware: a finding the last edit fixed is marked, not current", () => {
+  const g = (fp: string, lastEpoch: number, routes: string[], impactMs = 100) =>
+    ({
+      fingerprint: fp,
+      rule: "parallelizable",
+      severity: "info",
+      title: fp,
+      requests: 5,
+      impactMs,
+      savedMsPerRequest: impactMs / 5,
+      seenOnce: false,
+      routes,
+      latestTraceId: "",
+      latestAt: 0,
+      firstAt: 0,
+      isNew: false,
+      lastEpoch,
+    }) as import("../src/state/stats").FindingGroup;
+
+  test("every route hit again after the finding's last epoch: goneSince, ranked after current ones", async () => {
+    const { markGone, isLowSignal } = await import("../src/state/stats");
+    const newest = new Map([
+      ["GET /api/products", 6],
+      ["GET /api/feed", 5],
+    ]);
+    const out = markGone([g("old", 5, ["GET /api/products"], 900), g("cur", 5, ["GET /api/feed"], 10)], newest);
+    expect(out.map((x) => x.fingerprint)).toEqual(["cur", "old"]);
+    expect(out[1]!.goneSince).toBe(5);
+    expect(isLowSignal(out[1]!)).toBe(true);
+    expect(out[0]!.goneSince).toBeUndefined();
+  });
+
+  test("a route with no newer traffic keeps the finding current", async () => {
+    const { markGone } = await import("../src/state/stats");
+    const out = markGone([g("a", 5, ["GET /api/products", "GET /api/x"])], new Map([["GET /api/products", 6]]));
+    expect(out[0]!.goneSince).toBeUndefined();
+  });
+
+  test("newest epoch per route merges retained requests and the server's kept epochs", async () => {
+    const { newestEpochByRoute } = await import("../src/state/stats");
+    const m = newestEpochByRoute(
+      [{ method: "GET", route: "/a", path: "/a", facts: { epoch: 2 } as TraceFacts }],
+      [
+        {
+          key: "GET /a",
+          epochs: [
+            { epoch: 4, count: 3 },
+            { epoch: 7, count: 0 },
+          ],
+        },
+      ],
+    );
+    expect(m.get("GET /a")).toBe(4);
+  });
+});

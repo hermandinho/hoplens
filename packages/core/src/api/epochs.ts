@@ -56,7 +56,8 @@ const CHECK_DELAY_MS = 150;
 type Subscriber = (event: "epoch" | "regression", data: unknown) => void;
 
 class EpochsService {
-  readonly regressions = new RegressionTracker();
+  /** The runtime's (restored baselines and verdicts survive a restart); a fresh one for bare test runtimes. */
+  readonly regressions: RegressionTracker;
   private readonly graph: ImportGraph;
   private readonly affectedCache = new Map<number, { routes: string[]; via: AffectedVia }>();
   private readonly subscribers = new Set<Subscriber>();
@@ -64,6 +65,7 @@ class EpochsService {
   private checkTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly rt: Runtime) {
+    this.regressions = rt.regressions ?? new RegressionTracker();
     this.graph = new ImportGraph(rt.root);
     rt.epochs.onEpoch((info) => {
       // Off the finalize path: attribution walks the import graph.

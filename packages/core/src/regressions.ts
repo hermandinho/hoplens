@@ -255,11 +255,21 @@ const STATUS_ORDER: Record<RegressionStatus, number> = {
 export class RegressionTracker {
   /** route key -> last good epoch stats (warm n >= minN, not regressed). Insertion = recency. */
   private readonly baselines = new Map<string, EpochStats>();
+  /**
+   * `key@epoch` -> the last decided verdict (regressed / improved / unchanged) for it. Once the store
+   * drops the baseline epoch a verdict used, a later evaluate can't rebuild it (it would compare with
+   * whatever is kept, or nothing): the remembered one stands in. Insertion = recency.
+   */
+  private readonly history = new Map<string, RouteRegression>();
 
-  constructor(private readonly maxRoutes = 500) {}
+  constructor(
+    private readonly maxRoutes = 500,
+    private readonly maxHistory = 1000,
+  ) {}
 
   clear(): void {
     this.baselines.clear();
+    this.history.clear();
   }
 
   /** Baseline remembered for a route (tests / diagnostics). */
@@ -267,11 +277,22 @@ export class RegressionTracker {
     return this.baselines.get(key);
   }
 
+  private remember(id: string, v: RouteRegression): void {
+    this.history.delete(id);
+    this.history.set(id, v);
+    if (this.history.size > this.maxHistory) {
+      const oldest = this.history.keys().next().value;
+      if (oldest !== undefined) this.history.delete(oldest);
+    }
+  }
+
   evaluate(stats: StatsResponse, affected?: AffectedRoutes): RegressionsResponse {
     const items: RouteRegression[] = [];
     let newest = stats.epoch;
     if (affected && affected.epoch > newest) newest = affected.epoch;
     const byRoute = new Map<string, RouteStats[]>();
+    /** route key -> its oldest kept epoch: remembered verdicts for older epochs are listed as is. */
+    const oldestKeptOf = new Map<string, number>();
 
     for (const r of stats.routes) {
       const list = byRoute.get(r.route);
@@ -283,12 +304,18 @@ export class RegressionTracker {
       const remembered = this.baselines.get(r.key);
       // A remembered baseline only stands in for epochs the store already dropped.
       let baseline = remembered && remembered.epoch < kept[0]!.epoch ? remembered : undefined;
+      const oldestKept = kept[0]!.epoch;
+      oldestKeptOf.set(r.key, oldestKept);
       for (const e of kept) {
         let verdict: RouteRegression | undefined;
-        if (baseline && e.epoch > baseline.epoch) {
-          verdict = compareEpochs(r, baseline, e);
-          items.push(verdict);
-        }
+        if (baseline && e.epoch > baseline.epoch) verdict = compareEpochs(r, baseline, e);
+        const id = `${r.key}@${e.epoch}`;
+        const past = this.history.get(id);
+        // The remembered verdict wins only when the baseline it used is gone from the store.
+        const lost = past?.baselineEpoch !== undefined && past.baselineEpoch < oldestKept;
+        if (past && lost && (!verdict || verdict.baselineEpoch !== past.baselineEpoch)) verdict = past;
+        else if (verdict && DECIDED.has(verdict.status)) this.remember(id, verdict);
+        if (verdict) items.push(verdict);
         if (e.warm >= REGRESSION_RULE.minN && verdict?.status !== "regressed") baseline = e;
       }
       if (baseline) {
@@ -299,6 +326,13 @@ export class RegressionTracker {
           if (oldest !== undefined) this.baselines.delete(oldest);
         }
       }
+    }
+
+    // Verdicts for epochs the store no longer keeps (several edits ago, or before a restart replayed
+    // with persist: true): they can't be recomputed, the remembered ones still stand.
+    for (const v of this.history.values()) {
+      const oldest = oldestKeptOf.get(v.key);
+      if (oldest !== undefined && v.epoch < oldest) items.push(v);
     }
 
     // Routes the latest edit touched that haven't been hit since: "no traffic since edit".
@@ -325,6 +359,8 @@ export class RegressionTracker {
     return { epoch: newest, rule: REGRESSION_RULE, items };
   }
 }
+
+const DECIDED = new Set<RegressionStatus>(["regressed", "improved", "unchanged"]);
 
 function noTraffic(
   key: string,

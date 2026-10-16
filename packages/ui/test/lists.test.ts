@@ -9,7 +9,7 @@ import {
   perRequest,
   stepShape,
 } from "../src/state/queries";
-import { foldBatches, splitUrl } from "../src/state/requestLog";
+import { foldBatches, keepsSubject, splitUrl } from "../src/state/requestLog";
 
 /* WP4 lists: the log's path + query split, and the Queries list | subject helpers.
  * Run: pnpm --filter @hoplens/ui exec vitest run test/lists.test.ts */
@@ -180,5 +180,30 @@ describe("foldBatches (a Replay xN batch is one log row)", () => {
 
   test("a lone run (single-run batch) is a plain row", () => {
     expect(foldBatches(list, "s1").batchSize.has("s1")).toBe(false);
+  });
+});
+
+describe("a prefilled query keeps the open request only when it is in the list", () => {
+  const sum = (over: Partial<TraceSummary>): TraceSummary =>
+    ({
+      id: "t1",
+      method: "GET",
+      url: "/api/feed",
+      path: "/api/feed",
+      route: "/api/feed",
+      kind: "route",
+      startedAt: 0,
+      done: true,
+      status: 200,
+      ...over,
+    }) as TraceSummary;
+  test("swallowed link with an unrelated 200 open: the subject closes", () => {
+    expect(keepsSubject("has:error status:<500", sum({}))).toBe(false);
+  });
+  test("the open request matches: it stays", () => {
+    expect(
+      keepsSubject("has:error status:<500", sum({ error: { type: "Error", message: "x" } } as Partial<TraceSummary>)),
+    ).toBe(true);
+    expect(keepsSubject("has:error", undefined)).toBe(false);
   });
 });

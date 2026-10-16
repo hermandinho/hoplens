@@ -11,6 +11,8 @@ import {
   groupFindings,
   isCountable,
   isError,
+  markGone,
+  newestEpochByRoute,
   routeBadges,
 } from "./stats";
 
@@ -107,7 +109,9 @@ export const retainedIds = computed(() => new Set(tracesState.value.map((t) => t
 export const overviewFindings = computed<FindingGroup[]>(() => {
   const server = statsSource.value === "server" ? serverStats.value?.findings : undefined;
   const ids = retainedIds.value;
-  return mergeFindingGroups(findingGroups.value, server, (id) => ids.has(id));
+  const merged = mergeFindingGroups(findingGroups.value, server, (id) => ids.has(id));
+  const s = statsSource.value === "server" ? serverStats.value : undefined;
+  return markGone(merged, newestEpochByRoute(finishedTraces.value, s?.routes));
 });
 export const kpis = computed(() => {
   const s = serverStats.value;

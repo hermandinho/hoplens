@@ -272,14 +272,57 @@ export interface FindingGroup {
   firstAt: number;
   /** First seen in the newest dev-rebuild epoch while older epochs exist. */
   isNew: boolean;
+  /** Newest dev-rebuild epoch a request had it in. */
+  lastEpoch?: number;
+  /**
+   * Set when every route it was seen on has had requests in a later epoch without it: the epoch it was
+   * last seen in ("not seen since e5"). Such a finding is history, not a current problem (`markGone`).
+   */
+  goneSince?: number;
 }
 
 /**
  * Low-signal findings sink below every actionable one and never become the hero: seen in a single
  * request, or a dev compile stall (cold-compile: the dev server's cost, not the code's). Mirrors core.
  */
-export function isLowSignal(f: Pick<FindingGroup, "seenOnce" | "rule">): boolean {
-  return f.seenOnce || f.rule === "cold-compile";
+export function isLowSignal(f: Pick<FindingGroup, "seenOnce" | "rule" | "goneSince">): boolean {
+  return f.seenOnce || f.rule === "cold-compile" || f.goneSince !== undefined;
+}
+
+/**
+ * Newest epoch with traffic per route key, from the retained requests and (when given) the server's
+ * kept epochs. Pure.
+ */
+export function newestEpochByRoute(
+  traces: readonly Pick<TraceSummary, "method" | "route" | "path" | "facts">[],
+  server?: readonly { key: string; epochs: readonly { epoch: number; count: number }[] }[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const note = (k: string, e: number) => {
+    if ((out.get(k) ?? Number.NEGATIVE_INFINITY) < e) out.set(k, e);
+  };
+  for (const t of traces) if (t.facts?.epoch !== undefined) note(routeKeyOf(t), t.facts.epoch);
+  for (const r of server ?? []) for (const e of r.epochs) if (e.count > 0) note(r.key, e.epoch);
+  return out;
+}
+
+/**
+ * NEXT is "what is wrong now" (plan T2): a finding whose every route was hit again in a later epoch
+ * without it is marked `goneSince` (its last epoch) and ranked with the low-signal rows. Pure.
+ */
+export function markGone<T extends FindingGroup>(groups: readonly T[], newest: ReadonlyMap<string, number>): T[] {
+  let changed = false;
+  const out = groups.map((g) => {
+    if (g.lastEpoch === undefined || g.routes.length === 0) return g;
+    const gone = g.routes.every((r) => {
+      const n = newest.get(r);
+      return n !== undefined && n > (g.lastEpoch as number);
+    });
+    if (!gone) return g;
+    changed = true;
+    return { ...g, goneSince: g.lastEpoch };
+  });
+  return changed ? rankFindingGroups(out) : out;
 }
 
 /**
@@ -287,7 +330,10 @@ export function isLowSignal(f: Pick<FindingGroup, "seenOnce" | "rule">): boolean
  * ones (`isLowSignal`), then impact (saveable ms x requests), severity, requests, recency, fingerprint.
  */
 export function rankFindingGroups<
-  T extends Pick<FindingGroup, "impactMs" | "seenOnce" | "rule" | "severity" | "requests" | "latestAt" | "fingerprint">,
+  T extends Pick<
+    FindingGroup,
+    "impactMs" | "seenOnce" | "rule" | "severity" | "requests" | "latestAt" | "fingerprint" | "goneSince"
+  >,
 >(list: readonly T[]): T[] {
   return [...list].sort(
     (a, b) =>
@@ -317,6 +363,7 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
   const multiEpoch = maxEpoch > minEpoch;
 
   type Acc = FindingGroup & { routeSet: Set<string>; firstEpoch: number; savedSum: number; savedN: number };
+  const known = (e: number) => (Number.isFinite(e) ? e : undefined);
   const groups = new Map<string, Acc>();
   for (const t of traces) {
     if (!t.findings?.length) continue;
@@ -362,6 +409,7 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
           latestAt: t.startedAt,
           firstAt: t.startedAt,
           firstEpoch: epoch,
+          lastEpoch: known(epoch),
           isNew: false,
           savedSum: saved ?? 0,
           savedN: saved === undefined ? 0 : 1,
@@ -382,6 +430,7 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
       }
       if (t.startedAt < g.firstAt) g.firstAt = t.startedAt;
       if (epoch < g.firstEpoch) g.firstEpoch = epoch;
+      if (known(epoch) !== undefined && epoch > (g.lastEpoch ?? Number.NEGATIVE_INFINITY)) g.lastEpoch = epoch;
     }
   }
 

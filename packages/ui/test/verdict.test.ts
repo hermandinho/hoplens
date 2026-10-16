@@ -466,3 +466,47 @@ describe("baselines", () => {
     expect(urlVariantKey("/api/x?b=2&a=1#f")).toBe("/api/x?a=1&b=2");
   });
 });
+
+describe("verdict ranks by impact, not only by estSavedMs", () => {
+  test("a cold trace whose function took 90% leads with the function, not the 1.2s compile", () => {
+    const fn = span({ kind: "function", name: "listProducts", start: 1300, end: 13900 });
+    const t = trace({
+      duration: 14000,
+      spans: [fn],
+      facts: facts({ cold: true, compileMs: 1230, preHandlerMs: 40 }),
+      findings: [
+        {
+          rule: "cold-compile",
+          severity: "info",
+          title: "Cold request: 1230ms spent compiling/loading the route",
+          fingerprint: "c",
+          spanIds: [],
+          estSavedMs: 1230,
+        },
+        {
+          rule: "slow-fn",
+          severity: "error",
+          title: "listProducts spent 12600ms in its own code (90% of the request)",
+          fingerprint: "s",
+          spanIds: [fn.id],
+          fn: "listProducts",
+        },
+      ] as Finding[],
+    });
+    const v = verdictFor(t);
+    expect(v.finding?.rule).toBe("slow-fn");
+    expect(v.text).toContain("listProducts()");
+    expect(v.saveableMs).toBeUndefined();
+  });
+});
+
+describe("Where to look names the same place as the verdict", () => {
+  test("the N+1 row points at the loop's call site, not the helper's fetch line", () => {
+    const t = feedTrace();
+    for (const s of t.spans) if (s.kind === "fetch") s.location = { file: "src/lib/external.ts", line: 28 };
+    t.findings![0]!.location = { file: "src/lib/external.ts", line: 67, via: "call-site" };
+    const row = lookGroups(t).find((g) => g.count === 10 && g.kind === "fetch");
+    expect(row?.location?.line).toBe(67);
+    expect(verdictFor(t).location?.line).toBe(67);
+  });
+});

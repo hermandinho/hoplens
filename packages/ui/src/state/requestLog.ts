@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import type { TraceSummary } from "../api/types";
 import { clearedAt, liveActivity } from "./activity";
 import { matchQuery, parseQuery, summaryTarget } from "./query";
-import { route } from "./router";
+import { go, route } from "./router";
 import { serverLatencyByKey, serverStats } from "./serverStats";
 import { type Percentiles, routeKeyOf } from "./stats";
 import { clientRouteStats, loadTrace, mainView, selectedTraceId, setMainView, statsSource, tracesState } from "./store";
@@ -252,11 +252,25 @@ export function logVisible(): boolean {
 
 export const QUERY_INPUT_MAIN = "rlog-q-main";
 
+/**
+ * Whether the open request stays the subject when a link prefills `q`: only when it is in the list that
+ * query shows. Pure. (A "swallowed 4" link must not leave an unrelated 200 open beside the four rows.)
+ */
+export function keepsSubject(q: string, open: TraceSummary | undefined): boolean {
+  return !!open && matchQuery(parseQuery(q), summaryTarget(open));
+}
+
 /** Prefill the query (from a finding badge or a "Needs attention" row) and show the Requests view. */
 export function prefillQuery(q: string): void {
+  const id = selectedTraceId.peek();
+  const open = id ? tracesState.peek().find((t) => t.id === id) : undefined;
   batch(() => {
     logQuery.value = q;
     logCursor.value = null;
   });
-  setMainView("requests");
+  if (keepsSubject(q, open)) setMainView("requests");
+  else {
+    const since = route.peek().since;
+    go(since ? { view: "requests", since } : { view: "requests" });
+  }
 }

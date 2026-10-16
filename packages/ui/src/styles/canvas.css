@@ -565,6 +565,16 @@
   );
 }
 
+/*
+ * A folded row's name ("getUser") keeps its width and the note gives way: proportional shrinking took
+ * a fraction of a pixel off the name too, enough to ellipsize it ("getUs…"). Capped so a long name
+ * still leaves the note some room.
+ */
+.jw-name-keep {
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
 .tc-fold-note {
   /* shrinks before the span name does */
   flex: 0 1000 auto;

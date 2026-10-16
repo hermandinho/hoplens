@@ -67,6 +67,36 @@ export function epochLabel(e: EpochNaming): string {
   return "rebuild";
 }
 
+/**
+ * An edit of this dev session: not a session start (e0, or the start marker a restart writes) and not
+ * restored from an earlier session (`persist: true` tags those with `session`). Pure.
+ */
+export function isSessionEdit(id: number, info?: Pick<EpochView, "via" | "session">): boolean {
+  return id > 0 && info?.via !== "start" && info?.session === undefined;
+}
+
+/**
+ * Requests per epoch: the retained ones, or the server's per-route epoch counts when those say more
+ * (they survive ring eviction and a restart with `persist: true`). Pure.
+ */
+export function requestsByEpoch(
+  traces: readonly Pick<TraceSummary, "kind" | "facts">[],
+  serverRoutes?: readonly { epochs: readonly { epoch: number; count: number }[] }[],
+): Map<number, number> {
+  const local = new Map<number, number>();
+  for (const t of traces) {
+    const e = t.facts?.epoch;
+    if (e === undefined || t.kind === "asset") continue;
+    local.set(e, (local.get(e) ?? 0) + 1);
+  }
+  const server = new Map<number, number>();
+  for (const r of serverRoutes ?? [])
+    for (const e of r.epochs) server.set(e.epoch, (server.get(e.epoch) ?? 0) + e.count);
+  const out = new Map(local);
+  for (const [e, n] of server) if (n > (out.get(e) ?? 0)) out.set(e, n);
+  return out;
+}
+
 /** How the files were found, for the Changes row: "(saved)", "(from rebuilt chunks)", ... */
 export function viaLabel(e: Pick<EpochView, "via">): string {
   switch (e.via) {
@@ -172,6 +202,24 @@ export const STATUS_RANK: Record<RegressionStatus, number> = {
 };
 
 /** Verdicts grouped by the epoch they judge, each group worst first, then by route. */
+/**
+ * Credit the edit that undid a regression. Core judges each edit against the route's last good
+ * baseline, so a revert after a regressed e5 reads "unchanged" vs e4: when an unchanged / improved
+ * verdict's route regressed at an epoch between its baseline and itself, it gets `fixes` = that
+ * (newest) epoch. Pure.
+ */
+export function annotateFixes(items: Iterable<RouteRegression>): RouteRegression[] {
+  const list = [...items];
+  const regressed = new Map<string, number[]>();
+  for (const r of list) if (r.status === "regressed") regressed.set(r.key, [...(regressed.get(r.key) ?? []), r.epoch]);
+  return list.map((r) => {
+    if ((r.status !== "unchanged" && r.status !== "improved") || r.baselineEpoch === undefined) return r;
+    const base = r.baselineEpoch;
+    const between = (regressed.get(r.key) ?? []).filter((e) => e > base && e < r.epoch);
+    return between.length ? { ...r, fixes: Math.max(...between) } : r;
+  });
+}
+
 export function regressionsByEpoch(items: Iterable<RouteRegression>): Map<number, RouteRegression[]> {
   const out = new Map<number, RouteRegression[]>();
   for (const r of items) {
@@ -260,10 +308,23 @@ export function describeRegression(r: RouteRegression, minN = 3): RegressionText
         io: ioDelta(r.io),
         grew,
         n,
-        note: r.lowConfidence ? "low confidence" : undefined,
+        note:
+          r.fixes !== undefined
+            ? `fixed the e${r.fixes} regression${r.lowConfidence ? ", low confidence" : ""}`
+            : r.lowConfidence
+              ? "low confidence"
+              : undefined,
       };
     }
     case "unchanged":
+      if (r.fixes !== undefined)
+        return {
+          glyph: "-",
+          tone: "better",
+          p50,
+          n,
+          note: `back to e${r.baselineEpoch}: fixed the e${r.fixes} regression`,
+        };
       return { glyph: "=", tone: "same", p50, n, note: r.lowConfidence ? "unchanged, low confidence" : "unchanged" };
     case "insufficient":
       return {
@@ -448,19 +509,28 @@ export function buildTimeline(
       improved: v.some((r) => r.status === "improved"),
     };
   });
-  // Label from the newest backwards; a tick too close to the last labelled one stays bare
-  // (its name is in the tooltip and the table). Regressed ticks win over plain ones.
-  let lastX = Number.POSITIVE_INFINITY;
-  for (let i = ticks.length - 1; i >= 0; i--) {
-    const t = ticks[i] as TimelineTick;
-    if (lastX - t.x >= gap || (t.regressed && lastX - t.x >= gap / 2)) {
+  // Label from the newest backwards, regressed ticks first; a tick closer than `gap` to a labelled one
+  // stays bare (its name is in the tooltip and the table), so labels never overlap.
+  const labelled: number[] = [];
+  const free = (x: number) => labelled.every((l) => Math.abs(l - x) >= gap);
+  for (const pass of [true, false])
+    for (let i = ticks.length - 1; i >= 0; i--) {
+      const t = ticks[i] as TimelineTick;
+      if (t.regressed !== pass || !free(t.x)) continue;
       t.showLabel = true;
-      lastX = t.x;
+      labelled.push(t.x);
     }
-  }
   const tones = dotTones(reqs);
   const dots = reqs.map((t) => ({ id: t.id, x: xOf(t.startedAt), tone: tones.get(t.id) ?? "ok" }));
   return { t0, t1, endsNow, ticks, dots };
+}
+
+/** Room one Changes tick label takes ("e12 store.ts…": up to ~22 mono characters). */
+const TICK_LABEL_PX = 150;
+
+/** Minimum distance between labelled ticks, as a fraction of the track (0.07 before it is measured). Pure. */
+export function labelGap(widthPx: number): number {
+  return widthPx > 0 ? Math.max(0.07, TICK_LABEL_PX / widthPx) : 0.07;
 }
 
 /** The epoch in effect at time `t` (the newest that started at or before it; else the oldest). */
@@ -702,7 +772,9 @@ export const nowTick = signal(Date.now());
 /** Edits, oldest first. */
 export const epochList = computed<EpochView[]>(() => [...(epochsData.value?.items ?? [])].sort((a, b) => a.id - b.id));
 export const epochById = computed(() => new Map(epochList.value.map((e) => [e.id, e])));
-const verdictSplit = computed(() => splitAffected(regressionsByEpoch(regressionMap.value.values()), epochById.value));
+const verdictSplit = computed(() =>
+  splitAffected(regressionsByEpoch(annotateFixes(regressionMap.value.values())), epochById.value),
+);
 /**
  * Each edit's verdicts for the routes it affects (every verdict when the edit's routes aren't known).
  * This is what the rail, the track, the strip, Changes and the toast judge an edit by.

@@ -471,3 +471,81 @@ describe("shell wiring", () => {
     ]);
   });
 });
+
+describe("Changes after a restart with persist: true", () => {
+  test("only this session's edits count: not e0, not a restart's start marker, not restored ones", async () => {
+    const { isSessionEdit } = await import("../src/state/epochs");
+    expect(isSessionEdit(0, { via: "start" })).toBe(false);
+    expect(isSessionEdit(8, { via: "start" })).toBe(false); // the restart marker
+    expect(isSessionEdit(3, { via: "src-watch", session: 1 })).toBe(false);
+    expect(isSessionEdit(9, { via: "src-watch" })).toBe(true);
+  });
+  test("restored edits count the server's requests, not only the retained ones", async () => {
+    const { requestsByEpoch } = await import("../src/state/epochs");
+    const m = requestsByEpoch(
+      [{ kind: "route", facts: { epoch: 9 } as never }],
+      [
+        {
+          epochs: [
+            { epoch: 3, count: 6 },
+            { epoch: 9, count: 1 },
+          ],
+        },
+        { epochs: [{ epoch: 3, count: 2 }] },
+      ],
+    );
+    expect(m.get(3)).toBe(8);
+    expect(m.get(9)).toBe(1);
+  });
+});
+
+describe("Changes track labels never overlap", () => {
+  test("at phone width close edits leave all but one label bare; a regressed one wins", async () => {
+    const { buildTimeline, labelGap } = await import("../src/state/epochs");
+    const ep = (id: number, at: number) => ({
+      id,
+      at,
+      files: [`f${id}.ts`],
+      deleted: [],
+      moreFiles: 0,
+      via: "src-watch" as const,
+      candidates: [],
+    });
+    const eps = [ep(0, 1_000_000), ep(1, 1_010_000), ep(5, 1_500_000), ep(7, 1_520_000)];
+    const bad = new Map([[5, [{ status: "regressed" }]]]) as never;
+    const tl = buildTimeline(eps, [], bad, 1_600_000, { minLabelGap: labelGap(400) });
+    const shown = tl.ticks.filter((t) => t.showLabel).map((t) => t.id);
+    expect(shown).toEqual([1, 5]);
+    for (const a of tl.ticks.filter((t) => t.showLabel))
+      for (const b of tl.ticks.filter((t) => t.showLabel && t !== a))
+        expect(Math.abs(a.x - b.x)).toBeGreaterThanOrEqual(labelGap(400));
+  });
+});
+
+describe("a revert that undid a regression is credited", () => {
+  const v = (epoch: number, status: string, baselineEpoch: number) =>
+    ({
+      key: "GET /api/products",
+      method: "GET",
+      route: "/api/products",
+      epoch,
+      baselineEpoch,
+      status,
+      lowConfidence: false,
+      before: { n: 6, p50: 15 },
+      after: { n: 6, p50: status === "regressed" ? 94 : 16 },
+      buckets: [],
+      findings: { added: [], removed: [] },
+      basis: "route",
+    }) as never;
+  test("e6 unchanged vs e4 after e5 regressed reads 'fixed the e5 regression'", async () => {
+    const { annotateFixes, describeRegression } = await import("../src/state/epochs");
+    const out = annotateFixes([v(5, "regressed", 4), v(6, "unchanged", 4), v(4, "unchanged", 3)]);
+    const e6 = out.find((r) => r.epoch === 6)!;
+    expect(e6.fixes).toBe(5);
+    expect(out.find((r) => r.epoch === 4)!.fixes).toBeUndefined();
+    const d = describeRegression(e6);
+    expect(d).toMatchObject({ glyph: "-", tone: "better" });
+    expect(d.note).toContain("fixed the e5 regression");
+  });
+});

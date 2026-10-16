@@ -10,7 +10,8 @@ import { cheatsheetOpen } from "../state/palette";
 
 const SCOPE_LABELS: Record<KeyScope, { title: string; note: string }> = {
   global: { title: "Anywhere", note: "" },
-  list: { title: "List", note: "Overview routes, Requests, Queries" },
+  // One row per key, labelled for the list on screen (the Changes edits included).
+  list: { title: "List", note: "the list on screen: routes, requests, query shapes or edits" },
   subject: { title: "Open subject", note: "a request or route is open" },
   trace: { title: "Open request", note: "a request is open" },
   canvas: { title: "Span canvas", note: "focus in the canvas" },

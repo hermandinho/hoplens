@@ -27,13 +27,19 @@
       "import": "./dist/trace.mjs",
       "require": "./dist/trace.js"
     },
+    "./query": {
+      "types": "./dist/query.d.ts",
+      "import": "./dist/query.mjs",
+      "require": "./dist/query.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --exclude \"**/benchmark.test.ts\"",
+    "bench": "vitest run test/benchmark.test.ts"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

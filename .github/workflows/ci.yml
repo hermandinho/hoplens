@@ -36,6 +36,8 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Build first: typecheck resolves workspace packages (e.g. @hoplens/schema) through their dist
+      # .d.ts, so typechecking against a missing or half-written dist races.
       - name: Build packages
         run: pnpm -r --filter "./packages/*" run build
 
@@ -44,6 +46,16 @@ jobs:
 
       - name: Test
         run: pnpm -r --parallel run test
+
+      # Overhead budget (< 2 ms per request, AGENTS.md). Run on its own, after the parallel tests, so
+      # CPU contention can't fail it. Linux only: the shared Windows runners are too noisy for a timing gate.
+      - name: Bench (core)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @hoplens/core bench
+
+      - name: Bench (next)
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @hoplens/next bench
 
   integration:
     needs: check

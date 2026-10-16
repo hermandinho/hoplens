@@ -4,6 +4,8 @@ export type HopKind =
   | "request"
   | "proxy"
   | "router"
+  /** Dev compile / module load (findPageComponents, loadRouteModule, RouteModule.prepare, ...). */
+  | "compile"
   | "handler"
   | "render"
   | "function"
@@ -84,7 +86,72 @@ export interface TraceRecord {
   spans: SpanRecord[];
   logs: LogRecord[];
   error?: CapturedError;
+  /** Computed in finalize() once the trace is done. Absent while in flight or if analysis failed. */
+  facts?: TraceFacts;
+  findings?: Finding[];
 }
+
+/* ---------------------------------------------------------- facts + findings */
+
+/**
+ * Where a request's time went. Redis spans stay `kind: "db"` (with `db.system: "redis"`) and are
+ * bucketed as "cache" here.
+ */
+export type TimeBucket = "db" | "cache" | "ext" | "fn" | "framework" | "compile" | "idle";
+
+export interface TraceFacts {
+  /**
+   * Self-time per bucket (ms), computed by interval union so buckets sum to ~duration. "fn" = user
+   * function self time (label it "your code" in UI), "ext" = outgoing fetch/http, "framework" = Next
+   * internals, "compile" = dev compile/module load, "idle" = time covered by no child span.
+   */
+  time: Record<TimeBucket, number>;
+  /** ms from trace start to first response byte, when known. */
+  ttfb?: number;
+  reqBytes: number;
+  resBytes: number;
+  counts: { spans: number; db: number; fetch: number; cache: number; fn: number; warn: number; error: number };
+  cold: boolean;
+  compileMs: number;
+  /** Spans that ended after the trace finished: shown in the timeline (attrs["hoplens.late"]), not in facts/findings. */
+  droppedSpans: number;
+  /** Coarse dev-rebuild epoch counter (Phase 1: bumps when the dev build output changes). */
+  epoch: number;
+  /** True when the span cap (~2000) stopped facts/analysis early. */
+  truncated?: boolean;
+}
+
+export type FindingRule =
+  | "n-plus-1"
+  | "duplicate"
+  | "parallelizable"
+  | "slow-fn"
+  | "fetch-uncached"
+  | "cold-compile"
+  | "large-payload"
+  | "swallowed-error"
+  | "logs-on-success";
+
+export interface Finding {
+  rule: FindingRule;
+  severity: "info" | "warn" | "error";
+  /** One line, names the function/query/host, e.g. "listProducts ran SELECT products x50 (N+1)". */
+  title: string;
+  detail?: string;
+  /** Stable across traces (rule + normalized query/url/fn + route) so the UI can group the same problem across requests. */
+  fingerprint: string;
+  spanIds: string[];
+  fn?: string;
+  location?: SourceLocation;
+  count?: number;
+  /** Estimated ms saved if fixed; omit if unknown. */
+  estSavedMs?: number;
+}
+
+export type FindingSummary = Pick<
+  Finding,
+  "rule" | "severity" | "title" | "fingerprint" | "fn" | "location" | "count" | "estSavedMs"
+>;
 
 export interface TraceSummary {
   id: string;
@@ -100,6 +167,8 @@ export interface TraceSummary {
   status?: number;
   error?: string;
   hops: number;
+  facts?: TraceFacts;
+  findings?: FindingSummary[];
 }
 
 /* ------------------------------------------------------------- discovery */

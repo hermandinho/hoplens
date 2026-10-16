@@ -13,12 +13,15 @@ import {
   makeWrap,
   markOwnServer,
 } from "./capture";
+import { EpochTracker, distMtimeProbe } from "./epoch";
 import { HoplensError } from "./errors";
 import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
+import { QueryStatsStore } from "./queries";
 import { type Redactor, makeRedactor } from "./serialize";
 import { handleUi } from "./server";
 import { setDistDir } from "./sourcemap";
+import { RouteStatsStore } from "./stats";
 import { TraceStore } from "./store";
 import type { Discovery, DiscoverySource, HttpTap, ProxyInfo, RouteInfo } from "./types";
 
@@ -50,6 +53,12 @@ export class Runtime {
   readonly httpTap?: HttpTap;
   readonly log: Logger;
   readonly startedAt = Date.now();
+  /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
+  readonly epochs: EpochTracker;
+  /** Per-route, per-epoch rolling aggregates (GET /api/stats). Survive ring-buffer eviction. */
+  readonly stats = new RouteStatsStore();
+  /** Cross-request query / host aggregates (GET /api/queries). */
+  readonly queries = new QueryStatsStore();
 
   appPort?: number;
   uiPort?: number;
@@ -70,6 +79,16 @@ export class Runtime {
     this.banner = cfg.banner;
     this.log = createLogger("runtime");
     setDistDir(this.root, this.options.distDir);
+    this.epochs = new EpochTracker(distMtimeProbe(this.root, this.options.distDir ?? ".next"));
+    // Both aggregates swallow their own errors: a listener that threw would surface in finish()'s timer.
+    this.store.on("done", (t) => {
+      this.stats.add(t);
+      this.queries.add(t);
+    });
+    this.store.on("clear", () => {
+      this.stats.clear();
+      this.queries.clear();
+    });
   }
 
   start(): this {

@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import type { QueryKind } from "./queries";
+import { type QueryTarget, matchQuery, parseQuery } from "./query";
 import type { Runtime } from "./runtime";
 import { preview } from "./serialize";
 import { summarize } from "./store";
-import type { TraceRecord } from "./types";
+import type { BodyCapture, TraceRecord } from "./types";
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 let uiCache: { mtimeMs: number; html: string } | null = null;
@@ -150,8 +152,36 @@ addRoute("GET", "/api/routes", ({ rt, url, res }) => {
   json(res, 200, rt.discover(url.searchParams.has("fresh")));
 });
 
-addRoute("GET", "/api/traces", ({ rt, res }) => {
-  json(res, 200, rt.store.list());
+addRoute("GET", "/api/traces", ({ rt, url, res }) => {
+  const q = url.searchParams.get("q");
+  if (!q || !q.trim()) return json(res, 200, rt.store.list());
+  // Same array shape as the unfiltered list; dropped terms are reported in a header so the UI can
+  // flag them without a second request.
+  const query = parseQuery(q);
+  const out = rt.store
+    .records()
+    .filter((t) => matchQuery(query, recordTarget(t)))
+    .map(summarize);
+  res.setHeader("x-hoplens-query-errors", encodeURIComponent(JSON.stringify(query.errors)));
+  json(res, 200, out);
+});
+
+addRoute("GET", "/api/stats", ({ rt, url, res }) => {
+  json(res, 200, rt.stats.snapshot({ buckets: url.searchParams.get("buckets") === "1" }));
+});
+
+addRoute("GET", "/api/queries", ({ rt, url, res }) => {
+  const kind = url.searchParams.get("kind");
+  const limit = Number(url.searchParams.get("limit"));
+  json(
+    res,
+    200,
+    rt.queries.snapshot({
+      kind: kind === "db" || kind === "cache" || kind === "fetch" ? (kind as QueryKind) : undefined,
+      limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+      retained: (id) => rt.store.get(id) !== undefined,
+    }),
+  );
 });
 
 addRoute("DELETE", "/api/traces", ({ rt, res }) => {
@@ -211,15 +241,18 @@ addRoute("GET", "/api/events", ({ rt, req, res }) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(t ? summarize(t) : {})}\n\n`);
   const onStart = send("start");
   const onDone = send("done");
+  const onUpdate = send("update");
   const onClear = send("clear");
   rt.store.on("start", onStart);
   rt.store.on("done", onDone);
+  rt.store.on("update", onUpdate);
   rt.store.on("clear", onClear);
   const beat = setInterval(() => res.write(": ping\n\n"), 15000);
   const stop = () => {
     clearInterval(beat);
     rt.store.off("start", onStart);
     rt.store.off("done", onDone);
+    rt.store.off("update", onUpdate);
     rt.store.off("clear", onClear);
   };
   req.on("close", stop);
@@ -230,6 +263,46 @@ addRoute("POST", "/api/run", async ({ rt, req, res }) => {
   const input = JSON.parse((await readBody(req)) || "{}");
   await run(rt, input, res);
 });
+
+/* ------------------------------------------------------------------ search */
+
+function bodyText(b: BodyCapture | undefined): string | undefined {
+  if (!b) return undefined;
+  if (b.text !== undefined) return b.text;
+  if (b.json === undefined) return undefined;
+  try {
+    return JSON.stringify(b.json);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Server-side search target. Free text covers path, url, route, error message, logs and the captured
+ * (already redacted) request/response bodies; the expensive sources are thunks, only evaluated when the
+ * cheaper ones didn't match.
+ */
+export function recordTarget(t: TraceRecord): QueryTarget {
+  return {
+    method: t.method,
+    path: t.path,
+    route: t.route,
+    kind: t.kind,
+    status: t.done ? t.status : undefined,
+    duration: t.duration,
+    cold: t.facts?.cold,
+    rules: t.findings?.map((f) => f.rule),
+    error: !!t.error,
+    text: [
+      t.url,
+      t.route,
+      t.error?.message,
+      () => t.logs.map((l) => l.text).join("\n"),
+      () => bodyText(t.request.body),
+      () => bodyText(t.response.body),
+    ],
+  };
+}
 
 /* -------------------------------------------------------------- entrypoint */
 

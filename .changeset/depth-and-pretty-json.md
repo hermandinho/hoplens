@@ -29,8 +29,6 @@ New instrumentation:
 
 New in Journey:
 
-- A "Slowest" callout at the top of the waterfall pins the longest leaf
-  span, its ms, and its share of total — one click jumps to it.
 - When a step errors, console lines emitted inside its time window show
   up grouped beneath it, so you don't have to hop to the Console tab to
   piece together what went wrong.

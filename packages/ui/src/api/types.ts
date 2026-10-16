@@ -652,3 +652,225 @@ export interface RegressionsResponse {
   /** Newest epoch first, regressed first within an epoch. Filters: ?epoch=N, ?status=a,b. */
   items: RouteRegression[];
 }
+
+// WP6 -- process health: GET /api/health and the SSE `event: health` on /api/events (mirrors core health.ts).
+
+export interface HealthSample {
+  /** Epoch ms when the sample closed. */
+  t: number;
+  /** Event-loop delay over the sample window, in ms. */
+  loopP50: number;
+  loopP99: number;
+  loopMax: number;
+  loopMean: number;
+  /** Bytes. */
+  rss: number;
+  heapUsed: number;
+  heapTotal: number;
+  external: number;
+  /** GC pauses that ended in this window. */
+  gcCount: number;
+  gcMs: number;
+}
+
+export type ProcessErrorKind = "uncaughtException" | "unhandledRejection";
+
+export interface ProcessErrorRecord {
+  id: number;
+  t: number;
+  kind: ProcessErrorKind;
+  name: string;
+  message: string;
+  stack?: string;
+}
+
+export interface HealthErrorCounts {
+  uncaughtException: number;
+  unhandledRejection: number;
+}
+
+export interface HealthSnapshot {
+  startedAt: number;
+  /** Sampler period in ms. */
+  sampleMs: number;
+  /** False when the monitor is not attached (production, or stopped). */
+  active: boolean;
+  current: HealthSample | null;
+  samples: HealthSample[];
+  gc: { count: number; totalMs: number; maxMs: number; byKind: Record<string, number> };
+  errors: ProcessErrorRecord[];
+  errorCounts: HealthErrorCounts;
+  /** Whether unhandled rejections are being recorded (only while the app has its own listener). */
+  watchingRejections: boolean;
+}
+
+/** SSE `event: health` payload. */
+export interface HealthTick {
+  current: HealthSample | null;
+  errorCounts: HealthErrorCounts;
+  /** Errors recorded since the previous tick sent to this client. */
+  newErrors: ProcessErrorRecord[];
+}
+
+// WP5 -- Overview rollup: impact-ranked findings, errors tally, exemplars, per-epoch delta (mirrors core stats.ts).
+
+/**
+ * Failed and quietly failed requests, disjoint: fivexx = answered >= 500 with no exception captured,
+ * thrown = failed with an exception captured, swallowed = answered below 500 although an exception
+ * was captured. fivexx + thrown = EpochStats.errors.
+ */
+export interface ErrorKinds {
+  fivexx: number;
+  thrown: number;
+  swallowed: number;
+}
+
+export interface FindingCount {
+  fn?: string;
+  location?: SourceLocation;
+  maxCount?: number;
+  /** Sum of per-request saving estimates (ms) over `savedN` requests. */
+  savedMsSum?: number;
+  savedN?: number;
+  lastTraceId?: string;
+  lastSeen?: number;
+}
+
+export interface EpochStats {
+  errorKinds?: ErrorKinds;
+}
+
+export interface RouteEpochDelta {
+  epoch: number;
+  baselineEpoch: number;
+  /** Regression rule; "insufficient" = warm n < 3 on either side. */
+  status: "regressed" | "improved" | "unchanged" | "insufficient" | "no-traffic";
+  deltaMs?: number;
+  /** 0.34 = +34%. */
+  deltaPct?: number;
+  nBefore: number;
+  nAfter: number;
+  lowConfidence: boolean;
+  basis: "variants" | "route";
+}
+
+export interface Exemplar {
+  traceId: string;
+  ms: number;
+  epoch: number;
+}
+
+export interface RouteExemplars {
+  fast: Exemplar;
+  typical: Exemplar;
+  slow: Exemplar;
+  n: number;
+}
+
+export interface ServerRouteStats {
+  /** Newest epoch vs this route's previous one; absent without traffic in the newest epoch. */
+  delta?: RouteEpochDelta;
+  exemplars?: RouteExemplars;
+}
+
+export interface StatsTotals {
+  errorKinds?: ErrorKinds;
+}
+
+/** One finding across routes and kept epochs (core `rollupFindings`). */
+export interface FindingRollup {
+  fingerprint: string;
+  rule: FindingRule;
+  severity: FindingSeverity;
+  title: string;
+  fn?: string;
+  location?: SourceLocation;
+  maxCount?: number;
+  requests: number;
+  routes: string[];
+  /** Mean per-request saving (ms). */
+  savedMsPerRequest?: number;
+  /** savedMsPerRequest x requests: the total. */
+  impactMs: number;
+  seenOnce: boolean;
+  firstEpoch: number;
+  lastEpoch: number;
+  lastSeen: number;
+  lastTraceId?: string;
+}
+
+export interface StatsResponse {
+  /** Ranked: repeatable before seen-once, then by impact. Absent from older cores. */
+  findings?: FindingRollup[];
+}
+
+// WP7 -- Replay xN: POST /api/run?repeat=N (mirrors core replay.ts). Interfaces below merge into the
+// existing TraceSummary / RunInput declarations.
+
+export interface TraceSummary {
+  /** Same id on every run of one Replay xN batch; the log folds them into one row. */
+  batchId?: string;
+}
+
+export interface RunInput {
+  /** 1-50 (more is capped). Also accepted as `?repeat=N`. Absent = single run, RunResult. */
+  repeat?: number;
+  /** Keep going after a 5xx (default: stop at the first one). */
+  keepGoing?: boolean;
+}
+
+export interface ReplayWarmStats {
+  /** Runs that count: not cold, reached the app, status < 500, trace captured. */
+  n: number;
+  p50?: number;
+  p95?: number;
+  min?: number;
+  max?: number;
+}
+
+export type ReplayExclusion = "cold" | "5xx" | "error" | "no-trace";
+
+export interface ReplayRun {
+  runId: string;
+  traceId?: string;
+  status: number;
+  error?: string;
+  /** Client-side wall time, ms. */
+  elapsed: number;
+  /** Server-side trace duration, ms (what the stats use). */
+  duration?: number;
+  cold: boolean;
+  /** Why the run is left out of `warm`; absent = counted. */
+  excluded?: ReplayExclusion;
+}
+
+export interface ReplayPrevious {
+  batchId: string;
+  /** epoch ms. */
+  at: number;
+  warm: ReplayWarmStats;
+  coldExcluded: number;
+}
+
+/** Response of POST /api/run with `repeat`. 502 when every run failed to reach the app; 400 on bad input. */
+export interface ReplayResult {
+  batchId: string;
+  /** "GET /api/feed" or "GET /api/feed @profile": what "vs last run" compares under. */
+  key: string;
+  requested: number;
+  repeat: number;
+  capped: boolean;
+  runs: ReplayRun[];
+  warm: ReplayWarmStats;
+  coldExcluded: number;
+  /** 5xx (unless keepGoing), unreachable app, or the 120s total cap. */
+  stopped?: "5xx" | "unreachable" | "timeout";
+  /** Last batch for the same key (core keeps 100 keys); null on the first. */
+  previous: ReplayPrevious | null;
+  /** This batch minus previous; p50Pct 0.2 = +20%. Absent when either side has no warm runs. */
+  vsPrevious?: { p50Ms: number; p95Ms: number; p50Pct: number };
+  /** Last run's trace and status. */
+  traceId?: string;
+  status: number;
+  elapsed: number;
+}

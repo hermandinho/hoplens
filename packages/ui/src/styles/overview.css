@@ -54,69 +54,10 @@
   box-shadow: inset 1px 0 color-mix(in srgb, var(--bg) 55%, transparent);
 }
 
-.mix-bar-mini {
-  width: 60px;
-  min-width: 60px;
-  height: 6px;
-}
-
-.bucket-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  list-style: none;
-  margin: 0 0 8px;
-  padding: 0;
-  font: var(--fs-label) var(--font-mono);
-  color: var(--muted);
-}
-
-.bucket-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
 .legend-swatch {
   width: 9px;
   height: 9px;
   border-radius: 2px;
-}
-
-.spark {
-  display: block;
-  width: 100%;
-  height: 24px;
-  overflow: visible;
-}
-
-.spark-empty {
-  height: 24px;
-}
-
-.spark-line {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.5;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-
-.spark-area {
-  fill: var(--accent);
-  opacity: 0.12;
-}
-
-.spark-dot {
-  fill: var(--accent);
-}
-
-.spark-err .spark-line {
-  stroke: var(--err);
-}
-.spark-err .spark-area,
-.spark-err .spark-dot {
-  fill: var(--err);
 }
 
 .pctl {
@@ -211,18 +152,20 @@
 
 /* ============================================================ overview */
 
+/* The Overview is the list pane of its split: at 1280 with a route open it is ~490px wide, so the
+   layout keys off its own width (container queries), not the viewport. */
 .overview {
-  padding: 16px 18px 24px;
+  container: overview / inline-size;
+  padding: 14px 16px 24px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .ov-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: baseline;
+  gap: 4px 10px;
   flex-wrap: wrap;
 }
 
@@ -230,12 +173,15 @@
   margin: 0;
   font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .ov-sub {
-  font-size: var(--fs-sm);
-  margin-top: 2px;
+  font-size: var(--fs-label);
+  min-width: 0;
+}
+
+.ov-cold {
+  margin-left: auto;
 }
 
 .ov-empty {
@@ -253,52 +199,73 @@
   margin-bottom: 6px;
 }
 
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+/* hero: the cause, in one sentence. Severity only as the 3px rule. */
+.ov-hero {
+  border-left: 3px solid var(--line-2);
+  padding: 2px 0 2px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ov-hero-warn {
+  border-left-color: var(--warn);
+}
+.ov-hero-error {
+  border-left-color: var(--err);
+}
+.ov-hero-info {
+  border-left-color: var(--info);
+}
+.ov-hero-ok {
+  border-left-color: var(--ok);
+}
+
+.ov-hero-text {
+  margin: 0;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ov-hero-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-loc {
+  font-size: var(--fs-sm);
+}
+
+.ov-actions {
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
 }
 
-.kpi {
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.ov-hero-sub .ov-actions {
+  margin-left: auto;
 }
 
-.kpi-label {
-  font: 500 var(--fs-label) var(--font-ui);
-  color: var(--dim);
+.ov-since:empty {
+  display: none;
 }
 
-.kpi-value {
-  font-size: var(--fs-hero);
-  font-weight: 500;
-  color: var(--fg);
-  line-height: 1.3;
+/* two columns when the Overview is wide, stacked when it is the narrow list beside a subject */
+.ov-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
 }
 
-.kpi-err .kpi-value {
-  color: var(--err);
-}
-
-.kpi-warn .kpi-value {
-  color: var(--warn);
-}
-
-.kpi-sub {
-  font-size: var(--fs-label);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.kpi-spark {
-  margin-top: 6px;
+@container overview (min-width: 1000px) {
+  .ov-cols {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
 }
 
 .ov-section {
@@ -311,8 +278,7 @@
 .ov-section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 6px 10px;
   flex-wrap: wrap;
 }
 
@@ -327,6 +293,11 @@
   gap: 8px;
 }
 
+.ov-hint {
+  margin-left: auto;
+  font-size: var(--fs-label);
+}
+
 .ov-section .muted {
   padding: 4px 0;
 }
@@ -334,6 +305,7 @@
 .ov-sort {
   padding: 0;
   margin: 0;
+  border: 0;
 }
 
 .ov-more {
@@ -352,94 +324,102 @@
   color: var(--fg);
 }
 
-/* needs-attention list */
-.attn-list {
+/* findings: sentence first, then route, saving, n=, location, actions */
+.ov-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.attn-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   border-top: 1px solid var(--line);
-  padding-right: 10px;
 }
 
-.attn-row:first-child {
-  border-top: 0;
-}
-
-.attn-row:hover {
-  background: var(--panel-2);
-}
-
-.attn-main {
-  flex: 1 1 auto;
-  min-width: 0;
+.ov-find {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px 10px;
-  align-items: center;
-  background: none;
-  border: 0;
-  padding: 8px 12px;
-  text-align: left;
-  color: inherit;
+  gap: 0 10px;
+  align-items: baseline;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
 }
 
-.attn-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-sm);
+.ov-find-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.attn-meta {
-  grid-column: 2;
+.ov-find-text {
+  font-size: var(--fs-body);
+  overflow-wrap: anywhere;
+}
+
+.ov-find-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 2px 10px;
-  font-size: var(--fs-label);
-}
-
-.attn-rule {
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 
-.attn-save {
-  color: var(--ok);
+.ov-find-route {
+  color: var(--fg);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.attn-new {
+.ov-find-meta .ov-actions {
+  margin-left: auto;
+}
+
+.ov-find-once .ov-find-text {
+  color: var(--muted);
+}
+
+.ov-once-tag {
+  color: var(--dim);
+  font-style: italic;
+}
+
+.ov-new {
   color: var(--accent);
 }
 
-.attn-loc {
-  flex: 0 0 auto;
-  font-size: var(--fs-label);
+.ov-once {
+  margin-top: 4px;
+}
+
+.ov-once > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-once > summary:hover,
+.ov-once > summary:focus-visible {
+  color: var(--fg);
 }
 
 /* routes table */
 .ov-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .ov-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
 }
 
 .ov-table th,
 .ov-table td {
-  padding: 6px 10px;
+  padding: 6px 8px;
   border-top: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
@@ -461,9 +441,19 @@
   background: var(--panel-2);
 }
 
+.ov-row-on,
+.ov-row-on:hover {
+  background: var(--accent-bg);
+}
+
+.ov-row-on .ov-route {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
 .ov-route {
   font-weight: 400;
-  max-width: 320px;
+  max-width: 0;
+  width: 100%;
 }
 
 .ov-route-btn {
@@ -488,58 +478,128 @@
   color: var(--accent);
 }
 
-.ov-err {
+.ov-err-n {
   color: var(--err);
 }
 
-.ov-mix {
-  width: 22%;
-  min-width: 110px;
+.ov-col-split {
+  width: 96px;
+  min-width: 72px;
 }
 
-/* ============================================================ sidebar routes */
+/* narrow (the list beside a subject): drop p95 and the findings badge, keep n / p50 / delta / split */
+@container overview (max-width: 640px) {
+  .ov-col-p95,
+  .ov-col-find {
+    display: none;
+  }
+}
 
-.route-row .route-stats {
-  grid-column: 1;
-  grid-row: 2;
+@container overview (max-width: 400px) {
+  .ov-col-split {
+    display: none;
+  }
+}
+
+/* d-epoch: diff colours (delta badges only) */
+.ov-delta {
+  font-weight: 500;
+}
+.ov-delta-worse {
+  color: var(--diff-worse);
+}
+.ov-delta-better {
+  color: var(--diff-better);
+}
+.ov-delta-same {
+  color: var(--diff-same);
+}
+.ov-delta-low {
+  opacity: 0.7;
+}
+
+/* one honest errors line */
+.ov-errors {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.ov-errors-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+
+.ov-errors-parts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+/* route subject */
+.rs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.rs-title {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--dim);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.rs-ex {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 480px;
+}
+
+.rs-ex-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+
+.rs-ex-btn:hover,
+.rs-ex-btn:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.rs-ex-label {
   font-size: var(--fs-label);
+  color: var(--muted);
 }
 
-.route-row .route-methods {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-}
-
-.route-row .route-p95 {
-  font-family: var(--font-mono);
-}
-
-.route-row-idle .route-path {
-  opacity: 0.55;
+.rs-all {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 /* ============================================================ traffic rows */
 
-.trace-row-rich {
-  grid-template-columns: auto auto minmax(0, 1fr) auto;
-  row-gap: 3px;
-}
-
-.trace-row-rich .trace-meta {
-  grid-column: 3 / 5;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
 .trace-io {
   font-size: var(--fs-label);
-}
-
-.trace-more {
-  margin: 6px 14px 12px;
 }

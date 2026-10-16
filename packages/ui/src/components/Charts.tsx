@@ -2,68 +2,11 @@ import type { FindingSeverity, TimeBucket } from "../api/types";
 import { BUCKETS, BUCKET_LABELS, SMALL_SAMPLE, approx, fmtMs } from "../state/stats";
 
 /*
- * Small hand-rolled chart primitives shared by the Overview, sidebar and traffic list.
+ * Small hand-rolled chart primitives shared by the Overview, the route subject and the request list.
+ * No sparklines: at dev volume a 2-3 point line is noise (plan 3.3); the d-epoch column replaces them.
  * No chart library, no external assets: plain SVG/CSS so the UI stays one inlined HTML file.
  * Bucket colors come from the --b-* tokens in tokens.css so every surface uses one legend.
  */
-
-/** Sparkline over a series with gaps (undefined). Draws a line per contiguous run plus a soft area. */
-export function Sparkline({
-  values,
-  label,
-  tone = "neutral",
-}: {
-  values: Array<number | undefined>;
-  label: string;
-  tone?: "neutral" | "err";
-}) {
-  const defined = values.filter((v): v is number => v !== undefined);
-  if (values.length < 2 || defined.length < 2) return <div class="spark spark-empty" aria-hidden="true" />;
-  const max = Math.max(...defined);
-  const min = Math.min(0, ...defined);
-  const range = max - min || 1;
-  const W = 100;
-  const H = 24;
-  const step = W / (values.length - 1);
-  const y = (v: number) => H - 2 - ((v - min) / range) * (H - 4);
-
-  const runs: string[][] = [];
-  let cur: string[] = [];
-  values.forEach((v, i) => {
-    if (v === undefined) {
-      if (cur.length) runs.push(cur);
-      cur = [];
-      return;
-    }
-    cur.push(`${(i * step).toFixed(2)},${y(v).toFixed(2)}`);
-  });
-  if (cur.length) runs.push(cur);
-
-  return (
-    <svg
-      class={`spark spark-${tone}`}
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label={label}
-    >
-      {runs.map((pts) => {
-        if (pts.length === 1) {
-          const [x, yy] = (pts[0] as string).split(",");
-          return <circle key={pts[0]} cx={x} cy={yy} r="1.2" class="spark-dot" />;
-        }
-        const first = (pts[0] as string).split(",")[0];
-        const last = (pts[pts.length - 1] as string).split(",")[0];
-        return (
-          <g key={pts[0]}>
-            <polygon class="spark-area" points={`${first},${H} ${pts.join(" ")} ${last},${H}`} />
-            <polyline class="spark-line" points={pts.join(" ")} vector-effect="non-scaling-stroke" />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
 
 /** 100%-stacked horizontal bar of self-time per bucket. Width comes from the parent. */
 export function MixBar({
@@ -87,19 +30,6 @@ export function MixBar({
         return <span key={b} class={`mix-seg b-${b}`} style={{ width: `${(v / total) * 100}%` }} />;
       })}
     </span>
-  );
-}
-
-export function BucketLegend() {
-  return (
-    <ul class="bucket-legend" aria-label="Time bucket colors">
-      {BUCKETS.map((b) => (
-        <li key={b}>
-          <span class={`legend-swatch b-${b}`} aria-hidden="true" />
-          {BUCKET_LABELS[b]}
-        </li>
-      ))}
-    </ul>
   );
 }
 

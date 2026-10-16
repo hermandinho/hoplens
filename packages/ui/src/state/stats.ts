@@ -1,4 +1,4 @@
-import type { FindingRule, FindingSeverity, TimeBucket, TraceSummary } from "../api/types";
+import type { FindingRule, FindingSeverity, RouteEpochDelta, TimeBucket, TraceSummary } from "../api/types";
 
 /*
  * Cross-request statistics, computed client-side from TraceSummary[] (the SSE + /traces feed).
@@ -157,6 +157,12 @@ export interface RouteStats {
   worstSeverity?: FindingSeverity;
   lastAt: number;
   lastTraceId: string;
+  /** Time spent: summed duration of the requests behind `latency` (ms). */
+  totalMs: number;
+  /** Server only: newest epoch vs the route's previous one (the d-epoch column). */
+  delta?: RouteEpochDelta;
+  /** Server only: fast / typical / slow example requests (may have left the ring since). */
+  exemplars?: Exemplars;
 }
 
 export function computeRouteStats(traces: readonly TraceSummary[], includeCold: boolean): RouteStats[] {
@@ -179,6 +185,7 @@ export function computeRouteStats(traces: readonly TraceSummary[], includeCold: 
     let lastTraceId = first.id;
     let worst: FindingSeverity | undefined;
     const fps = new Set<string>();
+    const durations = warmDurations(list, includeCold);
     for (const t of list) {
       if (isError(t)) errors++;
       if (isCold(t)) coldHits++;
@@ -203,7 +210,8 @@ export function computeRouteStats(traces: readonly TraceSummary[], includeCold: 
       hits: list.length,
       errors,
       errPct: (errors / list.length) * 100,
-      latency: percentiles(warmDurations(list, includeCold)),
+      latency: percentiles(durations),
+      totalMs: durations.reduce((a, b) => a + b, 0),
       coldHits,
       mix: timeMix(list),
       avgIo: ioN > 0 ? ioSum / ioN : undefined,
@@ -216,12 +224,22 @@ export function computeRouteStats(traces: readonly TraceSummary[], includeCold: 
   return out;
 }
 
-export type RouteSort = "p95" | "hits" | "errors";
+export type RouteSort = "time" | "p95" | "hits" | "errors";
 
-/** Sort descending by the chosen metric; ties fall back to hits, then key for stability. */
+/**
+ * Sort descending by the chosen metric; ties fall back to hits, then key for stability. "time" =
+ * time spent (summed duration), the Overview default: a fast route hit 500 times can matter more
+ * than a slow one hit once.
+ */
 export function sortRouteStats(list: readonly RouteStats[], by: RouteSort): RouteStats[] {
   const metric = (r: RouteStats): number =>
-    by === "p95" ? (r.latency.p95 ?? -1) : by === "hits" ? r.hits : r.errors * 1e6 + r.errPct;
+    by === "time"
+      ? r.totalMs
+      : by === "p95"
+        ? (r.latency.p95 ?? -1)
+        : by === "hits"
+          ? r.hits
+          : r.errors * 1e6 + r.errPct;
   return [...list].sort((a, b) => metric(b) - metric(a) || b.hits - a.hits || a.key.localeCompare(b.key));
 }
 
@@ -240,7 +258,15 @@ export interface FindingGroup {
   /** Largest per-request count (e.g. N in N+1). */
   maxCount?: number;
   worstSavedMs?: number;
+  /** Mean per-request saving estimate (ms) over the requests that had one. "~173ms per request". */
+  savedMsPerRequest?: number;
+  /** savedMsPerRequest x requests: the total over the requests seen ("= 1.6s"). 0 without an estimate. */
+  impactMs: number;
+  /** Seen in exactly one request: ranked after every repeatable finding, labelled "seen once". */
+  seenOnce: boolean;
+  /** Route keys ("GET /api/feed"). */
   routes: string[];
+  /** Newest retained request with this finding; "" when every one was evicted (server-only rows). */
   latestTraceId: string;
   latestAt: number;
   firstAt: number;
@@ -249,9 +275,35 @@ export interface FindingGroup {
 }
 
 /**
- * Group findings across all traces by fingerprint. Sorted by severity, then estimated savings,
- * then affected request count. "New" means first seen in the newest epoch, and is only claimed
- * when the retained traces span more than one epoch (otherwise everything would be "new").
+ * Low-signal findings sink below every actionable one and never become the hero: seen in a single
+ * request, or a dev compile stall (cold-compile: the dev server's cost, not the code's). Mirrors core.
+ */
+export function isLowSignal(f: Pick<FindingGroup, "seenOnce" | "rule">): boolean {
+  return f.seenOnce || f.rule === "cold-compile";
+}
+
+/**
+ * Overview order (plan 3.1 #3, mirrors core `rankFindings`): actionable findings before low-signal
+ * ones (`isLowSignal`), then impact (saveable ms x requests), severity, requests, recency, fingerprint.
+ */
+export function rankFindingGroups<
+  T extends Pick<FindingGroup, "impactMs" | "seenOnce" | "rule" | "severity" | "requests" | "latestAt" | "fingerprint">,
+>(list: readonly T[]): T[] {
+  return [...list].sort(
+    (a, b) =>
+      Number(isLowSignal(a)) - Number(isLowSignal(b)) ||
+      b.impactMs - a.impactMs ||
+      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+      b.requests - a.requests ||
+      b.latestAt - a.latestAt ||
+      (a.fingerprint < b.fingerprint ? -1 : a.fingerprint > b.fingerprint ? 1 : 0),
+  );
+}
+
+/**
+ * Group findings across all traces by fingerprint, ranked by `rankFindingGroups`. "New" means first
+ * seen in the newest epoch, and is only claimed when the retained traces span more than one epoch
+ * (otherwise everything would be "new").
  */
 export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
   let maxEpoch = Number.NEGATIVE_INFINITY;
@@ -264,18 +316,34 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
   }
   const multiEpoch = maxEpoch > minEpoch;
 
-  const groups = new Map<string, FindingGroup & { routeSet: Set<string>; firstEpoch: number }>();
+  type Acc = FindingGroup & { routeSet: Set<string>; firstEpoch: number; savedSum: number; savedN: number };
+  const groups = new Map<string, Acc>();
   for (const t of traces) {
     if (!t.findings?.length) continue;
     const epoch = t.facts?.epoch ?? Number.NEGATIVE_INFINITY;
+    // A trace can carry the same fingerprint twice (e.g. request and response payload findings):
+    // count the request once, with the larger saving.
+    const savedHere = new Map<string, number | undefined>();
+    for (const f of t.findings) {
+      const prev = savedHere.get(f.fingerprint);
+      const cur = f.estSavedMs !== undefined && Number.isFinite(f.estSavedMs) ? f.estSavedMs : undefined;
+      savedHere.set(f.fingerprint, cur === undefined ? prev : Math.max(prev ?? 0, cur));
+    }
+    for (const [fp, saved] of savedHere) {
+      if (saved === undefined) continue;
+      const g = groups.get(fp);
+      if (g) {
+        g.savedSum += saved;
+        g.savedN++;
+      }
+    }
     const seen = new Set<string>();
     for (const f of t.findings) {
       const g = groups.get(f.fingerprint);
-      // A trace can carry the same fingerprint twice (e.g. two request/response payload findings);
-      // count the request once.
       const firstInTrace = !seen.has(f.fingerprint);
       seen.add(f.fingerprint);
       if (!g) {
+        const saved = savedHere.get(f.fingerprint);
         groups.set(f.fingerprint, {
           fingerprint: f.fingerprint,
           rule: f.rule,
@@ -286,6 +354,8 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
           requests: 1,
           maxCount: f.count,
           worstSavedMs: f.estSavedMs,
+          impactMs: 0,
+          seenOnce: false,
           routes: [],
           routeSet: new Set([routeKeyOf(t)]),
           latestTraceId: t.id,
@@ -293,6 +363,8 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
           firstAt: t.startedAt,
           firstEpoch: epoch,
           isNew: false,
+          savedSum: saved ?? 0,
+          savedN: saved === undefined ? 0 : 1,
         });
         continue;
       }
@@ -314,16 +386,205 @@ export function groupFindings(traces: readonly TraceSummary[]): FindingGroup[] {
   }
 
   const out: FindingGroup[] = [];
-  for (const { routeSet, firstEpoch, ...g } of groups.values()) {
-    out.push({ ...g, routes: [...routeSet], isNew: multiEpoch && firstEpoch === maxEpoch });
+  for (const { routeSet, firstEpoch, savedSum, savedN, ...g } of groups.values()) {
+    const per = savedN > 0 ? savedSum / savedN : undefined;
+    out.push({
+      ...g,
+      routes: [...routeSet],
+      isNew: multiEpoch && firstEpoch === maxEpoch,
+      savedMsPerRequest: per,
+      impactMs: per === undefined ? 0 : per * g.requests,
+      seenOnce: g.requests === 1,
+    });
   }
-  return out.sort(
-    (a, b) =>
-      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
-      (b.worstSavedMs ?? 0) - (a.worstSavedMs ?? 0) ||
-      b.requests - a.requests ||
-      b.latestAt - a.latestAt,
+  return rankFindingGroups(out);
+}
+
+/* ------------------------------------------------------------- errors tally */
+
+/**
+ * The Overview's errors line (plan 3.3): one honest number, split three ways, disjoint.
+ *   fivexx     answered >= 500 with no exception captured (the route returned the error itself)
+ *   thrown     failed (>= 500, or no status) with an exception captured
+ *   swallowed  answered below 500 although an exception was captured (isHandledError)
+ * Mirrors core's ErrorKinds.
+ */
+export interface ErrorTally {
+  fivexx: number;
+  thrown: number;
+  swallowed: number;
+  total: number;
+}
+
+export function errorTally(traces: readonly TraceSummary[]): ErrorTally {
+  const out: ErrorTally = { fivexx: 0, thrown: 0, swallowed: 0, total: 0 };
+  for (const t of traces) {
+    if (!isCountable(t)) continue;
+    if (isError(t)) {
+      if (t.error) out.thrown++;
+      else out.fivexx++;
+    } else if (isHandledError(t)) out.swallowed++;
+  }
+  out.total = out.fivexx + out.thrown + out.swallowed;
+  return out;
+}
+
+/**
+ * Request-log queries for the errors line, matching `errorTally` exactly (r2: "thrown" also counts a
+ * request that threw before it had a status, which `status:5xx has:error` never matched).
+ * `-status:<500` keeps 5xx and status-less requests. thrown = isError with an error; fivexx = 5xx
+ * with none; swallowed = isHandledError.
+ */
+export const ERROR_QUERIES = {
+  fivexx: "status:5xx -has:error",
+  thrown: "has:error -status:<500",
+  swallowed: "has:error status:<500",
+} as const;
+
+/**
+ * The query for "list the failed ones" (5xx and thrown together) or the swallowed ones, whichever
+ * is larger. The language has no OR across keys, so a mix of 5xx and thrown uses `-status:<500`,
+ * which can also list a request still in flight.
+ */
+export function errorQueryFor(e: ErrorTally): string {
+  if (e.swallowed >= e.fivexx + e.thrown) return ERROR_QUERIES.swallowed;
+  if (e.thrown === 0) return ERROR_QUERIES.fivexx;
+  if (e.fivexx === 0) return ERROR_QUERIES.thrown;
+  return "-status:<500";
+}
+
+/* ---------------------------------------------------------------- exemplars */
+
+export interface ExemplarPick {
+  traceId: string;
+  ms: number;
+}
+
+export interface Exemplars {
+  fast: ExemplarPick;
+  typical: ExemplarPick;
+  slow: ExemplarPick;
+  /** Requests the three were picked from. */
+  n: number;
+}
+
+/**
+ * fast = the p10 request, typical = the one closest to the p50, slow = the slowest; ties go to the
+ * later sample. Same rule as core `pickExemplars`. Undefined for an empty list.
+ */
+export function pickExemplars(samples: readonly ExemplarPick[]): Exemplars | undefined {
+  const n = samples.length;
+  if (n === 0) return undefined;
+  const sorted = samples.map((e, i) => ({ e, i })).sort((a, b) => a.e.ms - b.e.ms || a.i - b.i);
+  const mid = (n - 1) / 2;
+  const p50 =
+    ((sorted[Math.floor(mid)] as { e: ExemplarPick }).e.ms + (sorted[Math.ceil(mid)] as { e: ExemplarPick }).e.ms) / 2;
+  let typical = sorted[0] as { e: ExemplarPick; i: number };
+  for (const x of sorted) {
+    const d = Math.abs(x.e.ms - p50);
+    const best = Math.abs(typical.e.ms - p50);
+    if (d < best || (d === best && x.i > typical.i)) typical = x;
+  }
+  const fast = (sorted[Math.round(0.1 * (n - 1))] as { e: ExemplarPick }).e;
+  return { fast, typical: typical.e, slow: (sorted[n - 1] as { e: ExemplarPick }).e, n };
+}
+
+/** Exemplars over one route's retained warm requests (cold ones too when `includeCold`), oldest first. */
+export function routeExemplars(
+  traces: readonly TraceSummary[],
+  routeKey: string,
+  includeCold: boolean,
+): Exemplars | undefined {
+  const list = traces
+    .filter((t) => isCountable(t) && t.duration !== undefined && routeKeyOf(t) === routeKey)
+    .filter((t) => includeCold || !isCold(t))
+    .sort((a, b) => a.startedAt - b.startedAt);
+  // Examples of the route working: a 500 that answered in 1ms is not its "fast" run (r2; mirrors
+  // core). Only when every request failed are the failures the examples.
+  const ok = list.filter((t) => !isError(t) && !t.error);
+  return pickExemplars((ok.length ? ok : list).map((t) => ({ traceId: t.id, ms: t.duration as number })));
+}
+
+/* ------------------------------------------------------------- stable order */
+
+/**
+ * Keep the order the reader is looking at (plan 3.1 #5): `prev` is the key order on screen when the
+ * hold began. Keys still present keep that order; new keys follow in `next`'s order. Without a
+ * previous order, `next` as is.
+ */
+export function holdOrder<T>(prev: readonly string[] | null, next: readonly T[], key: (x: T) => string): T[] {
+  if (!prev) return [...next];
+  const at = new Map(prev.map((k, i) => [k, i]));
+  const kept: T[] = [];
+  const fresh: T[] = [];
+  for (const x of next) (at.has(key(x)) ? kept : fresh).push(x);
+  kept.sort((a, b) => (at.get(key(a)) as number) - (at.get(key(b)) as number));
+  return [...kept, ...fresh];
+}
+
+/* --------------------------------------------------------------------- hero */
+
+export type HeroKind = "finding" | "errors" | "clean" | "empty";
+
+export interface Hero {
+  kind: HeroKind;
+  /** The finding the hero names (kind "finding"). */
+  finding?: FindingGroup;
+  /** Route keys the finding was seen on, or the route the "clean" sentence names. */
+  routes: string[];
+  /** Low-signal findings (seen once, dev compile; never the hero), for the "no repeatable problems" sentence. */
+  seenOnce: number;
+  requests: number;
+  errors?: ErrorTally;
+  slowest?: { key: string; p50?: number; n: number };
+}
+
+/** A finding below this saving per request never becomes the hero (same floor as the trace verdict). */
+export const HERO_MIN_SAVE_MS = 10;
+
+/**
+ * Overview hero (plan 3.3): the #1 repeatable finding by impact when it saves >= 10ms a request;
+ * else the errors, when anything failed or was swallowed; else "no problems" with the slowest route.
+ * `findings` must already be ranked.
+ */
+export function overviewHero(
+  findings: readonly FindingGroup[],
+  routes: readonly RouteStats[],
+  errors: ErrorTally,
+  requests: number,
+): Hero {
+  const seenOnce = findings.filter(isLowSignal).length;
+  if (requests === 0) return { kind: "empty", routes: [], seenOnce, requests };
+  const top = findings.find(
+    (f) => !isLowSignal(f) && f.savedMsPerRequest !== undefined && f.savedMsPerRequest >= HERO_MIN_SAVE_MS,
   );
+  if (top) return { kind: "finding", finding: top, routes: top.routes, seenOnce, requests };
+  if (errors.total > 0) return { kind: "errors", routes: [], seenOnce, requests, errors };
+  let slowest: RouteStats | undefined;
+  for (const r of routes) if (r.latency.p50 !== undefined && (slowest?.latency.p50 ?? -1) < r.latency.p50) slowest = r;
+  return {
+    kind: "clean",
+    routes: slowest ? [slowest.key] : [],
+    seenOnce,
+    requests,
+    slowest: slowest ? { key: slowest.key, p50: slowest.latency.p50, n: slowest.latency.n } : undefined,
+  };
+}
+
+/** "GET /api/feed" -> "/api/feed" for prose; anything without a method is returned as is. */
+export function routeOfKey(key: string): string {
+  const sp = key.indexOf(" ");
+  return sp > 0 && /^[A-Z]+$/.test(key.slice(0, sp)) ? key.slice(sp + 1) : key;
+}
+
+/* ------------------------------------------------------------ epoch delta */
+
+/** Delta label for the d-epoch column: "+84" / "-12" / "=" ms; undefined = blank (n < 3 or no data). */
+export function deltaLabel(d: RouteEpochDelta | undefined): string | undefined {
+  if (!d || d.status === "insufficient" || d.status === "no-traffic" || d.deltaMs === undefined) return undefined;
+  if (d.status === "unchanged") return "=";
+  const v = Math.round(d.deltaMs);
+  return v > 0 ? `+${v}` : `${v}`;
 }
 
 /** Finding summary per route key, for badges in the sidebar and traffic list. */
@@ -415,49 +676,6 @@ export function computeKpis(
     newFindings: findings.filter((f) => f.isNew).length,
     avgIo: ioN > 0 ? ioSum / ioN : undefined,
   };
-}
-
-/* ---------------------------------------------------------------- sparklines */
-
-export type SparkMetric = "requests" | "p50" | "p95" | "errPct" | "io";
-
-/**
- * Bin countable traces by start time into `bins` equal slices between the oldest and newest
- * trace, and reduce each bin to one value. Empty bins yield `undefined` (a gap) except for
- * "requests", where an empty bin is a real 0. Returns [] when there is nothing to plot.
- */
-export function sparkSeries(
-  traces: readonly TraceSummary[],
-  metric: SparkMetric,
-  bins: number,
-  includeCold: boolean,
-): Array<number | undefined> {
-  const pool = traces.filter(isCountable);
-  if (pool.length < 2 || bins < 2) return [];
-  let lo = Number.POSITIVE_INFINITY;
-  let hi = Number.NEGATIVE_INFINITY;
-  for (const t of pool) {
-    if (t.startedAt < lo) lo = t.startedAt;
-    if (t.startedAt > hi) hi = t.startedAt;
-  }
-  const span = hi - lo;
-  if (span <= 0) return [];
-  const buckets: TraceSummary[][] = Array.from({ length: bins }, () => []);
-  for (const t of pool) {
-    const i = Math.min(bins - 1, Math.floor(((t.startedAt - lo) / span) * bins));
-    (buckets[i] as TraceSummary[]).push(t);
-  }
-  return buckets.map((b) => {
-    if (metric === "requests") return b.length;
-    if (b.length === 0) return undefined;
-    if (metric === "errPct") return (b.filter(isError).length / b.length) * 100;
-    if (metric === "io") {
-      const vals = b.map(ioCount).filter((v): v is number => v !== undefined);
-      return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : undefined;
-    }
-    const p = percentiles(warmDurations(b, includeCold));
-    return metric === "p50" ? p.p50 : p.p95;
-  });
 }
 
 /* ---------------------------------------------------------------- formatting */

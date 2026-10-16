@@ -268,7 +268,14 @@ describe("RouteStatsStore", () => {
     s.clear();
     const snap = s.snapshot();
     expect(snap).toMatchObject({ routes: [], since: 200, epoch: 0 });
-    expect(snap.totals).toEqual({ requests: 0, errors: 0, cold: 0, routes: 0, droppedSpans: 0 });
+    expect(snap.totals).toEqual({
+      requests: 0,
+      errors: 0,
+      cold: 0,
+      routes: 0,
+      droppedSpans: 0,
+      errorKinds: { fivexx: 0, thrown: 0, swallowed: 0 },
+    });
   });
 
   test("a malformed trace never throws", () => {

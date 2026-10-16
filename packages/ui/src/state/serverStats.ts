@@ -2,6 +2,7 @@ import { effect, signal } from "@preact/signals";
 import { HoplensApiError, api } from "../api/client";
 import type {
   EpochStats,
+  FindingRollup,
   FindingSeverity,
   HistogramBucket,
   ServerRouteStats,
@@ -9,7 +10,16 @@ import type {
   TimeBucket,
 } from "../api/types";
 import { clearedAt, liveActivity, throttle } from "./activity";
-import { type Kpis, type Percentiles, type RouteBadge, type RouteStats, worseSeverity } from "./stats";
+import {
+  type ErrorTally,
+  type FindingGroup,
+  type Kpis,
+  type Percentiles,
+  type RouteBadge,
+  type RouteStats,
+  rankFindingGroups,
+  worseSeverity,
+} from "./stats";
 
 /*
  * Server-side route stats (GET /api/stats?buckets=1). They survive ring-buffer eviction and are
@@ -180,8 +190,69 @@ export function serverRouteStats(s: StatsResponse, lastTraceIds: ReadonlyMap<str
       worstSeverity: worstOf(a),
       lastAt: r.lastSeen,
       lastTraceId: lastTraceIds.get(r.key) ?? "",
+      totalMs: (a.avg ?? 0) * a.warm,
+      delta: r.delta,
+      exemplars: r.exemplars,
     };
   });
+}
+
+/** The errors line from the server's totals; undefined from a core without the split (fall back to the tab). */
+export function serverErrorTally(s: StatsResponse): ErrorTally | undefined {
+  let fivexx = 0;
+  let thrown = 0;
+  let swallowed = 0;
+  for (const r of countableRoutes(s)) {
+    const k = r.all.errorKinds;
+    if (!k) return undefined;
+    fivexx += k.fivexx;
+    thrown += k.thrown;
+    swallowed += k.swallowed;
+  }
+  return { fivexx, thrown, swallowed, total: fivexx + thrown + swallowed };
+}
+
+/**
+ * Overview findings: the server rollup (it survives ring eviction, so its counts are the honest ones)
+ * joined with the tab's groups by fingerprint. A retained example request is taken from the tab
+ * first, else the server's newest one if `retained` still has it, else "" (filter only). Tab-only
+ * fingerprints (past the server's per-route cap) are kept. Without a rollup, the tab's groups as is.
+ */
+export function mergeFindingGroups(
+  client: readonly FindingGroup[],
+  server: readonly FindingRollup[] | undefined,
+  retained: (traceId: string) => boolean,
+): FindingGroup[] {
+  if (!server) return [...client];
+  const byFp = new Map(client.map((g) => [g.fingerprint, g]));
+  const out: FindingGroup[] = [];
+  for (const f of server) {
+    const c = byFp.get(f.fingerprint);
+    byFp.delete(f.fingerprint);
+    const requests = Math.max(f.requests, c?.requests ?? 0);
+    const per = f.savedMsPerRequest ?? c?.savedMsPerRequest;
+    out.push({
+      fingerprint: f.fingerprint,
+      rule: f.rule,
+      severity: worseSeverity(c?.severity, f.severity),
+      title: c?.title ?? f.title,
+      fn: c?.fn ?? f.fn,
+      location: c?.location ?? f.location,
+      requests,
+      maxCount: Math.max(f.maxCount ?? 0, c?.maxCount ?? 0) || undefined,
+      worstSavedMs: c?.worstSavedMs,
+      savedMsPerRequest: per,
+      impactMs: per === undefined ? 0 : per * requests,
+      seenOnce: requests === 1,
+      routes: [...new Set([...f.routes, ...(c?.routes ?? [])])],
+      latestTraceId: c?.latestTraceId || (f.lastTraceId && retained(f.lastTraceId) ? f.lastTraceId : ""),
+      latestAt: Math.max(f.lastSeen, c?.latestAt ?? 0),
+      firstAt: c?.firstAt ?? f.lastSeen,
+      isNew: c?.isNew ?? false,
+    });
+  }
+  for (const c of byFp.values()) out.push(c);
+  return rankFindingGroups(out);
 }
 
 /** KPI tiles from the server aggregates; findings counts come from the client's grouped findings. */

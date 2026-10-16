@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import type { SourceResponse } from "../api/types";
+import { SEEK_SPAN, findCallLine } from "../state/callSite";
 import { closeSource, openSource, openSourceAt, sourceData, sourceError, sourceLoading } from "../state/source";
 
 export function SourcePeek() {
@@ -88,9 +89,6 @@ function SourceLines({ data, highlight }: { data: SourceResponse; highlight: num
  */
 const inlineCache = new Map<string, InlineSnippet>();
 const INLINE_CACHE_MAX = 100;
-/** Lines read below `line` when looking for the call site (`seek`). */
-const SEEK_SPAN = 30;
-
 interface InlineSnippet {
   data: SourceResponse;
   /** The line marked as the culprit (the call site when `seek` found it, else `line`). */
@@ -99,16 +97,6 @@ interface InlineSnippet {
 
 function cacheKey(file: string, line: number, context: number, seek: string | undefined, rev: string): string {
   return `${rev}|${file}:${line}:${context}:${seek ?? ""}`;
-}
-
-/** The first line at or after `line` that calls `seek(` (a word boundary before it). */
-function findCall(data: SourceResponse, line: number, seek: string): number | undefined {
-  const re = new RegExp(`(^|[^\\w$])${seek.replace(/[$.*+?^()[\]{}|\\]/g, "\\$&")}\\s*\\(`);
-  for (let i = 0; i < data.lines.length; i++) {
-    const n = data.start + i;
-    if (n >= line && re.test(data.lines[i] ?? "")) return n;
-  }
-  return undefined;
 }
 
 async function loadSnippet(
@@ -121,7 +109,7 @@ async function loadSnippet(
   // One read covering the declaration and the body below it; then cut +-context around the call.
   const half = Math.ceil(SEEK_SPAN / 2);
   const wide = await api.source(file, line + half, half);
-  const hit = findCall(wide, line, seek) ?? line;
+  const hit = findCallLine(wide, line, seek) ?? line;
   const from = Math.max(wide.start, hit - context);
   const to = Math.min(wide.start + wide.lines.length - 1, hit + context);
   return {

@@ -271,6 +271,7 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
             key={g.key}
             class={`budget-seg ${g.key === "wait" ? "budget-wait" : `b-${g.key}`} ${open === g.key ? "open" : ""}`}
             style={{ width: `${g.pct}%` }}
+            aria-haspopup="dialog"
             aria-expanded={open === g.key}
             aria-label={`${segLabel(g.key)} ${fmtMs(g.ms)}, ${Math.round(g.pct)}%`}
             onClick={() => setOpen(open === g.key ? null : g.key)}

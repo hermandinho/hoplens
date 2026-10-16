@@ -2,15 +2,14 @@ import { useComputed, useSignal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import type { TraceSummary } from "../api/types";
 import { logQuery, logRows } from "../state/requestLog";
-import { type Route, go, route, setSince } from "../state/router";
-import { fmtMs, routeKeyOf, statusClass } from "../state/stats";
+import { type Route, route, setSince } from "../state/router";
+import { fmtMs, routeKeyOf } from "../state/stats";
 import {
   builderOpen,
   closeBuilder,
   closeSubject,
   liveHold,
   loadTrace,
-  routeStats,
   routesState,
   selectRoute,
   selectedRouteKey,
@@ -18,11 +17,10 @@ import {
   selectedTraceId,
   tracesState,
 } from "../state/store";
-import { MixBar, Pctl } from "./Charts";
 import { Details } from "./Details";
 import { Inspector } from "./Inspector";
 import { JourneyPane } from "./JourneyPane";
-import { Overview } from "./Overview";
+import { Overview, RouteSubject, overviewHeld } from "./Overview";
 import { QueriesView } from "./QueriesView";
 import { RequestBuilder } from "./RequestBuilder";
 import { RequestLog } from "./RequestLog";
@@ -34,7 +32,7 @@ import { TraceHeader } from "./TraceHeader";
  * The main area: every view is the same list | subject split (plan 3.8), driven by the route.
  *   Overview   overview          | route subject (#/route/<key>)
  *   Requests   live request log  | the open request (#/r/<id>), the builder drawer, compare
- *   Queries    queries view (full width until WP4 splits it)
+ *   Queries    query shapes      | the open shape (#/q/<fingerprint>); QueriesView owns its Split
  *   Changes    edits seen so far (full width; WP9b draws the timeline)
  * A pane with nothing to show is not drawn: no subject means the list takes the full width.
  * Each view's Split is keyed by its id, so a view switch remounts it: the width is read per view and
@@ -56,13 +54,16 @@ export function MainPane() {
             subjectLabel="Route"
             listClass="split-scroll"
             subjectClass="split-scroll"
+            onHold={(held) => {
+              overviewHeld.value = held;
+            }}
           />
         </main>
       );
     case "queries":
       return (
         <main id="main" class="main" aria-label="Queries and hosts">
-          <Split key="queries" id="queries" list={<QueriesView />} listLabel="Queries" listClass="split-scroll" />
+          <QueriesView />
         </main>
       );
     case "changes":
@@ -396,63 +397,6 @@ function BuilderDrawer() {
       </header>
       <RequestBuilder />
     </section>
-  );
-}
-
-/* ================================================================ route subject */
-
-/**
- * #/route/<key>: one route as the Overview's subject. Minimal until WP5 builds the full one
- * (findings, exemplars): percentiles, time mix and its recent requests, one click each.
- * `key` is the RouteStats key ("GET /api/feed"); "route::METHOD" is accepted too.
- */
-function RouteSubject({ routeKey }: { routeKey: string }) {
-  const stat = routeStats.value.find((s) => s.key === routeKey || `${s.route}::${s.method}` === routeKey);
-  const recent = stat
-    ? tracesState.value.filter((t) => t.kind !== "asset" && routeKeyOf(t) === stat.key).slice(0, 12)
-    : [];
-  const close = () => go({ view: "overview" });
-
-  return (
-    <div class="subject">
-      <div class="subject-bar">
-        <span class="subject-kind">Route</span>
-        <button type="button" class="source-close subject-close" onClick={close} aria-label="Close" title="Close">
-          ×
-        </button>
-      </div>
-      <div class="subject-body">
-        {!stat ? (
-          <p class="subject-lead">
-            No requests for <code>{routeKey}</code> are retained.
-          </p>
-        ) : (
-          <>
-            <h2 class="subject-title mono">
-              {stat.method} {stat.route}
-            </h2>
-            <p class="subject-lead">
-              {stat.hits} request{stat.hits === 1 ? "" : "s"} · p50 <Pctl value={stat.latency.p50} n={stat.latency.n} />{" "}
-              · p95 <Pctl value={stat.latency.p95} n={stat.latency.n} />
-              {stat.errors > 0 && ` · ${stat.errors} failed`}
-            </p>
-            {stat.mix && <MixBar time={stat.mix} class="subject-mix" />}
-            <ul class="subject-recent">
-              {recent.map((t) => (
-                <li key={t.id}>
-                  <button type="button" class="subject-recent-row" onClick={() => void loadTrace(t.id, "user")}>
-                    <span class="mono dim">{new Date(t.startedAt).toLocaleTimeString()}</span>
-                    <span class="mono subject-recent-url">{t.url}</span>
-                    <span class={`status-code ${statusClass(t)}`}>{t.status ?? (t.error ? "ERR" : "…")}</span>
-                    <span class="mono">{fmtMs(t.duration)}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-    </div>
   );
 }
 

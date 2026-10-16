@@ -3,16 +3,15 @@ import { HoplensApiError, type LiveConnection, api, openLive } from "../api/clie
 import type { Discovery, Meta, RouteInfo, TraceRecord, TraceSummary } from "../api/types";
 import { noteActivity } from "./activity";
 import { type Route, go, initRouter, route } from "./router";
-import { serverKpis, serverRouteBadges, serverRouteStats, serverStats } from "./serverStats";
+import { mergeFindingGroups, serverKpis, serverRouteBadges, serverRouteStats, serverStats } from "./serverStats";
 import {
-  type SparkMetric,
+  type FindingGroup,
   computeKpis,
   computeRouteStats,
   groupFindings,
   isCountable,
   isError,
   routeBadges,
-  sparkSeries,
 } from "./stats";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -98,6 +97,18 @@ export const routeStats = computed(() => {
   for (const r of clientRouteStats.value) last.set(r.key, r.lastTraceId);
   return serverRouteStats(s, last);
 });
+/** Retained trace ids, for "open example" on server-only rows (findings, route exemplars). */
+export const retainedIds = computed(() => new Set(tracesState.value.map((t) => t.id)));
+
+/**
+ * The ranked findings (plan 3.7: one ranking for the Overview, its hero and the palette): the server
+ * rollup (survives eviction) joined with this tab's groups, ordered by `rankFindingGroups`.
+ */
+export const overviewFindings = computed<FindingGroup[]>(() => {
+  const server = statsSource.value === "server" ? serverStats.value?.findings : undefined;
+  const ids = retainedIds.value;
+  return mergeFindingGroups(findingGroups.value, server, (id) => ids.has(id));
+});
 export const kpis = computed(() => {
   const s = serverStats.value;
   const groups = findingGroups.value;
@@ -110,15 +121,6 @@ export const routeBadgeMap = computed(() => {
   if (statsSource.value === "server" && s) return serverRouteBadges(s);
   return routeBadges(finishedTraces.value, includeCold.value);
 });
-const SPARK_BINS = 24;
-const SPARK_METRICS: readonly SparkMetric[] = ["requests", "p50", "p95", "errPct", "io"];
-/** Overview sparklines, computed once per change instead of five times per render. */
-export const sparks = computed(() => {
-  const out = {} as Record<SparkMetric, Array<number | undefined>>;
-  for (const m of SPARK_METRICS) out[m] = sparkSeries(finishedTraces.value, m, SPARK_BINS, includeCold.value);
-  return out;
-});
-
 export const hasRoutes = computed(() => (routesState.value?.routes.length ?? 0) > 0);
 export const hasTraces = computed(() => tracesState.value.length > 0);
 /** Same definition as the Overview's Errors KPI (stats.isError: 5xx), so the counts agree. */

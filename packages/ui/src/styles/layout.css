@@ -10,7 +10,8 @@
   display: grid;
   /* minmax(0, ...): a plain 1fr track grows to its widest item's min-content and the page scrolls sideways. */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr);
+  /* top bar, main area, footer action bar (WP1b) */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 8px;
   padding: 8px;
   min-height: 100vh;
@@ -643,28 +644,6 @@
   border: 0;
 }
 
-/* segmented tabs (QueriesView reuses these) */
-.sidebar-tab {
-  background: none;
-  border: 0;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  padding: 9px 10px;
-  box-shadow: inset 0 -2px transparent;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.sidebar-tab:hover {
-  color: var(--fg);
-}
-
-.sidebar-tab.active {
-  color: var(--fg);
-  box-shadow: inset 0 -2px var(--accent);
-}
-
 .tab-count {
   font: var(--fs-label) var(--font-mono);
   color: var(--dim);
@@ -681,12 +660,6 @@
 /* sections inside the sidebar */
 .section + .section {
   border-top: 1px solid var(--line);
-}
-
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .section-title {
@@ -1500,10 +1473,6 @@
   border-color: var(--line-3);
 }
 
-.src-link-arrow {
-  color: var(--dim);
-}
-
 .stack-link {
   background: none;
   border: 0;
@@ -1518,18 +1487,6 @@
 .stack-link:hover,
 .stack-link:focus-visible {
   color: var(--fg);
-}
-
-.insp-json {
-  margin: 0;
-  padding: 8px 10px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font: var(--fs-label) / 1.5 var(--font-mono);
-  max-height: 240px;
-  overflow: auto;
-  white-space: pre;
 }
 
 .insp-attrs {
@@ -1745,11 +1702,6 @@
   border-radius: 999px;
 }
 
-.count-err {
-  color: var(--err);
-  background: var(--err-bg);
-}
-
 /* route and trace lists */
 .trace-list {
   list-style: none;
@@ -1757,20 +1709,12 @@
   padding: 0;
 }
 
-.route-path,
 .trace-path {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--fs-sm);
-}
-
-.route-methods {
-  display: flex;
-  gap: 3px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .method-tag {
@@ -1878,7 +1822,6 @@
 
 @media (max-width: 500px) {
   /* Touch targets: 36 px minimum for comfortable tapping (bump pills/tabs/chips). */
-  .sidebar-tab,
   .builder-tab,
   .details-tab {
     min-height: 36px;

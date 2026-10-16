@@ -1,5 +1,7 @@
 import { useComputed } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
+import { IS_MAC, formatKey } from "../state/keymap";
+import { toggleCheatsheet, togglePalette } from "../state/palette";
 import { QUERY_INPUT_MAIN } from "../state/requestLog";
 import { go, route } from "../state/router";
 import {
@@ -22,6 +24,7 @@ import {
   tracesState,
   tracesWithErrors,
 } from "../state/store";
+import { HealthStrip, LiveRate } from "./HealthStrip";
 import { QueryBar } from "./RequestLog";
 
 /*
@@ -94,6 +97,26 @@ export function TopBar() {
         </div>
 
         <div class="actions">
+          <button
+            type="button"
+            class="action"
+            onClick={togglePalette}
+            aria-label="Command palette"
+            title="Command palette: find a route, request, finding, query or action"
+            aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"}
+          >
+            <kbd>{formatKey("Mod+k")}</kbd>
+          </button>
+          <button
+            type="button"
+            class="action"
+            onClick={toggleCheatsheet}
+            title="Keyboard shortcuts"
+            aria-label="Keyboard shortcuts"
+            aria-keyshortcuts="?"
+          >
+            <kbd>?</kbd>
+          </button>
           <button
             type="button"
             class="action"
@@ -180,12 +203,17 @@ export function EpochRail() {
   );
 }
 
-/** Runtime status: live stream, Next and OTel. WP6 adds loop p99 / RSS here. */
+/**
+ * Runtime status: app, Next, OTel, port, then the WP6 health strip (loop p99, rss, process errors)
+ * and the live dot with the request rate.
+ */
 export function StatusSlot() {
   const meta = metaState.value;
   const live = liveStatus.value;
   return (
-    <output class="status-slot" aria-label="Runtime status">
+    // Not <output>: an implicit live region would re-announce the health values every 2s, and the
+    // process-errors panel inside needs flow content. Outages are announced by TopNotice.
+    <div class="status-slot">
       {meta?.app && <span class="pill-text mono">{meta.app}</span>}
       {meta?.next && (
         <span class="pill-text" title="Next.js version detected">
@@ -211,11 +239,13 @@ export function StatusSlot() {
           :{meta.uiPort}
         </span>
       )}
+      <HealthStrip />
       <span class={`pill-text pill-live pill-live-${live}`} aria-label={`Live status: ${live}`}>
         <span class="dot-indicator" aria-hidden="true" />
         {live === "live" ? "live" : live === "reconnecting" ? "reconnecting…" : "offline"}
+        {live === "live" && <LiveRate />}
       </span>
-    </output>
+    </div>
   );
 }
 

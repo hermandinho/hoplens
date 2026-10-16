@@ -6,6 +6,7 @@ import "./styles/overview.css";
 import "./styles/request.css";
 import "./styles/canvas.css";
 import "./styles/log.css";
+import "./styles/palette.css";
 
 const target = document.getElementById("app");
 if (target) render(<App />, target);

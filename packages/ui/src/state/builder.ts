@@ -1,6 +1,7 @@
 import { computed, effect, signal } from "@preact/signals";
 import { api } from "../api/client";
 import type { MethodInfo, RouteInfo, RunResult, SchemaInfo } from "../api/types";
+import { REPLAY_N, type ReplayRequest, startReplay } from "./replay";
 import { loadTrace, metaState, routesState, selectedRouteKey } from "./store";
 
 export interface KV {
@@ -112,6 +113,8 @@ function writeStored(state: BuilderState): void {
 
 /* -------------------------------------------- react to route selection */
 
+let tabFor: string | null = null;
+
 // When the selected route changes, swap builder state. Prefer localStorage, else build from schema.
 effect(() => {
   const route = activeRoute.value;
@@ -121,8 +124,18 @@ effect(() => {
   }
   const key = `${route.route.id}::${route.method.method}`;
   const stored = readStored(key);
-  builderState.value = stored ?? initialBuilder(route.route, route.method);
+  const next = stored ?? initialBuilder(route.route, route.method);
+  builderState.value = next;
+  // A GET has no body to edit: open on its query (plan 4.2 WP7). Only on a route switch, not when
+  // the route list refreshes under the same route.
+  if (key !== tabFor) builderTab.value = initialTab(next.method);
+  tabFor = key;
 });
+
+/** The tab a route opens on: Query for a bodiless method, else Body. */
+export function initialTab(method: string): BuilderTab {
+  return /^(GET|HEAD|OPTIONS)$/i.test(method) ? "query" : "body";
+}
 
 // Persist on every change (lightweight — JSON.stringify of a few KB max).
 effect(() => {
@@ -208,26 +221,38 @@ function resolvePath(template: string, params: Record<string, string>): string {
   });
 }
 
+/** The builder's fields as a run input (path params filled, enabled query/header rows only). */
+export function builderRequest(s: BuilderState): ReplayRequest {
+  const resolved = resolvePath(s.path, s.params);
+  const qs = buildQuery(s.query);
+  const path = qs ? `${resolved}?${qs}` : resolved;
+  const headers: Record<string, string> = {};
+  for (const h of s.headers) if (h.enabled && h.key.trim()) headers[h.key.trim()] = h.value;
+  const method = s.method.toUpperCase();
+  const canHaveBody = method !== "GET" && method !== "HEAD";
+  return {
+    method,
+    path,
+    headers,
+    body: canHaveBody && s.body.trim() ? s.body : undefined,
+    profile: s.profile || undefined,
+  };
+}
+
+/** Replay xN of the builder's request (`R` while the builder is open); non-GET asks first. */
+export function replayBuilder(n = REPLAY_N): void {
+  const s = builderState.value;
+  if (!s || !metaState.value || sending.value) return;
+  startReplay({ kind: "builder", routeKey: s.routeKey }, builderRequest(s), { n });
+}
+
 export async function sendRequest(): Promise<void> {
   const s = builderState.value;
   if (!s || !metaState.value) return;
   sending.value = true;
   sendError.value = null;
   try {
-    const resolved = resolvePath(s.path, s.params);
-    const qs = buildQuery(s.query);
-    const path = qs ? `${resolved}?${qs}` : resolved;
-    const headers: Record<string, string> = {};
-    for (const h of s.headers) if (h.enabled && h.key.trim()) headers[h.key.trim()] = h.value;
-    const method = s.method.toUpperCase();
-    const canHaveBody = method !== "GET" && method !== "HEAD";
-    const result = await api.run({
-      method,
-      path,
-      headers,
-      body: canHaveBody && s.body.trim() ? s.body : undefined,
-      profile: s.profile || undefined,
-    });
+    const result = await api.run(builderRequest(s));
     lastRunResult.value = result;
     if (result.traceId) await loadTrace(result.traceId);
   } catch (err) {

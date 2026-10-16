@@ -13,13 +13,14 @@ import {
   makeWrap,
   markOwnServer,
 } from "./capture";
-import { EpochTracker, distMtimeProbe } from "./epoch";
+import { type EpochTracker, createEpochTracker } from "./epoch";
 import { HoplensError } from "./errors";
+import { HealthMonitor } from "./health";
 import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
 import { QueryStatsStore } from "./queries";
 import { type Redactor, makeRedactor } from "./serialize";
-import { handleUi } from "./server";
+import { handleUi, startApiModules } from "./server";
 import { setDistDir } from "./sourcemap";
 import { RouteStatsStore } from "./stats";
 import { TraceStore } from "./store";
@@ -59,6 +60,8 @@ export class Runtime {
   readonly stats = new RouteStatsStore();
   /** Cross-request query / host aggregates (GET /api/queries). */
   readonly queries = new QueryStatsStore();
+  /** Event-loop delay, memory, GC and process errors (GET /api/health). Listeners attach in start(). */
+  readonly health = new HealthMonitor();
 
   appPort?: number;
   uiPort?: number;
@@ -79,7 +82,8 @@ export class Runtime {
     this.banner = cfg.banner;
     this.log = createLogger("runtime");
     setDistDir(this.root, this.options.distDir);
-    this.epochs = new EpochTracker(distMtimeProbe(this.root, this.options.distDir ?? ".next"));
+    // Rebuild signal from the build output, attribution from a watcher on the project's source dirs.
+    this.epochs = createEpochTracker(this.root, this.options.distDir ?? ".next");
     // Both aggregates swallow their own errors: a listener that threw would surface in finish()'s timer.
     this.store.on("done", (t) => {
       this.stats.add(t);
@@ -101,6 +105,8 @@ export class Runtime {
     installFetchHook(this);
     installPgHook(this);
     installRedisHook(this);
+    this.health.start();
+    startApiModules(this);
     (globalThis as any).__hoplens = { wrap: makeWrap(this), emitDb: makeEmitDb(this), version: 2 };
     this.listen(this.options.port, 0);
     return this;

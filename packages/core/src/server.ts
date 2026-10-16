@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import * as compareApi from "./api/compare";
+import * as epochsApi from "./api/epochs";
+import * as healthApi from "./api/health";
+import type { ApiModule } from "./api/module";
 import type { QueryKind } from "./queries";
 import { type QueryTarget, matchQuery, parseQuery } from "./query";
 import type { Runtime } from "./runtime";
@@ -263,6 +267,37 @@ addRoute("POST", "/api/run", async ({ rt, req, res }) => {
   const input = JSON.parse((await readBody(req)) || "{}");
   await run(rt, input, res);
 });
+
+/* ------------------------------------------------ per-endpoint modules (plan 4.1) */
+
+/**
+ * Endpoints that live in their own `src/api/<name>.ts` module (contract in api/module.ts). A work
+ * package adds exactly one import above and one entry here; nothing else in this file changes.
+ * Mounted after the built-in routes, so a module can't shadow an existing endpoint.
+ */
+const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi];
+
+/** Mount a per-endpoint module. Exported for tests; production modules go in API_MODULES. */
+export function mountApi(mod: ApiModule): void {
+  for (const ep of mod.endpoints) {
+    addRoute(ep.method, ep.path, ({ rt, req, res, url, method, params }) =>
+      ep.handle(req, res, rt, { url, method, params }),
+    );
+  }
+}
+
+for (const mod of API_MODULES) mountApi(mod);
+
+/** Run each module's `start` hook once for a runtime (Runtime.start calls this). Never throws. */
+export function startApiModules(rt: Runtime): void {
+  for (const mod of API_MODULES) {
+    try {
+      mod.start?.(rt);
+    } catch {
+      /* a module's background state is best effort */
+    }
+  }
+}
 
 /* ------------------------------------------------------------------ search */
 

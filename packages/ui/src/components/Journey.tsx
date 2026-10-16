@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "preact/hooks";
-import type { Hop } from "../state/journey";
+import type { SpanRecord, TraceRecord } from "../api/types";
+import { type FlowModel, type ResourceGroup, type ResourceItem, flowModel } from "../state/flow";
 import {
   SPEED_OPTIONS,
   currentTime,
   journey,
   normalisedTime,
   pause,
-  play,
   playing,
   resetPlayback,
   seekTo,
@@ -19,30 +19,33 @@ import {
 } from "../state/journey";
 import { selectedTrace } from "../state/store";
 
-const COL_WIDTH = 140;
-const ROW_HEIGHT = 60;
-const MAIN_Y = 50;
-const PADDING_X = 40;
-const PADDING_TOP = 20;
+/**
+ * Flow view — a diagram of what the request actually did, not a straight
+ * timeline. The top row renders the request *pipeline* (what Next.js did to
+ * route the call), and the grid below groups everything the handler
+ * *touched* — DB queries by table, Redis commands by key, external APIs by
+ * host, internal functions by directory, RSC renders. Each item links back
+ * to the span in the inspector.
+ */
 
 export function Journey() {
   const trace = selectedTrace.value;
   const j = journey.value;
+  const flow = flowModel.value;
   const t = currentTime.value;
   const isPlaying = playing.value;
   const spd = speed.value;
   const selected = selectedHopId.value;
-  const rafRef = useRef<number | null>(null);
-  const lastRef = useRef<number | null>(null);
 
-  // Reset playback when the trace changes. traceId is a trigger-only dep.
   const traceId = trace?.id ?? null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: traceId is intentionally the sole trigger
   useEffect(() => {
     resetPlayback();
   }, [traceId]);
 
-  // rAF loop advances currentTime at `speed` × wall-clock.
+  // rAF loop advances currentTime at `speed` × wall-clock when playing.
+  const rafRef = useRef<number | null>(null);
+  const lastRef = useRef<number | null>(null);
   useEffect(() => {
     if (!isPlaying) {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -76,11 +79,10 @@ export function Journey() {
     };
   }, [isPlaying, spd]);
 
-  // Keyboard controls, scoped to document when a hop is in play.
+  // Keyboard controls (space / arrows / Home / End).
   useEffect(() => {
     if (!j) return;
     const handler = (ev: KeyboardEvent) => {
-      // Don't swallow when the user is typing in an input/textarea.
       const target = ev.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
       if (ev.key === " ") {
@@ -104,7 +106,7 @@ export function Journey() {
     return () => document.removeEventListener("keydown", handler);
   }, [j]);
 
-  if (!trace || !j) {
+  if (!trace || !j || !flow) {
     return (
       <div class="journey-empty">
         <b>No trace selected</b>
@@ -113,22 +115,16 @@ export function Journey() {
     );
   }
 
-  // Canvas dimensions depend on main-lane columns + call rows.
-  const mainWidth = Math.max(j.mainHops.length, 2) * COL_WIDTH;
-  const callRows = j.callHops.length;
-  const svgWidth = PADDING_X * 2 + mainWidth;
-  const svgHeight = PADDING_TOP + MAIN_Y + 60 + Math.max(callRows, 1) * ROW_HEIGHT + 20;
-  const callX = (h: Hop) => PADDING_X + h.tStart * mainWidth;
-  const callW = (h: Hop) => Math.max(60, (h.tEnd - h.tStart) * mainWidth);
-  const packetX = PADDING_X + normalisedTime.value * mainWidth;
+  const totalMs = Math.round(j.duration);
+  const progressMs = Math.round(t);
 
   return (
-    <section class="journey" aria-label="Request journey">
-      <div class="journey-head">
-        <h3 class="journey-title">
-          Journey <span class="dim mono">{Math.round(j.duration)}ms</span>
+    <section class="flow" aria-label="Request flow">
+      <header class="flow-head">
+        <h3 class="flow-title">
+          Flow <span class="dim mono">{totalMs}ms</span>
         </h3>
-        <div class="journey-controls" role="toolbar" aria-label="Playback">
+        <div class="flow-controls" role="toolbar" aria-label="Playback">
           <button
             type="button"
             class="pbtn"
@@ -157,14 +153,14 @@ export function Journey() {
             max={j.duration}
             step={1}
             value={t}
-            aria-label="Scrub playback"
             onInput={(e) => seekTo(Number((e.target as HTMLInputElement).value))}
+            aria-label="Scrub playback"
           />
-          <label class="speed-label" for="journey-speed">
+          <label class="speed-label" for="flow-speed">
             Speed
           </label>
           <select
-            id="journey-speed"
+            id="flow-speed"
             class="speed-select"
             value={spd}
             onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value) as (typeof SPEED_OPTIONS)[number])}
@@ -175,235 +171,210 @@ export function Journey() {
               </option>
             ))}
           </select>
-          <span class="time-indicator mono" aria-live="off">
-            {Math.round(t)}ms
-          </span>
+          <span class="time-indicator mono">{progressMs}ms</span>
         </div>
-      </div>
+      </header>
 
-      <div class="journey-canvas-wrap">
-        <svg
-          class="journey-canvas"
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          width={svgWidth}
-          height={svgHeight}
-          role="img"
-          aria-label={`Journey graph for ${trace.method} ${trace.path}`}
-        >
-          <defs>
-            <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-              <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)" />
-            </marker>
-          </defs>
+      <TotalsStrip flow={flow} />
 
-          {/* main rail */}
-          <line
-            x1={PADDING_X}
-            x2={PADDING_X + mainWidth}
-            y1={MAIN_Y + 15}
-            y2={MAIN_Y + 15}
-            stroke="var(--line-2)"
-            stroke-width={1}
-          />
-
-          {/* main-lane hops */}
-          {j.mainHops.map((h, i) => {
-            const x = PADDING_X + i * COL_WIDTH + 8;
-            const w = COL_WIDTH - 16;
-            return (
-              <MainHopNode
-                key={h.id}
-                hop={h}
-                x={x}
-                y={MAIN_Y}
-                w={w}
-                h={32}
-                selected={selected === h.id}
-                onSelect={() => selectHop(h.id)}
-              />
-            );
-          })}
-
-          {/* handler → call elbow connectors */}
-          {j.callHops.map((h) => {
-            const handlerIdx = j.mainHops.findIndex((m) => m.kind === "handler");
-            const handlerX = handlerIdx >= 0 ? PADDING_X + handlerIdx * COL_WIDTH + COL_WIDTH / 2 : PADDING_X;
-            const y = MAIN_Y + 60 + (h.row - 1) * ROW_HEIGHT;
-            const nodeX = Math.max(callX(h), handlerX + 20);
-            return (
-              <g key={`conn-${h.id}`} class="elbow">
-                <path
-                  d={`M${handlerX},${MAIN_Y + 32} L${handlerX},${y + 12} L${nodeX},${y + 12}`}
-                  fill="none"
-                  stroke="var(--line-2)"
-                  stroke-width={1}
-                />
-              </g>
-            );
-          })}
-
-          {/* call hops */}
-          {j.callHops.map((h) => {
-            const y = MAIN_Y + 60 + (h.row - 1) * ROW_HEIGHT;
-            const handlerIdx = j.mainHops.findIndex((m) => m.kind === "handler");
-            const handlerX = handlerIdx >= 0 ? PADDING_X + handlerIdx * COL_WIDTH + COL_WIDTH / 2 : PADDING_X;
-            const x = Math.max(callX(h), handlerX + 20);
-            const w = Math.min(callW(h), mainWidth - (x - PADDING_X));
-            return (
-              <CallHopNode
-                key={h.id}
-                hop={h}
-                x={x}
-                y={y}
-                w={w}
-                h={24}
-                selected={selected === h.id}
-                onSelect={() => selectHop(h.id)}
-              />
-            );
-          })}
-
-          {/* animated packet along the main rail */}
-          <circle
-            class="packet"
-            cx={packetX}
-            cy={MAIN_Y + 15}
-            r={5}
-            fill="var(--in)"
-            stroke="var(--in-ink)"
-            stroke-width={1}
-          />
-        </svg>
+      <div class="flow-body">
+        <Pipeline flow={flow} trace={trace} selected={selected} progress={normalisedTime.value} />
+        <TouchedGrid flow={flow} selected={selected} />
       </div>
     </section>
   );
 }
 
-function MainHopNode({
-  hop,
-  x,
-  y,
-  w,
-  h,
-  selected,
-  onSelect,
-}: {
-  hop: Hop;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const colorVar = `var(--k-${hop.kind})`;
-  const errored = !!hop.span.error;
+/* -------------------------------------------------------- top totals strip */
+
+function TotalsStrip({ flow }: { flow: FlowModel }) {
+  const items: { label: string; ms: number; cls: string }[] = [];
+  if (flow.totals.dbMs > 0) items.push({ label: "DB", ms: flow.totals.dbMs, cls: "db" });
+  if (flow.totals.cacheMs > 0) items.push({ label: "Cache", ms: flow.totals.cacheMs, cls: "cache" });
+  if (flow.totals.externalMs > 0) items.push({ label: "External", ms: flow.totals.externalMs, cls: "external" });
+  if (flow.totals.internalMs > 0) items.push({ label: "Functions", ms: flow.totals.internalMs, cls: "internal" });
+  if (flow.totals.renderMs > 0) items.push({ label: "Render", ms: flow.totals.renderMs, cls: "render" });
+
+  if (items.length === 0) {
+    return (
+      <div class="flow-totals empty">
+        <span class="dim">This request didn't touch any external resource.</span>
+      </div>
+    );
+  }
+
   return (
-    <g
-      class={`hop-node main ${selected ? "selected" : ""} ${errored ? "errored" : ""}`}
-      // biome-ignore lint/a11y/useSemanticElements: SVG has no native button; role=button is the correct ARIA role here.
-      role="button"
-      tabindex={0}
-      aria-label={`${hop.kind}: ${hop.name}${errored ? " (errored)" : ""}`}
-      aria-pressed={selected}
-      onClick={onSelect}
-      onKeyDown={(e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      style="cursor: pointer"
-    >
-      <rect
-        x={x}
-        y={y}
-        width={w}
-        height={h}
-        rx={8}
-        fill={errored ? "var(--err-bg)" : "var(--panel-2)"}
-        stroke={errored ? "var(--err)" : colorVar}
-        stroke-width={selected ? 2 : 1}
-      />
-      <text
-        x={x + w / 2}
-        y={y + h / 2 + 4}
-        text-anchor="middle"
-        fill="var(--fg)"
-        font-size={11}
-        font-family="var(--font-mono)"
-      >
-        {hop.name.length > 20 ? `${hop.name.slice(0, 18)}…` : hop.name}
-      </text>
-      <text
-        x={x + w / 2}
-        y={y - 4}
-        text-anchor="middle"
-        fill={colorVar}
-        font-size={9}
-        font-family="var(--font-mono)"
-        style="text-transform: uppercase; letter-spacing: 0.08em"
-      >
-        {hop.kind}
-      </text>
-    </g>
+    <div class="flow-totals" aria-label="Resource totals">
+      {items.map((i) => (
+        <span key={i.label} class={`flow-total-chip chip-${i.cls}`}>
+          <span class="chip-label">{i.label}</span>
+          <span class="chip-ms mono">{Math.round(i.ms)}ms</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
-function CallHopNode({
-  hop,
-  x,
-  y,
-  w,
-  h,
+/* ----------------------------------------------------------- pipeline row */
+
+interface PipelineNode {
+  id: string;
+  kind: string;
+  label: string;
+  sub?: string;
+  duration: number;
+  errored: boolean;
+}
+
+function Pipeline({
+  flow,
+  trace,
   selected,
-  onSelect,
+  progress,
 }: {
-  hop: Hop;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  selected: boolean;
-  onSelect: () => void;
+  flow: FlowModel;
+  trace: TraceRecord;
+  selected: string | null;
+  progress: number;
 }) {
-  const colorVar = `var(--k-${hop.kind})`;
-  const errored = !!hop.span.error;
-  const dur = Math.round(hop.end - hop.start);
+  const total = Math.max(1, trace.duration ?? 1);
+  const nodes: PipelineNode[] = [
+    {
+      id: "client",
+      kind: "request",
+      label: trace.runId ? "Hoplens" : "Client",
+      sub: `${trace.method} ${trace.route ?? trace.path}`,
+      duration: 0,
+      errored: false,
+    },
+    ...flow.pipeline.map(
+      (s): PipelineNode => ({
+        id: s.id,
+        kind: s.kind,
+        label: pipelineLabel(s, trace),
+        sub: s.location ? `${baseFile(s.location.file)}:${s.location.line}` : undefined,
+        duration: s.end - s.start,
+        errored: !!s.error,
+      }),
+    ),
+  ];
+
   return (
-    <g
-      class={`hop-node call ${selected ? "selected" : ""} ${errored ? "errored" : ""}`}
-      // biome-ignore lint/a11y/useSemanticElements: SVG has no native button; role=button is the correct ARIA role here.
-      role="button"
-      tabindex={0}
-      aria-label={`${hop.kind}: ${hop.name} (${dur}ms)${errored ? " errored" : ""}`}
-      aria-pressed={selected}
-      onClick={onSelect}
-      onKeyDown={(e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      style="cursor: pointer"
-    >
-      <rect
-        x={x}
-        y={y}
-        width={w}
-        height={h}
-        rx={6}
-        fill={errored ? "var(--err-bg)" : colorVar}
-        fill-opacity="0.12"
-        stroke={errored ? "var(--err)" : colorVar}
-        stroke-width={selected ? 2 : 1}
-      />
-      <text x={x + 8} y={y + 16} fill="var(--fg)" font-size={11} font-family="var(--font-mono)">
-        {hop.name.length > 32 ? `${hop.name.slice(0, 30)}…` : hop.name}
-      </text>
-      <text x={x + w - 6} y={y + 16} text-anchor="end" fill="var(--dim)" font-size={10} font-family="var(--font-mono)">
-        {dur}ms
-      </text>
-    </g>
+    <div class="flow-pipeline" aria-label="Request pipeline">
+      <div class="flow-pipeline-rail">
+        {nodes.map((n, i) => (
+          <div class="flow-pipeline-slot" key={n.id}>
+            <button
+              type="button"
+              class={`pipe-node pipe-${n.kind} ${selected === n.id ? "selected" : ""} ${n.errored ? "errored" : ""}`}
+              onClick={() => selectHop(n.id)}
+            >
+              <span class="pipe-kind">{n.kind}</span>
+              <span class="pipe-label mono">{n.label}</span>
+              {n.sub && <span class="pipe-sub mono dim">{n.sub}</span>}
+              {n.duration > 0 && <span class="pipe-dur mono">{Math.round(n.duration)}ms</span>}
+            </button>
+            {i < nodes.length - 1 && (
+              <span class="pipe-arrow" aria-hidden="true">
+                →
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div class="flow-pipeline-scrub" aria-hidden="true">
+        <div class="flow-pipeline-scrub-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+      </div>
+      <div class="flow-pipeline-foot dim mono">{Math.round(total)}ms wall · click a node to inspect</div>
+    </div>
   );
+}
+
+/* -------------------------------------------------------- touched grid */
+
+function TouchedGrid({ flow, selected }: { flow: FlowModel; selected: string | null }) {
+  if (flow.groups.length === 0) {
+    return (
+      <div class="flow-touched flow-touched-empty">
+        <b>Nothing to show here yet.</b>
+        <span class="dim">
+          This request didn't touch any database, cache, external API, or app function. Try a route that queries data,
+          and the diagram will light up.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div class="flow-touched" aria-label="Resources touched by this request">
+      {flow.groups.map((g) => (
+        <ResourceCard key={`${g.category}-${g.name}`} group={g} selected={selected} />
+      ))}
+    </div>
+  );
+}
+
+function ResourceCard({ group, selected }: { group: ResourceGroup; selected: string | null }) {
+  const MAX_ITEMS = 6;
+  const visible = group.items.slice(0, MAX_ITEMS);
+  const more = group.items.length - visible.length;
+  return (
+    <article class={`res-card res-${group.category}`} aria-label={`${group.name} resource group`}>
+      <header class="res-head">
+        <span class={`res-icon icon-${group.icon}`} aria-hidden="true" />
+        <h4 class="res-name">{group.name}</h4>
+        <span class="res-count mono">
+          {group.items.length} {group.items.length === 1 ? "call" : "calls"}
+        </span>
+        <span class="res-total mono">{Math.round(group.totalMs)}ms</span>
+      </header>
+      <ul class="res-items">
+        {visible.map((item) => (
+          <ResourceRow key={item.span.id} item={item} selected={selected === item.span.id} />
+        ))}
+      </ul>
+      {more > 0 && <div class="res-more dim mono">+ {more} more</div>}
+    </article>
+  );
+}
+
+function ResourceRow({ item, selected }: { item: ResourceItem; selected: boolean }) {
+  return (
+    <li class={`res-row ${selected ? "selected" : ""} ${item.errored ? "errored" : ""}`}>
+      <button type="button" class="res-row-btn" onClick={() => selectHop(item.span.id)}>
+        <span class="res-row-label mono" title={item.label}>
+          {item.label}
+        </span>
+        {item.sub && (
+          <span class="res-row-sub mono dim" title={item.sub}>
+            {item.sub}
+          </span>
+        )}
+        <span class="res-row-dur mono">{Math.round(item.duration)}ms</span>
+      </button>
+    </li>
+  );
+}
+
+/* -------------------------------------------------------- label helpers */
+
+function pipelineLabel(s: SpanRecord, t: TraceRecord): string {
+  switch (s.kind) {
+    case "request":
+      return `${t.method} ${t.route ?? t.path}`;
+    case "proxy":
+      return "middleware";
+    case "router":
+      return "router";
+    case "handler":
+      return "handler";
+    case "response":
+      return `response ${t.status ?? ""}`.trim();
+    default:
+      return s.name;
+  }
+}
+
+function baseFile(file: string): string {
+  const i = file.lastIndexOf("/");
+  return i >= 0 ? file.slice(i + 1) : file;
 }

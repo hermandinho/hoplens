@@ -1,7 +1,18 @@
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { installBodyHooks, installConsoleHook, installHttpHook, installOtel, makeWrap, markOwnServer } from "./capture";
+import {
+  installBodyHooks,
+  installConsoleHook,
+  installFetchHook,
+  installHttpHook,
+  installOtel,
+  installPgHook,
+  installRedisHook,
+  makeEmitDb,
+  makeWrap,
+  markOwnServer,
+} from "./capture";
 import { HoplensError } from "./errors";
 import { type Logger, createLogger } from "./logger";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
@@ -68,7 +79,10 @@ export class Runtime {
     installHttpHook(this);
     installBodyHooks(this);
     installConsoleHook(this);
-    (globalThis as any).__hoplens = { wrap: makeWrap(this), version: 1 };
+    installFetchHook(this);
+    installPgHook(this);
+    installRedisHook(this);
+    (globalThis as any).__hoplens = { wrap: makeWrap(this), emitDb: makeEmitDb(this), version: 2 };
     this.listen(this.options.port, 0);
     return this;
   }

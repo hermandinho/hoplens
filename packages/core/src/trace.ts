@@ -40,3 +40,27 @@ function callerFile(): string {
   const m = line.match(/\(?([^()\s]+):(\d+):\d+\)?$/);
   return m ? `${m[1]}:${m[2]}` : "";
 }
+
+/**
+ * Drop-in logger for Drizzle so queries show up as `db` spans. Drizzle's
+ * built-in logger only fires once per query (no duration), so the span is a
+ * zero-length marker — but you get the SQL + bound params in the journey.
+ * For real timing, let the underlying driver (`pg`, etc.) be instrumented —
+ * Hoplens patches `pg` automatically.
+ *
+ * ```ts
+ * import { drizzle } from "drizzle-orm/node-postgres";
+ * import { drizzleLogger } from "@hoplens/core/trace";
+ *
+ * const db = drizzle(client, { logger: drizzleLogger() });
+ * ```
+ */
+export function drizzleLogger() {
+  return {
+    logQuery(query: string, params: unknown[]) {
+      const tp = (globalThis as any).__hoplens;
+      if (!tp || typeof tp.emitDb !== "function") return;
+      tp.emitDb({ system: "sql", query, params, name: "drizzle.query" });
+    },
+  };
+}

@@ -2,6 +2,7 @@ import type { CapturedError, LogRecord, SpanRecord } from "../api/types";
 import { selectedHopId } from "../state/journey";
 import { openSourceAt } from "../state/source";
 import { selectedTrace } from "../state/store";
+import { JsonView } from "./JsonView";
 
 export function Inspector() {
   const trace = selectedTrace.value;
@@ -138,11 +139,10 @@ function ErrorBlock({ err }: { err: CapturedError }) {
 }
 
 function JsonSection({ title, value }: { title: string; value: unknown }) {
-  const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   return (
     <section class="insp-section">
       <div class="insp-section-title">{title}</div>
-      <pre class="insp-json mono">{text}</pre>
+      <JsonView value={value} />
     </section>
   );
 }

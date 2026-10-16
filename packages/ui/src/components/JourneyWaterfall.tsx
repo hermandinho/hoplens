@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "preact/hooks";
-import type { HopKind, SpanRecord } from "../api/types";
+import { useEffect, useRef, useState } from "preact/hooks";
+import type { HopKind, LogRecord, SpanRecord } from "../api/types";
 import { selectHop, selectedHopId } from "../state/journey";
 import { selectedTrace } from "../state/store";
+import { SpanSnippet } from "./SpanSnippet";
 
 /**
  * Classic trace-waterfall layout — one row per span, indented by depth in the
@@ -86,8 +87,11 @@ export function JourneyWaterfall() {
     return () => el.removeEventListener("keydown", handler);
   }, [rows, selected]);
 
+  const logs = trace.logs;
+
   return (
     <section class="waterfall" aria-label="Journey waterfall">
+      <WhySlow rows={rows} total={total} />
       <header class="waterfall-head">
         <div class="waterfall-name-col">Span</div>
         <div class="waterfall-bar-col">
@@ -98,26 +102,36 @@ export function JourneyWaterfall() {
       </header>
       <ul ref={listRef} class="waterfall-rows">
         {rows.map((row) => (
-          <Row key={row.span.id} row={row} selected={selected === row.span.id} />
+          <Row key={row.span.id} row={row} selected={selected === row.span.id} logs={logs} />
         ))}
       </ul>
     </section>
   );
 }
 
-function Row({ row, selected }: { row: WaterfallRow; selected: boolean }) {
+function Row({ row, selected, logs }: { row: WaterfallRow; selected: boolean; logs: LogRecord[] }) {
   const { span, depth, leftPct, widthPct } = row;
   const duration = span.end - span.start;
   const hasError = !!span.error;
   const kindClass = `jw-kind-${span.kind}`;
   const indent = Math.min(depth, 6) * 16;
 
+  // Snippet is "always shown" per the design, but only the selected row (or
+  // any errored row) actually renders the preview — otherwise opening a page
+  // with 40 spans would fire 40 /source requests.
+  const [forceOpen, setForceOpen] = useState(false);
+  const showSnippet = selected || hasError || forceOpen;
+  const scoped = hasError ? logs.filter((l) => l.spanId === span.id || (l.t >= span.start && l.t <= span.end)) : [];
+
   return (
     <li class="waterfall-row-li">
       <button
         type="button"
         class={`waterfall-row ${selected ? "selected" : ""} ${hasError ? "jw-row-err" : ""}`}
-        onClick={() => selectHop(span.id)}
+        onClick={() => {
+          selectHop(span.id);
+          setForceOpen((v) => !v || !selected);
+        }}
       >
         <div class="waterfall-name-col" style={{ paddingLeft: `${12 + indent}px` }}>
           <span class={`jw-kind-pill ${kindClass}`}>{kindLabel(span.kind)}</span>
@@ -131,7 +145,53 @@ function Row({ row, selected }: { row: WaterfallRow; selected: boolean }) {
           </div>
         </div>
       </button>
+      {showSnippet && <SpanSnippet span={span} />}
+      {scoped.length > 0 && (
+        <fieldset class="wf-logs">
+          <legend class="wf-logs-head">Logs during this failing step ({scoped.length})</legend>
+          {scoped.map((log, i) => (
+            <div key={`${log.t}-${i}`} class={`wf-log-line level-${log.level}`}>
+              <span class="wf-log-time">+{Math.round(log.t)}ms</span>
+              <span class={`console-level level-${log.level}`}>{log.level}</span>
+              <span class="wf-log-text">{log.text}</span>
+            </div>
+          ))}
+        </fieldset>
+      )}
     </li>
+  );
+}
+
+function WhySlow({ rows, total }: { rows: WaterfallRow[]; total: number }) {
+  if (rows.length < 3 || total < 5) return null;
+  // Longest *leaf* span: a parent-span dominating its total is uninteresting
+  // ("the request was slow because the request was slow"). We bias toward
+  // spans that aren't ancestors of others.
+  const nonAncestors = rows.filter((r) => !rows.some((o) => o.span.parentId === r.span.id));
+  const pool = nonAncestors.length > 0 ? nonAncestors : rows;
+  const slowest = pool.reduce((a, b) => {
+    const ad = a.span.end - a.span.start;
+    const bd = b.span.end - b.span.start;
+    return bd > ad ? b : a;
+  });
+  const dur = slowest.span.end - slowest.span.start;
+  const pct = Math.round((dur / total) * 100);
+  // Hide if nothing is really standing out (<= 20% of total).
+  if (pct < 20) return null;
+  return (
+    <div class="why-slow" aria-label="Journey summary">
+      <span class="why-slow-lead">Slowest</span>
+      <button type="button" class="why-slow-span" onClick={() => selectHop(slowest.span.id)} title="Jump to span">
+        {slowest.span.name}
+      </button>
+      <span class="why-slow-sep">·</span>
+      <span class="why-slow-metric mono">{Math.round(dur)}ms</span>
+      <span class="why-slow-sep">·</span>
+      <span class="why-slow-metric mono">{pct}% of total</span>
+      <span class="why-slow-count">
+        {rows.length} spans · {Math.round(total)}ms total
+      </span>
+    </div>
   );
 }
 

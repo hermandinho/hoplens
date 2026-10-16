@@ -1,3 +1,4 @@
+import { useEffect } from "preact/hooks";
 import type { BodyCapture, TraceRecord } from "../api/types";
 import {
   type DetailsTab,
@@ -8,10 +9,12 @@ import {
   setDetailsTab,
 } from "../state/details";
 import { selectedHopId } from "../state/journey";
+import { closeDetailsSheet, detailsSheetOpen, isMobile, openDetailsSheet } from "../state/mobile";
 import { isHandledError, statusClass } from "../state/stats";
 import { selectedTrace } from "../state/store";
 import { SpanDetail } from "./Inspector";
 import { JsonView } from "./JsonView";
+import { Sheet } from "./Mobile";
 
 const TABS: readonly { id: DetailsTab; label: string }[] = [
   { id: "response", label: "Response" },
@@ -25,41 +28,72 @@ export function Details() {
   const picked = detailsTab.value;
   const counts = detailsCounts.value;
   const hopId = selectedHopId.value;
+  const mobile = isMobile.value;
+  const sheet = detailsSheetOpen.value;
   const span = hopId ? trace?.spans.find((s) => s.id === hopId) : undefined;
   // The Span tab exists only while a span is selected; without one it falls back to Response.
   const tab: DetailsTab = picked === "span" && !span ? "response" : picked;
 
+  // Phones (plan 3.6): the details live in a bottom sheet. Picking a span opens it on the Span tab,
+  // the way the drawer switches to Span on a desktop. The sheet never outlives the request view.
+  useEffect(() => {
+    if (mobile && hopId) openDetailsSheet();
+  }, [mobile, hopId]);
+  useEffect(() => closeDetailsSheet, []);
+
   if (!trace) return null;
+
+  const tabs = (sheetTabs: boolean) => (
+    <div class="details-tabs" role="tablist" aria-label="Trace detail views">
+      {TABS.filter((t) => t.id !== "span" || span).map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={sheetTabs || !mobile ? `details-tab-${t.id}` : undefined}
+          aria-controls={sheetTabs || !mobile ? "details-panel" : undefined}
+          class={`details-tab ${tab === t.id ? "active" : ""}`}
+          aria-selected={tab === t.id}
+          onClick={() => {
+            setDetailsTab(t.id);
+            if (mobile) openDetailsSheet();
+          }}
+        >
+          {t.label}
+          {counts[t.id] > 0 && t.id === "console" && <span class="tab-count">{counts[t.id]}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  const body = (
+    <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
+      {tab === "response" && <ResponsePane trace={trace} />}
+      {tab === "console" && <ConsolePane trace={trace} />}
+      {tab === "request" && <RequestPane />}
+      {tab === "span" && span && (
+        <div class="pane insp">
+          <SpanDetail trace={trace} span={span} />
+        </div>
+      )}
+    </div>
+  );
+
+  if (mobile) {
+    return (
+      <section class="details details-dock" aria-label="Trace details">
+        {tabs(false)}
+        <Sheet open={sheet} label="Trace details" onClose={closeDetailsSheet} head={tabs(true)}>
+          {body}
+        </Sheet>
+      </section>
+    );
+  }
 
   return (
     <section class="details" aria-label="Trace details">
-      <div class="details-tabs" role="tablist" aria-label="Trace detail views">
-        {TABS.filter((t) => t.id !== "span" || span).map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            id={`details-tab-${t.id}`}
-            aria-controls="details-panel"
-            class={`details-tab ${tab === t.id ? "active" : ""}`}
-            aria-selected={tab === t.id}
-            onClick={() => setDetailsTab(t.id)}
-          >
-            {t.label}
-            {counts[t.id] > 0 && t.id === "console" && <span class="tab-count">{counts[t.id]}</span>}
-          </button>
-        ))}
-      </div>
-      <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
-        {tab === "response" && <ResponsePane trace={trace} />}
-        {tab === "console" && <ConsolePane trace={trace} />}
-        {tab === "request" && <RequestPane />}
-        {tab === "span" && span && (
-          <div class="pane insp">
-            <SpanDetail trace={trace} span={span} />
-          </div>
-        )}
-      </div>
+      {tabs(true)}
+      {body}
     </section>
   );
 }

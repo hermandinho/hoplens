@@ -1,7 +1,9 @@
 import { useComputed, useSignal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
+import { builderDims } from "../state/builder";
 import { initCompare } from "../state/compare";
 import { sinceNumber, tracesSince } from "../state/epochs";
+import { isMobile, neighbourId } from "../state/mobile";
 import { logMatchCount, logQuery, logRows } from "../state/requestLog";
 import { type Route, route } from "../state/router";
 import {
@@ -22,6 +24,7 @@ import { CompareButton, CompareView, PickBanner, PinToggle } from "./CompareView
 import { Details } from "./Details";
 import { Inspector } from "./Inspector";
 import { JourneyPane } from "./JourneyPane";
+import { useSwipe } from "./Mobile";
 import { Overview, RouteSubject, overviewHeld } from "./Overview";
 import { QueriesView } from "./QueriesView";
 import { RequestBuilder } from "./RequestBuilder";
@@ -239,9 +242,14 @@ function RequestSubject({ r }: { r: Route }) {
   const newer = i > 0 ? rows[i - 1] : undefined;
   const older = i >= 0 ? rows[i + 1] : undefined;
   const isTrace = r.view === "trace";
+  // Phones (plan 3.6): a horizontal flick on the open request moves to the newer / older one.
+  const swipe = useSwipe((dir) => {
+    const next = neighbourId(logRows.peek(), selectedTraceId.peek(), dir);
+    if (next && route.peek().view === "trace") void loadTrace(next, "user");
+  });
 
   return (
-    <div class="subject">
+    <div class="subject" {...(isTrace && isMobile.value ? swipe : {})}>
       <div class="subject-bar">
         <span class="subject-kind">{r.view === "compare" ? "Compare" : isTrace ? "Request" : "New request"}</span>
         {isTrace && (
@@ -315,6 +323,7 @@ function TraceSubject({ traceId }: { traceId: string }) {
 function BuilderDrawer() {
   const routes = routesState.value?.routes ?? [];
   const key = selectedRouteKey.value ?? "";
+  const dims = builderDims.value;
   const groups = useComputed(() => {
     const m = new Map<string, NonNullable<typeof routesState.value>["routes"]>();
     for (const r of routesState.value?.routes ?? []) {
@@ -327,7 +336,7 @@ function BuilderDrawer() {
   }).value;
 
   return (
-    <section class="builder-drawer" aria-label="Request builder">
+    <section class={`builder-drawer${dims ? " dims-subject" : ""}`} aria-label="Request builder">
       <header class="builder-drawer-head">
         <label class="builder-drawer-title" for="builder-route">
           New request
@@ -368,6 +377,12 @@ function BuilderDrawer() {
           ×
         </button>
       </header>
+      {dims && (
+        <p class="builder-drawer-note">
+          Below, dimmed: the {route.value.view === "compare" ? "compare" : "request"} you had open, not this one. Send
+          to replace it with the result.
+        </p>
+      )}
       <RequestBuilder />
     </section>
   );

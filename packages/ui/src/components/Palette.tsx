@@ -323,6 +323,10 @@ export function Palette() {
               }}
             />
             {searching && <span class="palette-searching dim">searching…</span>}
+            {/* Touch has no Esc and the full-screen palette (mobile.css) no backdrop: shown on phones only. */}
+            <button type="button" class="palette-close" onClick={() => (paletteOpen.value = false)}>
+              Close
+            </button>
           </div>
           {/* Combobox popup: focus stays in the input, rows are picked via aria-activedescendant. */}
           {/* biome-ignore lint/a11y/useSemanticElements: combobox popup, see above */}

@@ -105,10 +105,11 @@ export function TopBar() {
             aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"}
           >
             <kbd>{formatKey("Mod+k")}</kbd>
+            <span class="touch-only">Search</span>
           </button>
           <button
             type="button"
-            class="action"
+            class="action keys-btn"
             onClick={toggleCheatsheet}
             title="Keyboard shortcuts"
             aria-label="Keyboard shortcuts"

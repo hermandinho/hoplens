@@ -3,6 +3,7 @@ import { useEffect } from "preact/hooks";
 import { ActionBar } from "./components/ActionBar";
 import { Cheatsheet } from "./components/Cheatsheet";
 import { MainPane } from "./components/MainPane";
+import { MobileTabs } from "./components/Mobile";
 import { Palette } from "./components/Palette";
 import { SourcePeek } from "./components/SourcePeek";
 import { TopBar } from "./components/TopBar";
@@ -81,6 +82,7 @@ export function App() {
       </a>
       <TopBar />
       <MainPane />
+      <MobileTabs />
       <ActionBar />
       <SourcePeek />
       <Palette />

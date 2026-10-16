@@ -46,6 +46,7 @@ import {
 } from "../state/flame";
 import { highlightNonce, highlightedSpanIds, selectHop, selectedHopId } from "../state/journey";
 import { register } from "../state/keymap";
+import { isMobile } from "../state/mobile";
 import { BUCKET_LABELS, fmtMs } from "../state/stats";
 import { selectedTrace } from "../state/store";
 import { type SpanGroup, bucketOf, buildSpanTree, hidingGroups, selfTimes } from "../state/traceview";
@@ -99,7 +100,8 @@ function Canvas({ trace }: { trace: TraceRecord }) {
   const highlighted = highlightedSpanIds.value;
   const hl = highlight.value;
   const nonce = highlightNonce.value;
-  const mode = canvasMode.value;
+  // Phones get the tree only (plan 3.6): a flame is unreadable at 400px.
+  const mode = isMobile.value ? "tree" : canvasMode.value;
   const crit = showCritical.value;
   const vpState = viewport.value;
   const zreq = zoomRequest.value;
@@ -462,7 +464,7 @@ function Canvas({ trace }: { trace: TraceRecord }) {
             )}
             <button
               type="button"
-              class="chip tc-btn"
+              class="chip tc-btn tc-pan"
               onClick={() => setRange(panRange(range, -PAN_STEP, total))}
               disabled={range[0] <= 0}
               title="Pan earlier ([)"
@@ -471,7 +473,7 @@ function Canvas({ trace }: { trace: TraceRecord }) {
             </button>
             <button
               type="button"
-              class="chip tc-btn"
+              class="chip tc-btn tc-pan"
               onClick={() => setRange(panRange(range, PAN_STEP, total))}
               disabled={range[1] >= total}
               title="Pan later (])"
@@ -879,7 +881,9 @@ function TreeRow({
           )}
           <span class={`jw-kind-pill jw-kind-${kind}`}>{kindLabel(kind)}</span>
           {n.type === "group" && <span class="wf-group-count mono">×{n.group.members.length}</span>}
-          <span class="jw-span-name">{span ? span.name : n.type === "group" ? n.group.label : "Next.js"}</span>
+          <span class={`jw-span-name ${note ? "jw-name-keep" : ""}`}>
+            {span ? span.name : n.type === "group" ? n.group.label : "Next.js"}
+          </span>
           {note && <span class={`tc-fold-note mono fold-${fold?.bucket}`}>{note}</span>}
           {n.type === "band" && (
             <span class="tc-band-note dim">

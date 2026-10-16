@@ -1,0 +1,516 @@
+/*
+ * WP11 phone layout (plan 3.6). Same breakpoint as state/mobile.ts (MOBILE_MAX_PX = 760).
+ * Imported last (main.tsx), so equal-specificity rules here win over the other sheets.
+ *   - The app is one viewport tall again (like >= 900px): compact top row, main, bottom tabs.
+ *   - The top bar is a single row: brand, newest edit, live dot, palette and shortcuts buttons. The
+ *     view tabs move to the bottom (MobileTabs); New request / Follow / Refresh live in the palette.
+ *   - A subject is a page pushed over its list (Split keeps the list mounted and inert under it);
+ *     the subject's close button reads "Back" and leads its bar.
+ *   - The request header puts the verdict right under the method / path / status line.
+ *   - Trace details sit in a bottom sheet (Mobile.tsx Sheet); the tree is the only canvas.
+ * Tokens only (scripts/check-tokens.mjs).
+ */
+
+/* Desktop: the phone-only pieces are not drawn. */
+.mtabs,
+.palette-close,
+.touch-only {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ sheet (any width) */
+
+.sheet {
+  padding: 0;
+  margin: auto 0 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 82dvh;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -12px 40px var(--shadow-lg);
+}
+
+.sheet::backdrop {
+  background: var(--scrim);
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 82dvh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.sheet-grip {
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 0;
+  border-radius: 2px;
+  background: var(--line-3);
+  flex: 0 0 auto;
+}
+
+.sheet-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 0 8px 0 0;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.sheet-head .details-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.sheet-close {
+  margin: 0 0 6px auto;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.sheet-close:hover,
+.sheet-close:focus-visible {
+  color: var(--fg);
+  border-color: var(--line-3);
+}
+
+.sheet-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px) {
+  /* ---------------------------------------------------------------- shell */
+
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    gap: 6px;
+    padding: calc(4px + env(safe-area-inset-top, 0px)) calc(6px + env(safe-area-inset-right, 0px)) 0
+      calc(6px + env(safe-area-inset-left, 0px));
+  }
+
+  /* ---------------------------------------------------------------- top bar: one row */
+
+  .top {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+  }
+
+  .top-row {
+    display: contents;
+  }
+
+  .brand {
+    order: 0;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .brand-name {
+    font-size: var(--fs-body);
+  }
+
+  .view-nav,
+  .top-filter {
+    display: none;
+  }
+
+  .top-status {
+    order: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 8px;
+    padding: 0;
+  }
+
+  .actions {
+    order: 2;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+
+  /* Palette and shortcuts only; the rest is in the palette's Actions group. */
+  .actions > :nth-child(n + 3) {
+    display: none;
+  }
+
+  .actions > .action {
+    min-height: 36px;
+    padding: 4px 10px;
+  }
+
+  .top-notice {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .epoch-rail {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .epoch-ticks {
+    display: none;
+  }
+
+  .epoch-now {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-slot {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  /* Only what needs attention: the live dot, a stalling loop, process errors. */
+  .status-slot > .pill-text:not(.pill-live),
+  .health-mem,
+  .health-loop-ok,
+  .health-rate {
+    display: none;
+  }
+
+  /* ---------------------------------------------------------------- bottom tabs */
+
+  .mtabs {
+    display: flex;
+    margin: 0 calc(-6px - env(safe-area-inset-right, 0px)) 0 calc(-6px - env(safe-area-inset-left, 0px));
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+  }
+
+  .mtab {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: none;
+    border: 0;
+    box-shadow: inset 0 2px transparent;
+    color: var(--muted);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+  }
+
+  .mtab[aria-current="page"] {
+    color: var(--fg);
+    box-shadow: inset 0 2px var(--accent);
+  }
+
+  .mtab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mtab-count {
+    font-size: var(--fs-label);
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mtab-count-err {
+    color: var(--err);
+  }
+
+  /* The rebuild toast sits above the tabs. */
+  .rebuild-toast {
+    left: 8px;
+    right: 8px;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+
+  /* ---------------------------------------------------------------- split: pushed subject */
+
+  .split,
+  .split-rail {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+  }
+
+  .split > .split-pane {
+    grid-area: 1 / 1;
+  }
+
+  .split-handle,
+  .split-list-rail {
+    display: none;
+  }
+
+  .split-log,
+  .split-solo .split-log {
+    height: auto;
+  }
+
+  .split-subject {
+    z-index: 3;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* The covered list keeps its scroll; it is inert (Split.tsx), so hide it from paint too. */
+  .split:not(.split-solo) > .split-list {
+    visibility: hidden;
+  }
+
+  /* The close button becomes "< Back" and leads the bar. */
+  .subject-bar {
+    padding: 2px 6px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .subject-close {
+    order: -1;
+    margin-left: 0;
+    min-height: 36px;
+    min-width: 0;
+    padding: 0 10px 0 4px;
+    font-size: 0;
+    color: var(--fg);
+  }
+
+  .subject-close::before {
+    content: "‹ Back" / "";
+    font-size: var(--fs-sm);
+    font-weight: 500;
+  }
+
+  .subject-kind {
+    display: none;
+  }
+
+  .subject-bar .sbtn {
+    min-height: 32px;
+    min-width: 32px;
+  }
+
+  /* ---------------------------------------------------------------- request header: verdict first */
+
+  .rh {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 8px;
+    padding: 10px 12px;
+  }
+
+  .rh-top {
+    display: contents;
+  }
+
+  .rh > *,
+  .rh-top > .rh-stats,
+  .rh-top > .rh-actions {
+    flex: 1 1 100%;
+    min-width: 0;
+    order: 5;
+  }
+
+  .rh-top > .method-tag,
+  .rh-top > .status-code,
+  .rh-top > .handled-badge {
+    flex: 0 0 auto;
+    order: 0;
+  }
+
+  .rh-top > .rh-path {
+    flex: 1 1 0;
+    order: 0;
+  }
+
+  .rh > .verdict {
+    order: 1;
+  }
+
+  .rh > .budget {
+    order: 2;
+  }
+
+  .rh-top > .rh-stats {
+    order: 3;
+  }
+
+  .rh-top > .rh-actions {
+    order: 4;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .verdict-title,
+  .verdict h2,
+  .verdict p {
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------------------------------------------------------------- canvas: tree only */
+
+  .tc-mode {
+    display: none;
+  }
+
+  /* Names first: the bar column only needs to show where and how long. */
+  .waterfall-row,
+  .waterfall-head {
+    padding-inline: 8px;
+  }
+
+  .waterfall-name-col {
+    flex: 0 0 62%;
+    min-width: 0;
+  }
+
+  .waterfall-bar-col {
+    margin-left: 6px;
+  }
+
+  /* ---------------------------------------------------------------- details: dock + sheet */
+
+  .details-dock {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    background: var(--panel);
+  }
+
+  .details-dock .details-tabs,
+  .sheet-head .details-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .details-tab {
+    min-height: 40px;
+    white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- overview: wrap, never cut */
+
+  .ov-find-route,
+  .ov-route-path {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------------------------------------------------------------- palette and cheatsheet */
+
+  .palette {
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .palette-body {
+    max-height: 100dvh;
+    padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+  }
+
+  .palette-search {
+    padding: 6px 8px 6px 14px;
+  }
+
+  .palette-close {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 4px 12px;
+    background: none;
+    border: 1px solid var(--line-2);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: var(--fs-sm);
+  }
+
+  .palette-row {
+    min-height: 40px;
+    padding-block: 4px;
+    padding-inline: 14px;
+  }
+
+  /* Findings wrap to their full sentence; long query shapes stop at two lines. */
+  .palette-title {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .palette-title.mono {
+    -webkit-line-clamp: 2;
+  }
+
+  .cheatsheet {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+}
+
+/* A touch screen has no keys: drop the key hints that only a keyboard can use. */
+@media (max-width: 760px) and (pointer: coarse) {
+  .palette-foot,
+  .list-hint,
+  button kbd,
+  .tc-pan,
+  .keys-btn {
+    display: none;
+  }
+
+  /* The palette button read "Ctrl+K" only. */
+  .touch-only {
+    display: inline;
+  }
+
+  /*
+   * The "x10" loop chip sits mid-row in a query shape row; on a phone a tap on the row landed on it
+   * and opened a request instead of the shape. The shape subject has "Open newest" for that.
+   */
+  .qv-row .qv-loop {
+    pointer-events: none;
+  }
+}
+
+@media (max-width: 760px) {
+  /* The loop annotation ("<- x10, 31ms each") goes under its code line, not off the right edge. */
+  .src-inline-lines .src-inline-hit {
+    display: grid;
+    grid-template-columns: 3ch max-content;
+    column-gap: 12px;
+  }
+
+  .src-inline-hit .src-inline-note {
+    grid-column: 2;
+  }
+}

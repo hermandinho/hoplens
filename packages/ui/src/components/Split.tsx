@@ -1,6 +1,7 @@
 import { signal } from "@preact/signals";
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { isMobile } from "../state/mobile";
 
 /*
  * The list | subject split every view uses (plan 3.1 "one list, one subject", 3.2).
@@ -10,7 +11,9 @@ import { useEffect, useRef, useState } from "preact/hooks";
  *    320px list, 560px subject (plan 3.10).
  *  - Double-click the splitter (or toggleListRail(id), bound to Ctrl+\ by the keymap) collapses
  *    the list to a 48px rail.
- *  - Below 900px the panes stack (mobile proper is WP11).
+ *  - Below 900px the panes stack. At the mobile breakpoint (state/mobile, 760px) the subject is a
+ *    page pushed over the list (layout in mobile.css); the list stays mounted, keeping its scroll,
+ *    and is made inert while covered. The subject's own close button is the Back button there.
  */
 
 export const LIST_MIN = 320;
@@ -81,6 +84,7 @@ export function Split(props: SplitProps) {
   const width = stored ?? Math.round(listWidth());
   const hasSubject = subject !== null && subject !== undefined && subject !== false;
   const rail = hasSubject && isRail(id);
+  const covered = hasSubject && isMobile.value;
 
   // Hold = list hovered || subject focused. Tracked here so both halves feed one flag.
   const hold = useRef({ hover: false, focus: false, on: false });
@@ -149,6 +153,7 @@ export function Split(props: SplitProps) {
     <section
       class={`split-pane split-list ${listClass}`}
       aria-label={listLabel}
+      inert={covered}
       onMouseEnter={() => setHold({ hover: true })}
       onMouseLeave={() => setHold({ hover: false })}
     >

@@ -1,7 +1,8 @@
-import { batch, computed, signal } from "@preact/signals";
+import { batch, computed, effect, signal } from "@preact/signals";
 import { HoplensApiError, type LiveConnection, api, openLive } from "../api/client";
 import type { Discovery, Meta, RouteInfo, TraceRecord, TraceSummary } from "../api/types";
 import { noteActivity } from "./activity";
+import { type Route, go, initRouter, route } from "./router";
 import { serverKpis, serverRouteBadges, serverRouteStats, serverStats } from "./serverStats";
 import {
   type SparkMetric,
@@ -15,12 +16,11 @@ import {
 } from "./stats";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-export type SidebarTab = "routes" | "traffic";
 /**
- * "overview" = cross-request dashboard; "requests" = the dense request log; "queries" = the
- * cross-request query / host workbench; "workbench" = builder + journey + details for one trace.
+ * The four top-bar tabs (plan 3.8), derived from the router: the URL hash is the source of truth.
+ * "requests" covers the log, a trace subject (#/r/<id>) and compare (#/cmp/a..b).
  */
-export type MainView = "overview" | "requests" | "queries" | "workbench";
+export type MainView = "overview" | "requests" | "queries" | "changes";
 
 export const metaState = signal<Meta | null>(null);
 export const routesState = signal<Discovery | null>(null);
@@ -35,13 +35,29 @@ export const loadError = signal<string | null>(null);
 export const actionError = signal<string | null>(null);
 export const loadStatus = signal<LoadState>("idle");
 
-export const sidebarTab = signal<SidebarTab>("routes");
-export const routeSearch = signal("");
 /** "routeId::METHOD" — identifies which route+method pair the request builder is editing. */
 export const selectedRouteKey = signal<string | null>(null);
 
-/** Landing view is the Overview; picking a route or a trace switches to the workbench. */
-export const mainView = signal<MainView>("overview");
+/** The active tab, derived from the route (read-only; navigate with setMainView or router.go). */
+export const mainView = computed<MainView>(() => viewOfRoute(route.value));
+
+export function viewOfRoute(r: Route): MainView {
+  switch (r.view) {
+    case "overview":
+    case "queries":
+    case "changes":
+      return r.view;
+    default:
+      return "requests";
+  }
+}
+
+/**
+ * Hold the live list still (plan 3.8 "Live list"): true while the pointer is over the request list
+ * or focus is inside the subject pane. Follow doesn't move the selection while held; the newest
+ * arrival is applied when the hold ends.
+ */
+export const liveHold = signal(false);
 /** Percentiles exclude cold (first-after-rebuild / compiling) requests unless this is on. */
 export const includeCold = signal(false);
 export const clearing = signal(false);
@@ -108,35 +124,13 @@ export const hasTraces = computed(() => tracesState.value.length > 0);
 /** Same definition as the Overview's Errors KPI (stats.isError: 5xx), so the counts agree. */
 export const tracesWithErrors = computed(() => tracesState.value.filter(isError).length);
 
-export const filteredRoutes = computed(() => {
-  const q = routeSearch.value.trim().toLowerCase();
-  const all = routesState.value?.routes ?? [];
-  if (!q) return all;
-  return all.filter((r) => r.path.toLowerCase().includes(q) || r.file.toLowerCase().includes(q));
-});
-
-/** Group routes by first visible path segment ("api", "admin", …). "/" items go under "root". */
-export const groupedRoutes = computed((): Array<{ group: string; items: RouteInfo[] }> => {
-  const groups = new Map<string, RouteInfo[]>();
-  for (const r of filteredRoutes.value) {
-    const parts = r.path.split("/").filter(Boolean);
-    const key = parts[0] ?? "root";
-    const list = groups.get(key) ?? [];
-    list.push(r);
-    groups.set(key, list);
-  }
-  return Array.from(groups.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([group, items]) => ({ group, items }));
-});
-
-export function selectRoute(route: RouteInfo, method: string): void {
+/** Point the request builder at one route + method and open it in the Requests subject. */
+export function selectRoute(r: RouteInfo, method: string): void {
   batch(() => {
-    selectedRouteKey.value = `${route.id}::${method}`;
-    mainView.value = "workbench";
+    selectedRouteKey.value = `${r.id}::${method}`;
     builderOpen.value = true;
   });
-  ensureSelectedLoaded();
+  showRequestsSubject();
 }
 
 /**
@@ -147,37 +141,53 @@ export function openBuilder(from?: { method: string; route?: string; path: strin
   batch(() => {
     if (!selectedRouteKey.value && from) {
       const tpl = from.route ?? from.path;
-      const route = routesState.value?.routes.find((r) => r.nextRoute === tpl || r.path === tpl);
-      const m = route?.methods.find((x) => x.method === from.method) ?? route?.methods.find((x) => x.method === "ANY");
-      if (route && m) selectedRouteKey.value = `${route.id}::${m.method}`;
+      const found = routesState.value?.routes.find((r) => r.nextRoute === tpl || r.path === tpl);
+      const m = found?.methods.find((x) => x.method === from.method) ?? found?.methods.find((x) => x.method === "ANY");
+      if (found && m) selectedRouteKey.value = `${found.id}::${m.method}`;
     }
-    mainView.value = "workbench";
     builderOpen.value = true;
   });
-  ensureSelectedLoaded();
+  showRequestsSubject();
+}
+
+/** The builder drawer lives in the Requests subject: switch there, keeping the open trace if any. */
+function showRequestsSubject(): void {
+  if (mainView.value !== "requests") setMainView("requests");
 }
 
 export function closeBuilder(): void {
   builderOpen.value = false;
 }
 
+/**
+ * Switch tabs (pushes history). Requests reopens the selected request as its subject, so going
+ * Overview -> Requests doesn't lose your place. The since scope carries over.
+ */
 export function setMainView(v: MainView): void {
-  mainView.value = v;
-  if (v === "workbench") ensureSelectedLoaded();
+  const since = route.value.since;
+  const id = selectedTraceId.value;
+  let next: Route;
+  if (v === "requests")
+    next = id && tracesState.value.some((t) => t.id === id) ? { view: "trace", traceId: id } : { view: "requests" };
+  else next = { view: v };
+  go(since ? { ...next, since } : next);
 }
 
-/** Follow only records the id while another view is up; fetch it once the workbench shows it. */
-function ensureSelectedLoaded(): void {
-  const id = selectedTraceId.value;
-  if (id && selectedTrace.value?.id !== id) void loadTrace(id, "follow");
+/** The Requests tab without a subject, keeping the since scope. */
+function requestsRoute(): Route {
+  const since = route.value.since;
+  return since ? { view: "requests", since } : { view: "requests" };
+}
+
+/** Close the Requests subject (the selection stays highlighted in the list). */
+export function closeSubject(): void {
+  builderOpen.value = false;
+  const v = route.value.view;
+  if (v === "trace" || v === "compare") go(requestsRoute());
 }
 
 export function toggleIncludeCold(): void {
   includeCold.value = !includeCold.value;
-}
-
-export function setSidebarTab(tab: SidebarTab): void {
-  sidebarTab.value = tab;
 }
 
 /** Fetch meta + routes + traces in parallel. Called on mount and when the user explicitly refreshes. */
@@ -202,31 +212,42 @@ export async function bootstrap(): Promise<void> {
 export type SelectSource = "user" | "follow" | "hash";
 
 /**
- * Load one trace's full detail (hops, logs, bodies). Idempotent — skips the fetch if the id is
- * already loaded. `source` says who asked:
- *  - "user": a click (traffic row, finding, route table). Switches to the workbench, and pauses
- *    Follow when the picked trace isn't the newest so the next arrival doesn't yank it away.
- *  - "hash": a #trace=<id> deep link. Switches to the workbench and, like a click, pauses Follow
- *    unless it is the newest trace, so the next arrival doesn't replace the linked one.
- *  - "follow": a live arrival. Leaves the current view alone, and only records the id while the
- *    Overview / Requests / Queries view is showing (setMainView fetches it on switch).
- * A finished trace that is already loaded is not fetched again; an in-flight one is (to complete it).
+ * Load one trace's full detail (hops, logs, bodies) and make it the selection. A finished trace
+ * that is already loaded is not fetched again; an in-flight one is (to complete it). `source` says
+ * who asked:
+ *  - "user": a click (log row, finding, route table). Opens it as the Requests subject (pushes
+ *    history, so Back returns; `replace` for j/k stepping) and turns Follow off: what you picked
+ *    stays put under live traffic.
+ *  - "hash": the route already names it (deep link, Back/Forward). Pauses Follow unless it is the
+ *    newest trace, so the next arrival doesn't replace the linked one.
+ *  - "follow": a live arrival. Replaces the subject (no history entry) only while the Requests tab
+ *    shows; elsewhere it only records the id, and switching to Requests opens it.
  */
-export async function loadTrace(id: string, source: SelectSource = "user"): Promise<void> {
-  if (source !== "follow") {
-    batch(() => {
-      mainView.value = "workbench";
-      if (followLive.value && newestFinishedId() !== id) followLive.value = false;
-    });
-  }
-  writeHash(id);
-  if (selectedTrace.value?.id === id && selectedTrace.value.done) {
+export async function loadTrace(
+  id: string,
+  source: SelectSource = "user",
+  opts: { replace?: boolean } = {},
+): Promise<void> {
+  const r = route.value;
+  batch(() => {
+    if (source === "user") followLive.value = false;
+    else if (source === "hash" && followLive.value && newestFinishedId() !== id) followLive.value = false;
     selectedTraceId.value = id;
-    return;
-  }
-  selectedTraceId.value = id;
-  // Nothing outside the workbench shows the trace itself; setMainView fetches it on switch.
-  if (source === "follow" && mainView.value !== "workbench") return;
+  });
+  const traceRoute: Route = r.since ? { view: "trace", traceId: id, since: r.since } : { view: "trace", traceId: id };
+  if (source === "user") go(r.view === "trace" && r.traceId === id ? r : traceRoute, { replace: opts.replace });
+  else if (source === "follow" && (r.view === "requests" || r.view === "trace")) go(traceRoute, { replace: true });
+  // Only the trace subject shows the full record; opening it (the route effect) fetches it.
+  if (route.value.view === "trace") await fetchSelected(id);
+}
+
+/** The id whose GET is in flight: a click and the route effect it triggers share one fetch. */
+let fetching: string | null = null;
+
+async function fetchSelected(id: string): Promise<void> {
+  const cur = selectedTrace.value;
+  if ((cur?.id === id && cur.done) || fetching === id) return;
+  fetching = id;
   try {
     const t = await api.trace(id);
     // A newer selection may have landed while this one was in flight (Follow under load).
@@ -243,6 +264,8 @@ export async function loadTrace(id: string, source: SelectSource = "user"): Prom
       return;
     }
     actionError.value = `Could not load the trace: ${(err as Error).message}`;
+  } finally {
+    if (fetching === id) fetching = null;
   }
 }
 
@@ -261,7 +284,9 @@ function scheduleFollow(id: string): void {
     followTimer = null;
     const next = pendingFollow;
     pendingFollow = null;
-    if (next && followLive.value) void loadTrace(next, "follow");
+    // Held (pointer on the list, focus in the subject): leave the selection alone. Releasing the
+    // hold applies the newest arrival (initRouting).
+    if (next && followLive.value && !liveHold.value) void loadTrace(next, "follow");
   }, FOLLOW_DEBOUNCE_MS);
 }
 
@@ -274,7 +299,7 @@ export function clearSelection(): void {
     selectedTraceId.value = null;
     selectedTrace.value = null;
   });
-  writeHash(null);
+  if (route.value.view === "trace") go(requestsRoute(), { replace: true });
 }
 
 /** DELETE all traces on the server; the `clear` SSE event empties local state in every open tab. */
@@ -304,43 +329,48 @@ function applyClear(): void {
     selectedTrace.value = null;
   });
   noteActivity("clear");
-  writeHash(null);
+  const v = route.value.view;
+  if (v === "trace" || v === "compare") go(requestsRoute(), { replace: true });
 }
 
-/* ------------------------------------------------------------------- #trace=<id> deep links */
+/* ------------------------------------------------------------------- route -> selection */
 
-const HASH_PREFIX = "#trace=";
-
-export function readHashTraceId(hash: string): string | null {
-  if (!hash.startsWith(HASH_PREFIX)) return null;
-  const raw = hash.slice(HASH_PREFIX.length);
-  if (!raw) return null;
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return null;
-  }
-}
-
-function writeHash(id: string | null): void {
-  if (typeof location === "undefined" || typeof history === "undefined") return;
-  const next = id ? `${HASH_PREFIX}${encodeURIComponent(id)}` : "";
-  if (location.hash === next) return;
-  // Only ever remove our own hash; leave other anchors (e.g. #main from the skip link) alone.
-  if (!next && !location.hash.startsWith(HASH_PREFIX)) return;
-  // replaceState: Follow would otherwise push one history entry per request.
-  history.replaceState(null, "", next || `${location.pathname}${location.search}`);
-}
-
-/** Select the trace named in location.hash, on load and on manual hash edits. Returns a disposer. */
-export function initHashRouting(): () => void {
-  const apply = () => {
-    const id = readHashTraceId(location.hash);
-    if (id && id !== selectedTraceId.value) void loadTrace(id, "hash");
+/**
+ * Wire the hash router (plan 3.8) to the store; the route is the source of truth for the screen.
+ *  - #/r/<id> selects and loads that trace (deep link, Back/Forward, manual edit, legacy #trace=).
+ *  - Releasing the live hold applies the newest arrival when Follow is on.
+ * The span part of #/r/<id>/s/<span> is synced by the shell (app.tsx), which can import
+ * state/journey without a cycle. Call once; returns a disposer.
+ */
+export function initRouting(): () => void {
+  const disposers = [
+    initRouter(),
+    effect(() => {
+      const r = route.value;
+      if (r.view !== "trace") return;
+      const id = r.traceId;
+      if (id === selectedTraceId.peek()) {
+        // The store navigated here itself (a click, or Follow picking the latest arrival): only make
+        // sure the record loads. Re-entering loadTrace(..., "hash") would pause Follow whenever
+        // requests finish out of start order (the newest finished is not the newest started).
+        if (selectedTrace.peek()?.id !== id) queueMicrotask(() => void fetchSelected(id));
+        return;
+      }
+      // Outside the effect: loadTrace reads signals, which would subscribe this effect to them.
+      queueMicrotask(() => {
+        const now = route.peek();
+        if (now.view === "trace" && now.traceId === id) void loadTrace(id, "hash");
+      });
+    }),
+    effect(() => {
+      if (liveHold.value || !followLive.peek()) return;
+      const newest = tracesState.peek().find((t) => t.done && t.kind !== "asset")?.id;
+      if (newest && newest !== selectedTraceId.peek()) scheduleFollow(newest);
+    }),
+  ];
+  return () => {
+    for (const d of disposers) d();
   };
-  apply();
-  window.addEventListener("hashchange", apply);
-  return () => window.removeEventListener("hashchange", apply);
 }
 
 /**
@@ -405,8 +435,8 @@ export function startLive(): void {
         noteActivity("done");
         if (followLive.value && ev.trace.kind !== "asset") scheduleFollow(ev.trace.id);
         // A trace picked by hand while still in flight: reload it now that it's complete.
-        else if (selectedTrace.value?.id === ev.trace.id && !selectedTrace.value.done)
-          void loadTrace(ev.trace.id, "follow");
+        else if (selectedTrace.value?.id === ev.trace.id && !selectedTrace.value.done && route.value.view === "trace")
+          void fetchSelected(ev.trace.id);
       } else if (ev.type === "update") {
         // Late spans landed on a finished trace: refresh its summary (droppedSpans) in place, and
         // reload the open one so the late spans show up in the canvas.

@@ -3,13 +3,14 @@ import { api } from "../api/client";
 import type { TraceSummary } from "../api/types";
 import { clearedAt, liveActivity } from "./activity";
 import { matchQuery, parseQuery, summaryTarget } from "./query";
+import { route } from "./router";
 import { serverLatencyByKey, serverStats } from "./serverStats";
 import { type Percentiles, routeKeyOf } from "./stats";
-import { clientRouteStats, loadTrace, mainView, setMainView, setSidebarTab, statsSource, tracesState } from "./store";
+import { clientRouteStats, loadTrace, mainView, setMainView, statsSource, tracesState } from "./store";
 import { normalizeUrl } from "./traceview";
 
 /*
- * The dense request log: one query (shared by the sidebar Traffic tab and the Requests view),
+ * The dense request log: one query (the top bar's filter drives the Requests view),
  * structural terms filtered client-side over the summaries, free text also sent to the server
  * (`?q=`, which searches logs and bodies too), and a keyboard cursor (j/k, Enter).
  */
@@ -110,18 +111,28 @@ effect(() => {
 });
 
 /**
- * The rows the log shows, newest first. A trace is in when the summary matches the whole query, or
+ * The rows the log shows, newest first, within the since scope when one is set (route `?since=e<n>`).
+ * A trace is in when the summary matches the whole query, or
  * (for free text) when the server matched it on logs or bodies. The server applies every term, so
  * its matches are always valid; the client match only fills in until the server answers.
  */
 export const logRows = computed((): TraceSummary[] => {
   const pq = parsedQuery.value;
-  const all = tracesState.value;
+  const since = sinceEpoch(route.value.since);
+  const all =
+    since === undefined ? tracesState.value : tracesState.value.filter((t) => (t.facts?.epoch ?? -1) >= since);
   if (pq.terms.length === 0) return all;
   const srv = hasTextTerms.value ? serverSearch.value : null;
   const ids = srv && srv.q === logQuery.value.trim() ? srv.ids : null;
   return all.filter((t) => matchQuery(pq, summaryTarget(t)) || (ids?.has(t.id) ?? false));
 });
+
+/** The "since edit" scope chip's epoch as a number (plan 3.8: scoped lists say so; this one is). */
+function sinceEpoch(since: string | undefined): number | undefined {
+  if (since === undefined) return undefined;
+  const n = Number(since.split(":").pop());
+  return Number.isFinite(n) ? n : undefined;
+}
 
 /** Problems with the query: the client's parse errors, plus any the server reported. */
 export const queryErrors = computed(() => {
@@ -176,28 +187,14 @@ export function openCursor(): boolean {
   return true;
 }
 
-/** Is a request log on screen (the Requests view, or the sidebar's Traffic tab)? */
-export function logVisible(sidebarTraffic: boolean): boolean {
-  return mainView.value === "requests" || sidebarTraffic;
+/** Is the request log on screen (the Requests view)? */
+export function logVisible(): boolean {
+  return mainView.value === "requests";
 }
 
 /* ------------------------------------------------------------------ query bar */
 
 export const QUERY_INPUT_MAIN = "rlog-q-main";
-export const QUERY_INPUT_SIDE = "rlog-q-side";
-
-/** `/`: focus the visible query bar; outside the Requests view that's the sidebar's Traffic tab. */
-export function focusQueryBar(): void {
-  const id = mainView.value === "requests" ? QUERY_INPUT_MAIN : QUERY_INPUT_SIDE;
-  if (id === QUERY_INPUT_SIDE) setSidebarTab("traffic");
-  const focus = () => {
-    const el = document.getElementById(id) as HTMLInputElement | null;
-    el?.focus();
-    el?.select();
-  };
-  if (document.getElementById(id)) focus();
-  else requestAnimationFrame(focus);
-}
 
 /** Prefill the query (from a finding badge or a "Needs attention" row) and show the Requests view. */
 export function prefillQuery(q: string): void {

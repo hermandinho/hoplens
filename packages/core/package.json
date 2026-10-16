@@ -1,8 +1,15 @@
 {
   "name": "@hoplens/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hoplens runtime — framework-agnostic capture, OTel bridge, UI server, source maps, redactor.",
-  "keywords": ["hoplens", "tracing", "request-journey", "nodejs", "opentelemetry", "devtools"],
+  "keywords": [
+    "hoplens",
+    "tracing",
+    "request-journey",
+    "nodejs",
+    "opentelemetry",
+    "devtools"
+  ],
   "license": "MIT",
   "author": "Hoplens contributors",
   "repository": {
@@ -10,7 +17,9 @@
     "url": "git+https://github.com/hermandinho/hoplens.git",
     "directory": "packages/core"
   },
-  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
   "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/core#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
@@ -34,14 +43,19 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude \"**/benchmark.test.ts\"",
     "bench": "vitest run test/benchmark.test.ts"
   },
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/context-async-hooks": "^2.0.0",

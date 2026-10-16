@@ -1,8 +1,15 @@
 {
   "name": "@hoplens/next",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hoplens adapter for Next.js — withHoplens() config wrap and the Next route scanner.",
-  "keywords": ["hoplens", "nextjs", "next", "adapter", "instrumentation", "devtools"],
+  "keywords": [
+    "hoplens",
+    "nextjs",
+    "next",
+    "adapter",
+    "instrumentation",
+    "devtools"
+  ],
   "license": "MIT",
   "author": "Hoplens contributors",
   "repository": {
@@ -10,7 +17,9 @@
     "url": "git+https://github.com/hermandinho/hoplens.git",
     "directory": "packages/next"
   },
-  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
   "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/next#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
@@ -28,14 +37,19 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --exclude \"**/benchmark.test.ts\"",
     "bench": "vitest run test/benchmark.test.ts"
   },
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "peerDependencies": {
     "next": ">=15.3.0"
   },

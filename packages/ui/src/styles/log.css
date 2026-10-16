@@ -398,6 +398,16 @@ kbd {
   gap: 4px;
 }
 
+/* A folded Replay xN batch ("x10") and a pinned request: neutral chips, no severity colour. */
+.batch-badge,
+.pin-badge {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
 /* The findings chip over the last column: same right edge as the header's findings column. */
 .rlog-dense .rlog-find {
   position: absolute;

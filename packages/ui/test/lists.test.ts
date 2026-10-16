@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { HostStat, QueryStat } from "../src/api/types";
+import type { HostStat, QueryStat, TraceSummary } from "../src/api/types";
 import {
   findShape,
   fmtPerRequest,
@@ -9,7 +9,7 @@ import {
   perRequest,
   stepShape,
 } from "../src/state/queries";
-import { splitUrl } from "../src/state/requestLog";
+import { foldBatches, splitUrl } from "../src/state/requestLog";
 
 /* WP4 lists: the log's path + query split, and the Queries list | subject helpers.
  * Run: pnpm --filter @hoplens/ui exec vitest run test/lists.test.ts */
@@ -158,5 +158,27 @@ describe("group by host", () => {
       "slow.dev",
       "idle.dev",
     ]);
+  });
+});
+
+describe("foldBatches (a Replay xN batch is one log row)", () => {
+  const t = (id: string, batchId?: string) => ({ id, batchId }) as TraceSummary;
+  // Newest first, as the log lists them.
+  const list = [t("n1"), t("b3", "B"), t("b2", "B"), t("b1", "B"), t("n0"), t("s1", "S")];
+
+  test("keeps the newest run of each batch, in place, with its run count", () => {
+    const { rows, batchSize } = foldBatches(list);
+    expect(rows.map((r) => r.id)).toEqual(["n1", "b3", "n0", "s1"]);
+    expect([...batchSize]).toEqual([["b3", 3]]);
+  });
+
+  test("a run opened from the replay strip stands in for its batch", () => {
+    const { rows, batchSize } = foldBatches(list, "b2");
+    expect(rows.map((r) => r.id)).toEqual(["n1", "b2", "n0", "s1"]);
+    expect(batchSize.get("b2")).toBe(3);
+  });
+
+  test("a lone run (single-run batch) is a plain row", () => {
+    expect(foldBatches(list, "s1").batchSize.has("s1")).toBe(false);
   });
 });

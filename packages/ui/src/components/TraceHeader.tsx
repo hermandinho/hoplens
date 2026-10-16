@@ -18,6 +18,8 @@ import { includeCold, metaState, openBuilder, selectedTrace, tracesState } from 
 import { type SpanSelf, selfTimes, toCurl, toFetch, topSpansByBucket } from "../state/traceview";
 import { type Baseline, preHandlerWait, traceBaselines } from "../state/verdict";
 import { toVitest } from "../state/vitest";
+import { ReplayActions, TraceReplayPanel } from "./ReplayPanel";
+import { EditContext } from "./SinceStrip";
 import { Verdict } from "./Verdict";
 import "../styles/verdict.css";
 
@@ -92,6 +94,7 @@ export function TraceHeader() {
           )}
         </span>
         <span class="rh-actions">
+          <ReplayActions trace={trace} />
           <CopyMenu trace={trace} />
           <button
             type="button"
@@ -104,6 +107,8 @@ export function TraceHeader() {
         </span>
       </div>
       <Baselines trace={trace} />
+      <EditContext trace={trace} />
+      <TraceReplayPanel traceId={trace.id} />
       <Verdict trace={trace} />
       <BudgetBar key={trace.id} trace={trace} />
     </section>

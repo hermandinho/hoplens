@@ -211,10 +211,16 @@ describe("RouteStatsStore", () => {
     expect(r.current.p50).toBe(50);
     expect(r.all.epoch).toBe(-1);
     expect(r.all.count).toBe(6);
+    expect(r.evicted).toBe(4); // epochs 0 and 1 dropped: a since-scope past them is a lower bound
     expect(s.snapshot().epoch).toBe(4);
-    // A straggler from an epoch older than every kept one is not counted.
+    // A straggler from an epoch older than every kept one is not counted in `all`, only as evicted.
     s.add(trace(10, {}, { epoch: 0 }));
     expect(s.snapshot().routes[0]!.all.count).toBe(6);
+    expect(s.snapshot().routes[0]!.evicted).toBe(5);
+    // Nothing evicted: no field.
+    const fresh = new RouteStatsStore({ maxEpochs: 3 });
+    fresh.add(trace(10, {}, { epoch: 0 }));
+    expect(fresh.snapshot().routes[0]!.evicted).toBeUndefined();
   });
 
   test("routes capped, least recently seen dropped", () => {

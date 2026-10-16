@@ -276,6 +276,11 @@ export interface RouteStats {
   delta?: RouteEpochDelta;
   /** One-click example requests: fast (p10), typical (closest to p50), slow (max), warm only. */
   exemplars?: RouteExemplars;
+  /**
+   * Requests counted in epochs this route no longer keeps (`all` leaves them out). Absent when none:
+   * a "since e<n>" scope reaching past the kept epochs is then exact, else a lower bound.
+   */
+  evicted?: number;
 }
 
 export interface RouteEpochDelta {
@@ -550,6 +555,8 @@ interface RouteEntry {
   epochs: Map<number, EpochAgg>;
   /** Newest warm requests (a ring of EXEMPLAR_RING), for the exemplars. */
   recent: Exemplar[];
+  /** Requests counted in epochs no longer kept (or too old to keep). */
+  evicted: number;
 }
 
 /** Warm requests remembered per route for picking exemplars. */
@@ -753,6 +760,7 @@ export class RouteStatsStore {
         lastSeen: seenAt,
         epochs: new Map(),
         recent: [],
+        evicted: 0,
       };
     r.kind = t.kind;
     r.lastSeen = Math.max(r.lastSeen, seenAt);
@@ -773,8 +781,12 @@ export class RouteStatsStore {
         // Keep ascending order (an out-of-order epoch is rare but possible with concurrent requests).
         const sorted = [...r.epochs.entries()].sort((a, b) => a[0] - b[0]);
         r.epochs.clear();
+        for (const [, v] of sorted.slice(0, -this.maxEpochs)) r.evicted += v.count;
         for (const [k, v] of sorted.slice(-this.maxEpochs)) r.epochs.set(k, v);
-        if (!r.epochs.has(epoch)) return; // older than every kept epoch
+        if (!r.epochs.has(epoch)) {
+          r.evicted++; // older than every kept epoch
+          return;
+        }
       }
     }
     e.count++;
@@ -900,6 +912,7 @@ export class RouteStatsStore {
         all: all.toJSON(withBuckets),
         epochs: [...asc].reverse(),
       };
+      if (r.evicted > 0) row.evicted = r.evicted;
       const delta = epochDelta(row, asc, this.newestEpoch);
       if (delta) row.delta = delta;
       // Exemplars from the kept epochs only, so they agree with the percentiles beside them.

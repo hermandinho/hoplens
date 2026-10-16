@@ -568,8 +568,8 @@ export interface BaselinesResponse {
 // stream GET /api/epochs/events (`event: epoch` = EpochView, `event: regression` = RouteRegression).
 // Mirrors core epoch.ts, regressions.ts and api/epochs.ts.
 
-export type EpochVia = "start" | "src-watch" | "candidates" | "unknown";
-export type EpochAffectedVia = "imports" | "candidates" | "none";
+export type EpochVia = "start" | "src-watch" | "chunk-diff" | "candidates" | "unknown";
+export type EpochAffectedVia = "imports" | "chunks" | "candidates" | "none";
 
 export interface EpochView {
   /** Epoch number (the `epoch` fact). */
@@ -873,4 +873,24 @@ export interface ReplayResult {
   traceId?: string;
   status: number;
   elapsed: number;
+}
+
+// WP8 -- compare pins (UI round): GET /api/compare/pins, POST|DELETE /api/compare/pins/:id (mirrors core api/compare.ts).
+
+/** GET /api/compare/pins: retained traces kept past ring rotation, oldest pin first (core caps at 20). */
+export interface PinsResponse {
+  /** Every pin (Compare's automatic ones and the user's). */
+  pinned: string[];
+  /** The user's own pins (`p`); compare never releases these. Absent on an older core. */
+  manual?: string[];
+}
+
+// WP9c -- module-level chunk diff (core chunkindex.ts): `via: "chunk-diff"` and `routesVia: "chunks"`
+// are folded into the WP9a unions EpochVia / EpochAffectedVia above (r3 integration).
+
+// r3 fixes -- core stats.ts keeps a per-route count of requests in epochs it no longer keeps, so a
+// "since e<n>" scope that reaches past them can say its numbers are a lower bound.
+export interface ServerRouteStats {
+  /** Requests counted in epochs this route no longer keeps (`all` leaves them out). Absent when none. */
+  evicted?: number;
 }

@@ -1,9 +1,11 @@
 import { useComputed, useSignalEffect } from "@preact/signals";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { FindingSeverity, FindingSummary, TraceSummary } from "../api/types";
+import { pinnedIds } from "../state/compare";
 import { QUERY_KEYS, type SuggestResult, applySuggestion, findingQuery, suggest } from "../state/querySuggest";
 import {
   hasTextTerms,
+  logBatchSize,
   logCursor,
   logQuery,
   logRows,
@@ -272,6 +274,8 @@ export function RequestLog({ variant, label }: { variant: LogVariant; label: str
   const selected = selectedTraceId.value;
   const cursor = logCursor.value;
   const latency = routeLatency.value;
+  const batchSize = logBatchSize.value;
+  const pinned = pinnedIds.value;
   const rowH = ROW_H[variant];
   const scrollRef = useRef<HTMLDivElement>(null);
   const { start, end } = useWindow(scrollRef, rows.length, rowH, rows.length > 0);
@@ -400,6 +404,8 @@ export function RequestLog({ variant, label }: { variant: LogVariant; label: str
                 cursor={cursor === t.id}
                 tabbable={tabId === t.id}
                 lat={t.done ? latency(t) : undefined}
+                runs={batchSize.get(t.id)}
+                pinned={pinned.has(t.id)}
               />
             ))}
           </ul>
@@ -467,6 +473,8 @@ function LogRow({
   cursor,
   tabbable,
   lat,
+  runs,
+  pinned,
 }: {
   t: TraceSummary;
   index: number;
@@ -477,6 +485,9 @@ function LogRow({
   cursor: boolean;
   tabbable: boolean;
   lat: Percentiles | undefined;
+  /** Runs folded into this row (a Replay xN batch), when 2+. */
+  runs?: number;
+  pinned?: boolean;
 }) {
   const f = t.facts;
   const io = ioCount(t);
@@ -492,6 +503,8 @@ function LogRow({
     dur !== undefined ? `${Math.round(dur)} milliseconds` : undefined,
     isHandledError(t) ? "handled error" : undefined,
     f?.cold ? "cold" : undefined,
+    runs ? `replay batch of ${runs} runs` : undefined,
+    pinned ? "pinned" : undefined,
     nFindings ? `${nFindings} finding${nFindings === 1 ? "" : "s"}` : undefined,
   ]
     .filter(Boolean)
@@ -510,6 +523,18 @@ function LogRow({
       err
     </span>
   ) : null;
+
+  const batch = runs ? (
+    <span class="batch-badge" title={`Replay batch: ${runs} runs folded into this row (the newest, or the one open)`}>
+      x{runs}
+    </span>
+  ) : null;
+  const pin = pinned ? (
+    <span class="pin-badge" title="Pinned: kept past rotation">
+      pin
+    </span>
+  ) : null;
+  const flags = cold || handled || batch || pin;
 
   return (
     <li
@@ -545,8 +570,10 @@ function LogRow({
                 {url.path}
                 {url.query && <span class="rlog-qs">{url.query}</span>}
               </span>
-              {(cold || handled) && (
+              {flags && (
                 <span class="rlog-flags">
+                  {batch}
+                  {pin}
                   {cold}
                   {handled}
                 </span>
@@ -575,6 +602,8 @@ function LogRow({
                   {io} io
                 </span>
               )}
+              {batch}
+              {pin}
               {cold}
               {handled}
               <span class="rlog-time mono dim">{hhmmss(t.startedAt)}</span>

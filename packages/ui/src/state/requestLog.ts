@@ -6,7 +6,7 @@ import { matchQuery, parseQuery, summaryTarget } from "./query";
 import { route } from "./router";
 import { serverLatencyByKey, serverStats } from "./serverStats";
 import { type Percentiles, routeKeyOf } from "./stats";
-import { clientRouteStats, loadTrace, mainView, setMainView, statsSource, tracesState } from "./store";
+import { clientRouteStats, loadTrace, mainView, selectedTraceId, setMainView, statsSource, tracesState } from "./store";
 import { normalizeUrl } from "./traceview";
 
 /*
@@ -116,7 +116,7 @@ effect(() => {
  * (for free text) when the server matched it on logs or bodies. The server applies every term, so
  * its matches are always valid; the client match only fills in until the server answers.
  */
-export const logRows = computed((): TraceSummary[] => {
+const matchedRows = computed((): TraceSummary[] => {
   const pq = parsedQuery.value;
   const since = sinceEpoch(route.value.since);
   const all =
@@ -126,6 +126,48 @@ export const logRows = computed((): TraceSummary[] => {
   const ids = srv && srv.q === logQuery.value.trim() ? srv.ids : null;
   return all.filter((t) => matchQuery(pq, summaryTarget(t)) || (ids?.has(t.id) ?? false));
 });
+
+export interface FoldedRows {
+  rows: TraceSummary[];
+  /** Runs per shown batch row (row id -> n, only for batches of 2+). */
+  batchSize: ReadonlyMap<string, number>;
+}
+
+/**
+ * Fold the runs of one Replay xN batch (same `batchId`) into one row (plan 4.2 WP7: "the log shows 1
+ * batch row, not 10"). `list` is newest first; each batch keeps its newest run, or `keepId` when that
+ * run belongs to the batch (a run opened from the replay strip stays visible and selected).
+ */
+export function foldBatches(list: readonly TraceSummary[], keepId?: string | null): FoldedRows {
+  const keepBatch = keepId ? list.find((t) => t.id === keepId)?.batchId : undefined;
+  const size = new Map<string, number>();
+  for (const t of list) if (t.batchId) size.set(t.batchId, (size.get(t.batchId) ?? 0) + 1);
+  const shown = new Set<string>();
+  const rows: TraceSummary[] = [];
+  const batchSize = new Map<string, number>();
+  for (const t of list) {
+    const b = t.batchId;
+    if (!b || (size.get(b) ?? 0) < 2) {
+      rows.push(t);
+      continue;
+    }
+    if (shown.has(b)) continue;
+    if (b === keepBatch && t.id !== keepId) continue;
+    shown.add(b);
+    rows.push(t);
+    batchSize.set(t.id, size.get(b) ?? 0);
+  }
+  return { rows, batchSize };
+}
+
+const folded = computed(() => foldBatches(matchedRows.value, selectedTraceId.value));
+
+/** The shown rows: matched, then each replay batch folded into one row. */
+export const logRows = computed((): TraceSummary[] => folded.value.rows);
+/** Runs behind a folded batch row (row id -> n); the row shows an "xN" badge. */
+export const logBatchSize = computed(() => folded.value.batchSize);
+/** Requests matching the filter and scope, before batches fold (the header's count, in requests not rows). */
+export const logMatchCount = computed(() => matchedRows.value.length);
 
 /** The "since edit" scope chip's epoch as a number (plan 3.8: scoped lists say so; this one is). */
 function sinceEpoch(since: string | undefined): number | undefined {

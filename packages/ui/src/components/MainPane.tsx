@@ -1,9 +1,9 @@
 import { useComputed, useSignal } from "@preact/signals";
 import { useEffect, useLayoutEffect, useRef } from "preact/hooks";
-import type { TraceSummary } from "../api/types";
-import { logQuery, logRows } from "../state/requestLog";
-import { type Route, route, setSince } from "../state/router";
-import { fmtMs, routeKeyOf } from "../state/stats";
+import { initCompare } from "../state/compare";
+import { sinceNumber, tracesSince } from "../state/epochs";
+import { logMatchCount, logQuery, logRows } from "../state/requestLog";
+import { type Route, route } from "../state/router";
 import {
   builderOpen,
   closeBuilder,
@@ -17,6 +17,8 @@ import {
   selectedTraceId,
   tracesState,
 } from "../state/store";
+import { ChangesView } from "./ChangesView";
+import { CompareButton, CompareView, PickBanner, PinToggle } from "./CompareView";
 import { Details } from "./Details";
 import { Inspector } from "./Inspector";
 import { JourneyPane } from "./JourneyPane";
@@ -24,6 +26,7 @@ import { Overview, RouteSubject, overviewHeld } from "./Overview";
 import { QueriesView } from "./QueriesView";
 import { RequestBuilder } from "./RequestBuilder";
 import { RequestLog } from "./RequestLog";
+import { SinceChip } from "./SinceChip";
 import { Skeleton } from "./Skeleton";
 import { Split } from "./Split";
 import { TraceHeader } from "./TraceHeader";
@@ -33,13 +36,15 @@ import { TraceHeader } from "./TraceHeader";
  *   Overview   overview          | route subject (#/route/<key>)
  *   Requests   live request log  | the open request (#/r/<id>), the builder drawer, compare
  *   Queries    query shapes      | the open shape (#/q/<fingerprint>); QueriesView owns its Split
- *   Changes    edits seen so far (full width; WP9b draws the timeline)
+ *   Changes    the edits timeline and each edit's verdicts (full width; ChangesView)
  * A pane with nothing to show is not drawn: no subject means the list takes the full width.
  * Each view's Split is keyed by its id, so a view switch remounts it: the width is read per view and
  * the unmount releases the live hold (a pointer left on the old list must not pause Follow).
  */
 
 export function MainPane() {
+  // Compare (WP8): its fetch, the open request's baselines, pins and the c / c c / d / p keys.
+  useEffect(() => initCompare(), []);
   const r = route.value;
   switch (r.view) {
     case "overview":
@@ -69,7 +74,7 @@ export function MainPane() {
     case "changes":
       return (
         <main id="main" class="main" aria-label="Changes">
-          <Split key="changes" id="changes" list={<ChangesList r={r} />} listLabel="Changes" listClass="split-scroll" />
+          <Split key="changes" id="changes" list={<ChangesView r={r} />} listLabel="Changes" listClass="split-scroll" />
         </main>
       );
     default: {
@@ -110,6 +115,7 @@ const DENSE_ROW_H = 30;
  */
 function RequestsList() {
   const rows = logRows.value;
+  const matched = logMatchCount.value;
   const total = tracesState.value.length;
   const filtered = logQuery.value.trim() !== "" || !!route.value.since;
   const held = liveHold.value;
@@ -179,7 +185,8 @@ function RequestsList() {
     seen.value = null;
   };
 
-  const sinceCount = r.since ? countSince(tracesState.value, r.since) : 0;
+  const sinceNum = sinceNumber(r.since);
+  const sinceCount = sinceNum !== undefined ? tracesSince(tracesState.value, sinceNum).length : 0;
 
   return (
     <div class="rv-list" ref={wrapRef} onScrollCapture={onScroll}>
@@ -187,8 +194,17 @@ function RequestsList() {
         <h2 class="list-title">
           Requests{" "}
           {total > 0 && (
-            <span class="count" title={filtered ? `${rows.length} of ${total} match the filter` : undefined}>
-              {filtered ? `${rows.length}/${total}` : total}
+            // Requests, not rows: a Replay xN batch is one row but N requests (same unit as the since chip).
+            <span
+              class="count"
+              title={[
+                filtered ? `${matched} of ${total} requests match the filter or scope` : `${total} retained requests`,
+                rows.length !== matched ? `${rows.length} rows (replay batches folded)` : "",
+              ]
+                .filter(Boolean)
+                .join("; ")}
+            >
+              {filtered ? `${matched}/${total}` : total}
             </span>
           )}
         </h2>
@@ -202,22 +218,9 @@ function RequestsList() {
             {fresh} new ↑
           </button>
         )}
-        {r.since && (
-          <span
-            class="scope-chip"
-            title={`Scoped to edit e${r.since} and later: ${sinceCount} retained request${sinceCount === 1 ? "" : "s"}. Esc or x clears it.`}
-          >
-            since e{r.since}
-            <button
-              type="button"
-              class="scope-chip-x"
-              aria-label="Clear the since scope"
-              onClick={() => setSince(undefined)}
-            >
-              ×
-            </button>
-          </span>
-        )}
+        <SinceChip
+          title={`Requests built by edit e${r.since} and later: ${sinceCount} retained request${sinceCount === 1 ? "" : "s"}.`}
+        />
         <span class="list-hint dim">
           <kbd>j</kbd> <kbd>k</kbd> move, <kbd>Enter</kbd> open
         </span>
@@ -225,14 +228,6 @@ function RequestsList() {
       <RequestLog variant="dense" label="Requests" />
     </div>
   );
-}
-
-function countSince(list: readonly TraceSummary[], since: string): number {
-  const e = Number(since);
-  if (!Number.isFinite(e)) return 0;
-  let n = 0;
-  for (const t of list) if ((t.facts?.epoch ?? -1) >= e) n++;
-  return n;
 }
 
 /* ================================================================ request subject */
@@ -273,6 +268,12 @@ function RequestSubject({ r }: { r: Route }) {
             </button>
           </span>
         )}
+        {isTrace && (
+          <span class="subject-nav">
+            <CompareButton traceId={r.traceId} />
+            <PinToggle traceId={r.traceId} />
+          </span>
+        )}
         <button
           type="button"
           class="source-close subject-close"
@@ -284,8 +285,9 @@ function RequestSubject({ r }: { r: Route }) {
         </button>
       </div>
       {builderOpen.value && <BuilderDrawer />}
+      {r.view === "trace" && <PickBanner />}
       {r.view === "trace" && <TraceSubject traceId={r.traceId} />}
-      {r.view === "compare" && <ComparePending a={r.a} b={r.b} />}
+      {r.view === "compare" && <CompareView a={r.a} b={r.b} />}
     </div>
   );
 }
@@ -306,35 +308,6 @@ function TraceSubject({ traceId }: { traceId: string }) {
       <Inspector />
       <Details />
     </>
-  );
-}
-
-/** Compare (#/cmp/a..b) until WP8's CompareView lands: both requests, one click each. */
-function ComparePending({ a, b }: { a: string; b: string }) {
-  const list = tracesState.value;
-  const row = (label: string, id: string) => {
-    const t = list.find((x) => x.id === id);
-    return (
-      <li class="cmp-row">
-        <span class="cmp-label mono">{label}</span>
-        {t ? (
-          <button type="button" class="link-btn mono" onClick={() => void loadTrace(id, "user")}>
-            {t.method} {t.url} · {fmtMs(t.duration)}
-          </button>
-        ) : (
-          <span class="dim">not retained any more</span>
-        )}
-      </li>
-    );
-  };
-  return (
-    <div class="subject-body">
-      <p class="subject-lead">Side-by-side compare isn't built yet. Open either request:</p>
-      <ul class="cmp-list">
-        {row("A", a)}
-        {row("B", b)}
-      </ul>
-    </div>
   );
 }
 
@@ -396,80 +369,6 @@ function BuilderDrawer() {
         </button>
       </header>
       <RequestBuilder />
-    </section>
-  );
-}
-
-/* ================================================================ changes */
-
-/**
- * Changes (#/changes[/e<id>]) until WP9b's timeline: the dev-rebuild epochs seen in the retained
- * requests, newest first, with their traffic. Each row opens that epoch's newest request.
- */
-function ChangesList({ r }: { r: Extract<Route, { view: "changes" }> }) {
-  const epochs = useComputed(() => {
-    const m = new Map<number, { n: number; first: number; last: number; newest: TraceSummary; routes: Set<string> }>();
-    for (const t of tracesState.value) {
-      const e = t.facts?.epoch;
-      if (e === undefined || t.kind === "asset") continue;
-      const cur = m.get(e);
-      if (!cur) m.set(e, { n: 1, first: t.startedAt, last: t.startedAt, newest: t, routes: new Set([routeKeyOf(t)]) });
-      else {
-        cur.n++;
-        cur.first = Math.min(cur.first, t.startedAt);
-        if (t.startedAt > cur.last) {
-          cur.last = t.startedAt;
-          cur.newest = t;
-        }
-        cur.routes.add(routeKeyOf(t));
-      }
-    }
-    return [...m.entries()].sort((a, b) => b[0] - a[0]);
-  }).value;
-  const listRef = useRef<HTMLOListElement>(null);
-
-  // #/changes/e<id>: bring that epoch into view.
-  useEffect(() => {
-    if (!r.epoch) return;
-    listRef.current?.querySelector(`[data-epoch="${CSS.escape(r.epoch)}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [r.epoch]);
-
-  return (
-    <section class="changes-view" aria-labelledby="changes-title">
-      <header class="list-head">
-        <h2 id="changes-title" class="list-title">
-          Changes {epochs.length > 0 && <span class="count">{epochs.length}</span>}
-        </h2>
-        <span class="list-hint dim">Each dev rebuild (an edit) starts a new epoch.</span>
-      </header>
-      {epochs.length === 0 ? (
-        <p class="muted">No requests yet. Edit a file and send a request: each rebuild shows up here.</p>
-      ) : (
-        <ol class="changes-list" ref={listRef}>
-          {epochs.map(([e, info]) => {
-            const on = r.epoch === String(e);
-            return (
-              <li key={e} data-epoch={String(e)} class={`changes-row ${on ? "changes-row-on" : ""}`}>
-                <button
-                  type="button"
-                  class="changes-open"
-                  onClick={() => void loadTrace(info.newest.id, "user")}
-                  title="Open this epoch's newest request"
-                >
-                  <span class="mono changes-epoch">e{e}</span>
-                  <span class="mono dim">
-                    {new Date(info.first).toLocaleTimeString()} – {new Date(info.last).toLocaleTimeString()}
-                  </span>
-                  <span>
-                    {info.n} request{info.n === 1 ? "" : "s"} · {info.routes.size} route
-                    {info.routes.size === 1 ? "" : "s"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      )}
     </section>
   );
 }

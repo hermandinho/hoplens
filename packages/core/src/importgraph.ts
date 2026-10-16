@@ -88,7 +88,8 @@ export class ImportGraph {
   }
 
   private abs(rel: string): string {
-    return path.resolve(this.root, rel);
+    // `\` is only a separator to path.resolve on Windows; normalize so a Windows-style path matches on POSIX too.
+    return path.resolve(this.root, rel.replace(/\\/g, "/"));
   }
 
   private reaches(start: string, want: Set<string>): boolean {

@@ -2,7 +2,7 @@ import { computed, effect, signal } from "@preact/signals";
 import { api } from "../api/client";
 import { selectedTrace } from "./store";
 
-export type DetailsTab = "response" | "waterfall" | "console" | "request";
+export type DetailsTab = "response" | "console" | "request";
 
 export const detailsTab = signal<DetailsTab>("response");
 
@@ -19,10 +19,9 @@ export const rawRequestError = signal<string | null>(null);
 /** Count badges per tab, so the user can see at a glance if there's anything to look at. */
 export const detailsCounts = computed(() => {
   const t = selectedTrace.value;
-  if (!t) return { response: 0, waterfall: 0, console: 0, request: 0 };
+  if (!t) return { response: 0, console: 0, request: 0 };
   return {
     response: t.response.body ? 1 : 0,
-    waterfall: t.spans.length,
     console: t.logs.length,
     request: 1,
   };
@@ -41,13 +40,18 @@ effect(() => {
   if (!t || tab !== "request") return;
   if (lastFetchedId === t.id) return;
   lastFetchedId = t.id;
+  const id = t.id;
+  // Never show the previous trace's request while this one loads (or after it fails).
+  rawRequest.value = null;
   rawRequestError.value = null;
   api
-    .rawRequest(t.id)
+    .rawRequest(id)
     .then((req) => {
+      if (selectedTrace.value?.id !== id) return;
       rawRequest.value = req;
     })
     .catch((err) => {
+      if (selectedTrace.value?.id !== id) return;
       rawRequest.value = null;
       rawRequestError.value = (err as Error).message;
     });

@@ -1,0 +1,311 @@
+/*
+ * Single-request canvas (JourneyWaterfall.tsx): Flame and Tree modes, the "Next.js" band, the
+ * critical-path outline, hatched idle gaps and log ticks. Bars and boxes use the bucket colors
+ * (--b-*, .b-* in overview.css), the same legend as the time-budget bar above them.
+ */
+
+/* ============================================================ pane controls */
+
+.tc-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.journey-pane-head {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.journey-pane-meta {
+  margin-right: auto;
+}
+
+.tc-mode {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.tc-crit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tc-crit-swatch {
+  width: 14px;
+  height: 8px;
+  border: 1.5px solid var(--fg);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.tc-crit-toggle.chip-active .tc-crit-swatch {
+  opacity: 1;
+}
+
+/* ============================================================ tree mode */
+
+.tc-caret,
+.tc-caret-pad {
+  flex: 0 0 12px;
+  width: 12px;
+  text-align: center;
+}
+
+.tc-caret:hover {
+  color: var(--fg);
+}
+
+.jw-bar.b-idle .jw-bar-label,
+.jw-bar.b-framework .jw-bar-label {
+  color: var(--fg);
+}
+
+.waterfall-row.tc-crit .jw-bar,
+.waterfall-row.tc-crit .wf-group-track {
+  outline: 1.5px solid var(--fg);
+  outline-offset: 1px;
+}
+
+/* the chain as a strip under the bars: one segment per stretch the end waited on */
+.tc-crit-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.tc-crit-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1px;
+  background: var(--fg);
+  border-radius: 1px;
+}
+
+.tc-band-row .jw-span-name {
+  font-weight: 600;
+}
+
+.tc-band-note {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.jw-kind-pill.jw-kind-next {
+  background: var(--b-framework);
+  color: var(--fg);
+}
+
+.tc-band-track {
+  background: rgba(107, 122, 153, 0.18);
+}
+
+.tc-late .jw-bar,
+.fl-rect.tc-late {
+  opacity: 0.6;
+  background-image: repeating-linear-gradient(90deg, transparent 0 4px, rgba(8, 12, 21, 0.45) 4px 6px);
+}
+
+.tc-late-tag {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px dashed var(--warn);
+  border-radius: 3px;
+  color: var(--warn);
+  font-size: 10px;
+}
+
+/* idle gaps: hatched, "nothing captured was running here" */
+.tc-gap {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  min-width: 1px;
+  background: repeating-linear-gradient(-45deg, rgba(134, 146, 171, 0.32) 0 2px, transparent 2px 6px);
+  border-left: 1px dashed rgba(134, 146, 171, 0.4);
+  border-right: 1px dashed rgba(134, 146, 171, 0.4);
+  z-index: 0;
+}
+
+/* log ticks: warn/error dots at their instant */
+.tc-tick {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+  z-index: 2;
+}
+
+.tc-tick-warn {
+  background: var(--warn);
+}
+
+.tc-tick-error {
+  background: var(--err);
+}
+
+/* ============================================================ flame mode */
+
+.fl-head .waterfall-bar-col {
+  margin-left: 0;
+}
+
+.tc-flame .waterfall-head {
+  padding: 8px 10px;
+}
+
+.fl-canvas {
+  position: relative;
+  margin: 8px 10px 4px;
+  min-width: 0;
+}
+
+.fl-gaps {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.fl-gaps .tc-gap {
+  top: 0;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.fl-rect {
+  position: absolute;
+  min-width: 1px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(8, 12, 21, 0.55);
+  color: var(--bg);
+  text-align: left;
+  overflow: hidden;
+  font: 11px / 20px var(--font-mono);
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.fl-rect:hover {
+  filter: brightness(1.12);
+}
+
+.fl-rect.b-idle,
+.fl-rect.b-framework,
+.fl-band {
+  color: var(--fg);
+}
+
+.fl-band {
+  font-weight: 600;
+}
+
+.fl-group {
+  background-image: repeating-linear-gradient(90deg, transparent 0 3px, rgba(8, 12, 21, 0.3) 3px 4px);
+}
+
+.fl-label {
+  position: relative;
+  padding-left: 4px;
+  pointer-events: none;
+}
+
+/* with the critical path on, everything off the path steps back */
+.tc-crit-on .fl-rect:not(.tc-crit):not(.selected):not(.wf-hl) {
+  opacity: 0.45;
+}
+
+.tc-crit-on .waterfall-row:not(.tc-crit) .jw-bar,
+.tc-crit-on .waterfall-row:not(.tc-crit) .wf-group-track {
+  opacity: 0.45;
+}
+
+.fl-ms {
+  opacity: 0.75;
+}
+
+.fl-rect.selected {
+  box-shadow: inset 0 0 0 2px var(--in), 0 0 0 1px var(--bg);
+  z-index: 3;
+}
+
+.fl-rect.wf-hl {
+  box-shadow: inset 0 0 0 2px var(--in);
+  filter: brightness(1.15);
+}
+
+.fl-rect.fl-err {
+  box-shadow: inset 0 0 0 2px var(--err);
+}
+
+.fl-rect.tc-crit {
+  outline: 1.5px solid var(--fg);
+  outline-offset: -1px;
+  z-index: 2;
+}
+
+.fl-rect .tc-crit-seg {
+  top: auto;
+  bottom: 0;
+  height: 3px;
+}
+
+.fl-hint {
+  margin: 4px 12px 10px;
+  font-size: 11.5px;
+}
+
+.fl-selection {
+  margin: 6px 10px 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.fl-selection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+/* group/band ticks: request.css gives .wf-group-tick a muted default after .b-* is declared */
+.wf-group-tick.b-db {
+  background: var(--b-db);
+}
+.wf-group-tick.b-cache {
+  background: var(--b-cache);
+}
+.wf-group-tick.b-ext {
+  background: var(--b-ext);
+}
+.wf-group-tick.b-fn {
+  background: var(--b-fn);
+}
+.wf-group-tick.b-framework {
+  background: var(--b-framework);
+}
+.wf-group-tick.b-compile {
+  background: var(--b-compile);
+}
+.wf-group-tick.b-idle {
+  background: var(--line-3);
+}

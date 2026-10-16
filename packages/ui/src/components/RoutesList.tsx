@@ -1,15 +1,19 @@
 import type { RouteInfo } from "../api/types";
 import {
+  builderOpen,
   filteredRoutes,
   groupedRoutes,
   hasRoutes,
   loadError,
   loadStatus,
+  mainView,
+  routeBadgeMap,
   routeSearch,
   routesState,
   selectRoute,
   selectedRouteKey,
 } from "../state/store";
+import { Pctl, SevBadge } from "./Charts";
 import { Skeleton } from "./Skeleton";
 
 export function RoutesList() {
@@ -17,7 +21,9 @@ export function RoutesList() {
   const err = loadError.value;
   const routes = routesState.value;
   const groups = groupedRoutes.value;
-  const selected = selectedRouteKey.value;
+  // The badge outline means "this route is in the request builder on screen": none once it's closed or
+  // another view is up (the key itself is kept so reopening the builder resumes the same route).
+  const selected = builderOpen.value && mainView.value === "workbench" ? selectedRouteKey.value : null;
   const q = routeSearch.value;
 
   return (
@@ -55,7 +61,7 @@ export function RoutesList() {
           <Skeleton lines={5} />
         </div>
       )}
-      {err && (
+      {err && status === "error" && (
         <div class="error" role="alert">
           <b>Can't reach Hoplens.</b>
           <br />
@@ -86,11 +92,25 @@ export function RoutesList() {
 }
 
 function RouteRow({ route, selected }: { route: RouteInfo; selected: string | null }) {
+  // Traces carry Next's route template ("/api/x/[id]"), which is RouteInfo.nextRoute.
+  const map = routeBadgeMap.value;
+  const badge = map.get(route.nextRoute) ?? map.get(route.path);
+  const idle = !badge;
   return (
-    <div class="route-row">
-      <div class="route-path mono" title={route.file}>
+    <div class={`route-row ${idle ? "route-row-idle" : ""}`}>
+      <div class="route-path mono" title={idle ? `${route.file} · no traffic yet` : route.file}>
         <RenderPath path={route.path} />
       </div>
+      {badge && (
+        <div class="route-stats" title={`${badge.hits} request${badge.hits === 1 ? "" : "s"}`}>
+          {badge.latency.n > 0 && (
+            <span class="route-p95">
+              <span class="dim">p95</span> <Pctl value={badge.latency.p95} n={badge.latency.n} />
+            </span>
+          )}
+          <SevBadge severity={badge.worstSeverity} count={badge.findings} />
+        </div>
+      )}
       <div class="route-methods">
         {route.methods.map((m) => {
           const key = `${route.id}::${m.method}`;

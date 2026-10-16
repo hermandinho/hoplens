@@ -1,15 +1,13 @@
-import type { BodyCapture, LogRecord, SpanRecord, TraceRecord } from "../api/types";
+import type { BodyCapture, TraceRecord } from "../api/types";
 import { detailsCounts, detailsTab, rawRequest, rawRequestError, setDetailsTab } from "../state/details";
-import { selectHop, selectedHopId } from "../state/journey";
+import { isHandledError, statusClass } from "../state/stats";
 import { selectedTrace } from "../state/store";
 import { JsonView } from "./JsonView";
-import { SpanSnippet } from "./SpanSnippet";
 
 const TABS = [
   { id: "response", label: "Response" },
-  { id: "waterfall", label: "Waterfall" },
-  { id: "console", label: "Console" },
   { id: "request", label: "Request" },
+  { id: "console", label: "Console" },
 ] as const;
 
 export function Details() {
@@ -42,7 +40,6 @@ export function Details() {
       </div>
       <div id="details-panel" class="details-body" role="tabpanel" aria-labelledby={`details-tab-${tab}`}>
         {tab === "response" && <ResponsePane trace={trace} />}
-        {tab === "waterfall" && <WaterfallPane trace={trace} />}
         {tab === "console" && <ConsolePane trace={trace} />}
         {tab === "request" && <RequestPane />}
       </div>
@@ -53,95 +50,20 @@ export function Details() {
 /* ----------------------------------------------------------- panes */
 
 function ResponsePane({ trace }: { trace: TraceRecord }) {
-  const status = trace.status ?? 0;
-  const statusClass = trace.error ? "c5" : `c${Math.floor(status / 100)}`;
   return (
     <div class="pane">
       <div class="response-head">
-        <span class={`status-code ${statusClass}`}>{trace.status ?? (trace.done ? "—" : "…")}</span>
+        <span class={`status-code ${statusClass(trace)}`}>{trace.status ?? (trace.done ? "—" : "…")}</span>
         {trace.duration !== undefined && <span class="dim mono">{Math.round(trace.duration)}ms</span>}
         {trace.error && (
           <span class="pane-issue">
+            {isHandledError(trace) && "Handled: "}
             {trace.error.type}: {trace.error.message}
           </span>
         )}
       </div>
       <HeadersTable headers={trace.response.headers} />
       <BodyBlock body={trace.response.body} empty="Empty response body." />
-    </div>
-  );
-}
-
-function WaterfallPane({ trace }: { trace: TraceRecord }) {
-  if (trace.spans.length === 0) {
-    return <div class="muted">No spans captured.</div>;
-  }
-  const total = Math.max(1, ...trace.spans.map((s) => s.end));
-  const selected = selectedHopId.value;
-  return (
-    <div class="pane">
-      <div class="waterfall">
-        {trace.spans.map((s) => (
-          <WaterfallRow key={s.id} span={s} total={total} selected={selected === s.id} logs={trace.logs} />
-        ))}
-      </div>
-      <div class="waterfall-foot dim mono">
-        Total {Math.round(total)}ms · {trace.spans.length} spans
-      </div>
-    </div>
-  );
-}
-
-function WaterfallRow({
-  span,
-  total,
-  selected,
-  logs,
-}: {
-  span: SpanRecord;
-  total: number;
-  selected: boolean;
-  logs: LogRecord[];
-}) {
-  const left = (span.start / total) * 100;
-  const width = Math.max(0.5, ((span.end - span.start) / total) * 100);
-  const dur = Math.round(span.end - span.start);
-  const errored = !!span.error;
-  // Logs that happened inside this span's time window OR were tagged with its spanId.
-  // When errored, we surface them inline so you don't have to hop to the Console tab.
-  const scoped = errored ? logs.filter((l) => l.spanId === span.id || (l.t >= span.start && l.t <= span.end)) : [];
-  return (
-    <div class="wf-row-wrap">
-      <button
-        type="button"
-        class={`wf-row ${selected ? "selected" : ""} ${errored ? "errored" : ""}`}
-        onClick={() => selectHop(span.id)}
-        aria-pressed={selected}
-      >
-        <span class={`wf-kind wf-kind-${span.kind}`} aria-hidden="true" />
-        <span class="wf-name mono" title={span.name}>
-          {span.name}
-        </span>
-        <span class="wf-bar-track">
-          <span class={`wf-bar wf-bar-${span.kind}`} style={`left: ${left}%; width: ${width}%;`} aria-hidden="true" />
-        </span>
-        <span class="wf-dur dim mono" aria-label={`${dur} milliseconds`}>
-          {dur}ms
-        </span>
-      </button>
-      {selected && <SpanSnippet span={span} />}
-      {scoped.length > 0 && (
-        <fieldset class="wf-logs">
-          <legend class="wf-logs-head">Logs during this failing step ({scoped.length})</legend>
-          {scoped.map((log, i) => (
-            <div key={`${log.t}-${i}`} class={`wf-log-line level-${log.level}`}>
-              <span class="wf-log-time">+{Math.round(log.t)}ms</span>
-              <span class={`console-level level-${log.level}`}>{log.level}</span>
-              <span class="wf-log-text">{log.text}</span>
-            </div>
-          ))}
-        </fieldset>
-      )}
     </div>
   );
 }

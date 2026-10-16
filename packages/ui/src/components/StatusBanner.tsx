@@ -1,8 +1,9 @@
-import { bootstrap, hasRoutes, liveStatus, loadError, loadStatus, metaState } from "../state/store";
+import { actionError, bootstrap, hasRoutes, liveStatus, loadError, loadStatus, metaState } from "../state/store";
 
 /**
  * Prominent full-width banner that only shows when something's actively wrong or important:
  * - bootstrap failed with no cached data → red "can't reach Hoplens"
+ * - a user action failed (Clear, opening a trace) → red, dismissible, cleared by the next success
  * - SSE in reconnecting state → amber "reconnecting"
  * - OTel not attached → amber informational
  * - config not wrapped with withHoplens → amber informational
@@ -26,6 +27,18 @@ export function StatusBanner() {
         </div>
         <button type="button" class="banner-action" onClick={() => void bootstrap()}>
           Retry
+        </button>
+      </div>
+    );
+  }
+
+  const action = actionError.value;
+  if (action) {
+    return (
+      <div class="banner banner-err" role="alert">
+        <div class="banner-body">{action}</div>
+        <button type="button" class="banner-action" onClick={() => (actionError.value = null)}>
+          Dismiss
         </button>
       </div>
     );

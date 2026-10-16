@@ -31,6 +31,15 @@
   --k-render: #ff9b54;
   --k-response: #8692ab;
 
+  /* time buckets (TraceFacts.time) — one legend for every stacked bar */
+  --b-db: #d58cff;
+  --b-cache: #ff7eb6;
+  --b-ext: #7fd6ff;
+  --b-fn: #5fdc9a;
+  --b-framework: #6b7a99;
+  --b-compile: #e0c25a;
+  --b-idle: #2e3a56;
+
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
   color-scheme: dark;

@@ -35,7 +35,7 @@ export function Sidebar() {
           )}
         </button>
       </div>
-      <div class="sidebar-body" role="tabpanel">
+      <div class={`sidebar-body ${tab === "traffic" ? "sidebar-body-traffic" : ""}`} role="tabpanel">
         {tab === "routes" ? <RoutesList /> : <TrafficList />}
       </div>
     </aside>

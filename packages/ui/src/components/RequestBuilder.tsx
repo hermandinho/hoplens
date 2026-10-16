@@ -22,6 +22,10 @@ import { metaState } from "../state/store";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 
+// The shortcut accepts both modifiers; the hint shows the one this platform's users expect.
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+const SEND_KEYS = IS_MAC ? "⌘↵" : "Ctrl+↵";
+
 export function RequestBuilder() {
   const route = activeRoute.value;
   const s = builderState.value;
@@ -79,7 +83,7 @@ export function RequestBuilder() {
 
         <button type="button" class="send" onClick={() => void sendRequest()} disabled={isSending}>
           {isSending ? "Sending…" : "Send"}
-          <kbd class="send-kbd">⌘↵</kbd>
+          <kbd class="send-kbd">{SEND_KEYS}</kbd>
         </button>
       </div>
 

@@ -1,58 +1,76 @@
-import { signal } from "@preact/signals";
-import { Journey } from "./Journey";
+import { type CanvasMode, canvasMode, setCanvasMode, showCritical, toggleCritical } from "../state/canvas";
+import { selectedTrace, tracesState } from "../state/store";
 import { JourneyWaterfall } from "./JourneyWaterfall";
 
-/**
- * View-mode toggle between the horizontal "flow" layout (original, SVG-based)
- * and the new "waterfall" layout (time-proportional, Jaeger-style). Users can
- * flip between them to compare — persisted in localStorage so a reload keeps
- * their choice.
- */
-
-type JourneyView = "waterfall" | "flow";
-const STORAGE_KEY = "hoplens.journeyView";
-
-function loadInitial(): JourneyView {
-  if (typeof localStorage === "undefined") return "waterfall";
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored === "flow" || stored === "waterfall" ? stored : "waterfall";
-}
-
-const journeyView = signal<JourneyView>(loadInitial());
-
-function setView(v: JourneyView) {
-  journeyView.value = v;
-  if (typeof localStorage !== "undefined") localStorage.setItem(STORAGE_KEY, v);
-}
-
+/** The span canvas (Flame or Tree) for the selected request. */
 export function JourneyPane() {
-  const view = journeyView.value;
+  const trace = selectedTrace.value;
+  const spans = trace?.spans.length ?? 0;
+  // The list summary can be ahead of the loaded record while a late-span reload is in flight.
+  const summary = trace ? tracesState.value.find((t) => t.id === trace.id) : undefined;
+  const dropped = Math.max(trace?.facts?.droppedSpans ?? 0, summary?.facts?.droppedSpans ?? 0);
+  const mode = canvasMode.value;
   return (
     <section class="journey-pane" aria-label="Journey">
       <header class="journey-pane-head">
         <div class="journey-pane-title">Journey</div>
-        <div class="journey-view-toggle" role="tablist" aria-label="Journey view mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "waterfall"}
-            class={`view-btn ${view === "waterfall" ? "active" : ""}`}
-            onClick={() => setView("waterfall")}
-          >
-            Waterfall
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "flow"}
-            class={`view-btn ${view === "flow" ? "active" : ""}`}
-            onClick={() => setView("flow")}
-          >
-            Flow
-          </button>
-        </div>
+        {trace && (
+          <div class="journey-pane-meta dim mono">
+            {spans} span{spans === 1 ? "" : "s"}
+            {dropped > 0 && (
+              <span
+                class="journey-pane-warn"
+                title="Spans that ended after the response finished (after(), un-awaited work). Shown in the timeline with a 'late' tag, not counted in the facts or findings."
+              >
+                {" "}
+                · {dropped} late
+              </span>
+            )}
+            {trace.facts?.truncated && (
+              <span class="journey-pane-warn" title="Analysis stopped at the span cap">
+                {" "}
+                · analysis truncated
+              </span>
+            )}
+          </div>
+        )}
+        {trace && (
+          <div class="tc-controls">
+            <button
+              type="button"
+              class={`chip tc-crit-toggle ${showCritical.value ? "chip-active" : ""}`}
+              aria-pressed={showCritical.value}
+              onClick={toggleCritical}
+              title="Outline the critical path: the chain of spans the end of the request waited on"
+            >
+              <span class="tc-crit-swatch" aria-hidden="true" />
+              Critical path
+            </button>
+            <fieldset class="tc-mode">
+              <legend class="sr-only">Canvas mode</legend>
+              {(["flame", "tree"] as CanvasMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  class={`chip tc-mode-btn ${mode === m ? "chip-active" : ""}`}
+                  aria-pressed={mode === m}
+                  onClick={() => setCanvasMode(m)}
+                  title={
+                    m === "flame"
+                      ? "Flame: nested boxes, width = duration"
+                      : "Tree: one indented row per span, collapsible"
+                  }
+                >
+                  {m === "flame" ? "Flame" : "Tree"}
+                </button>
+              ))}
+            </fieldset>
+          </div>
+        )}
       </header>
-      <div class="journey-pane-body">{view === "waterfall" ? <JourneyWaterfall /> : <Journey />}</div>
+      <div class="journey-pane-body">
+        <JourneyWaterfall />
+      </div>
     </section>
   );
 }

@@ -1,4 +1,14 @@
-import type { Discovery, Meta, RunInput, RunResult, SourceResponse, TraceRecord, TraceSummary } from "./types";
+import type {
+  Discovery,
+  Meta,
+  QueriesResponse,
+  RunInput,
+  RunResult,
+  SourceResponse,
+  StatsResponse,
+  TraceRecord,
+  TraceSummary,
+} from "./types";
 
 // Hoplens serves the UI at /__hoplens/ and the API under /__hoplens/api. In Vite dev the proxy
 // in vite.config.ts rewrites both to the standalone runtime port on 127.0.0.1:4983.
@@ -28,6 +38,27 @@ export const api = {
   meta: () => get<Meta>("/meta"),
   routes: (fresh = false) => get<Discovery>(`/routes${fresh ? "?fresh=1" : ""}`),
   traces: () => get<TraceSummary[]>("/traces"),
+  /**
+   * Server-side search (`?q=`): free text also covers logs and request/response bodies. Terms the
+   * server dropped come back in the x-hoplens-query-errors header.
+   */
+  searchTraces: async (q: string, init?: RequestInit): Promise<{ traces: TraceSummary[]; errors: string[] }> => {
+    const path = `/traces?q=${encodeURIComponent(q)}`;
+    const res = await fetch(`${API}${path}`, { ...init, headers: { accept: "application/json" } });
+    if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
+    let errors: string[] = [];
+    try {
+      const h = res.headers.get("x-hoplens-query-errors");
+      if (h) errors = JSON.parse(decodeURIComponent(h)) as string[];
+    } catch {
+      /* malformed header: ignore */
+    }
+    return { traces: (await res.json()) as TraceSummary[], errors };
+  },
+  /** Per-route, per-epoch aggregates that survive ring eviction. 404 on an older core. */
+  stats: (buckets = false) => get<StatsResponse>(`/stats${buckets ? "?buckets=1" : ""}`),
+  /** Cross-request query / host fingerprints. */
+  queries: (limit = 500) => get<QueriesResponse>(`/queries?limit=${limit}`),
   trace: (id: string) => get<TraceRecord>(`/traces/${encodeURIComponent(id)}`),
   rawRequest: (id: string) =>
     get<{ method: string; url: string; headers: Record<string, string>; body?: string }>(
@@ -54,6 +85,8 @@ export type LiveEvent =
   | { type: "hello" }
   | { type: "start"; trace: TraceSummary }
   | { type: "done"; trace: TraceSummary }
+  /** A finished trace changed (late spans; facts.droppedSpans updated). Throttled server-side to 1 per 250 ms per trace. */
+  | { type: "update"; trace: TraceSummary }
   | { type: "clear" };
 
 export interface LiveConnection {
@@ -89,6 +122,13 @@ export function openLive(
     source.addEventListener("done", (e) => {
       try {
         onEvent({ type: "done", trace: JSON.parse((e as MessageEvent).data) });
+      } catch {
+        /* ignore malformed */
+      }
+    });
+    source.addEventListener("update", (e) => {
+      try {
+        onEvent({ type: "update", trace: JSON.parse((e as MessageEvent).data) });
       } catch {
         /* ignore malformed */
       }

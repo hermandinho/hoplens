@@ -1,9 +1,34 @@
-import { bootstrap, followLive, liveStatus, metaState, toggleFollow } from "../state/store";
+import { useEffect, useState } from "preact/hooks";
+import {
+  type MainView,
+  bootstrap,
+  clearTraces,
+  clearing,
+  findingGroups,
+  followLive,
+  liveStatus,
+  mainView,
+  metaState,
+  setMainView,
+  toggleFollow,
+  tracesState,
+} from "../state/store";
+
+const VIEWS: ReadonlyArray<{ id: MainView; label: string; title: string }> = [
+  { id: "overview", label: "Overview", title: "Cross-request overview: latency, findings, routes" },
+  { id: "requests", label: "Requests", title: "Dense request log with a query bar (press /)" },
+  { id: "queries", label: "Queries", title: "Every db, cache and fetch call across requests, and the hosts called" },
+  { id: "workbench", label: "Trace", title: "The selected request: journey, details and the request builder" },
+];
 
 export function TopBar() {
   const meta = metaState.value;
   const live = liveStatus.value;
   const follow = followLive.value;
+  const view = mainView.value;
+  const traceCount = tracesState.value.length;
+  // Only the group count: reading kpis here would recompute every stat even with the Overview hidden.
+  const findings = findingGroups.value.length;
 
   return (
     <header class="top">
@@ -49,6 +74,22 @@ export function TopBar() {
       </output>
 
       <div class="actions">
+        <nav class="view-nav" aria-label="Views">
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              class="action view-nav-btn"
+              aria-current={view === v.id ? "page" : undefined}
+              aria-pressed={view === v.id}
+              onClick={() => setMainView(v.id)}
+              title={v.title}
+            >
+              {v.label}
+              {v.id === "overview" && findings > 0 && <span class="tab-count action-count">{findings}</span>}
+            </button>
+          ))}
+        </nav>
         <button
           type="button"
           class="action"
@@ -62,7 +103,39 @@ export function TopBar() {
         <button type="button" class="action" onClick={() => void bootstrap()} title="Re-scan routes and reload traces">
           Refresh
         </button>
+        <ClearButton count={traceCount} />
       </div>
     </header>
+  );
+}
+
+/** Two-step clear: first click arms for 3s, second click deletes every retained trace. */
+function ClearButton({ count }: { count: number }) {
+  const [armed, setArmed] = useState(false);
+  const busy = clearing.value;
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  return (
+    <button
+      type="button"
+      class={`action ${armed ? "action-danger" : ""}`}
+      disabled={busy || count === 0}
+      onClick={() => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        void clearTraces();
+      }}
+      title={count === 0 ? "No traces to clear" : "Delete every retained trace (all open Hoplens tabs clear too)"}
+    >
+      {busy ? "Clearing…" : armed ? `Clear ${count}?` : "Clear"}
+    </button>
   );
 }

@@ -420,13 +420,50 @@ function cancelRefresh(): void {
 }
 
 let liveConn: LiveConnection | null = null;
+let helloSeen = false;
+
+/**
+ * Replace the local list with the server's after a reconnect. Rows the server no longer has are
+ * dropped; if the open request is one of them, close it and say why instead of 404ing on it.
+ */
+export async function resyncTraces(): Promise<void> {
+  let server: TraceSummary[];
+  try {
+    server = await api.traces();
+  } catch {
+    return; // still unreachable: the next hello retries
+  }
+  const ids = new Set(server.map((t) => t.id));
+  const lost = tracesState.peek().filter((t) => !ids.has(t.id)).length;
+  const sel = selectedTraceId.peek();
+  const selectedGone = sel !== null && !ids.has(sel);
+  if (selectedGone) pendingFollow = null;
+  batch(() => {
+    tracesState.value = server;
+    if (selectedGone) {
+      selectedTraceId.value = null;
+      selectedTrace.value = null;
+    }
+    if (lost > 0)
+      actionError.value = `Hoplens restarted: ${lost} older request${lost === 1 ? " is" : "s are"} no longer available.`;
+  });
+  noteActivity("bootstrap");
+  const v = route.value.view;
+  if (selectedGone && (v === "trace" || v === "compare")) go(requestsRoute(), { replace: true });
+}
 
 /** Open the SSE stream and keep tracesState in sync. Safe to call multiple times (reuses existing). */
 export function startLive(): void {
   if (liveConn) return;
   liveConn = openLive(
     (ev) => {
-      if (ev.type === "clear") {
+      if (ev.type === "hello") {
+        // The first hello is the initial connect (bootstrap already loaded the list). A later one is
+        // a reconnect, and the server may have restarted meanwhile (next dev restarts its server
+        // process), so the local list can name traces that no longer exist: resync from the server.
+        if (helloSeen) void resyncTraces();
+        helloSeen = true;
+      } else if (ev.type === "clear") {
         applyClear();
       } else if (ev.type === "start") {
         tracesState.value = capTraces([ev.trace, ...tracesState.value.filter((t) => t.id !== ev.trace.id)]);

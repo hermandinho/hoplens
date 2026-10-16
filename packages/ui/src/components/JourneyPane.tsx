@@ -1,4 +1,6 @@
+import { useEffect } from "preact/hooks";
 import { type CanvasMode, canvasMode, setCanvasMode, showCritical, toggleCritical } from "../state/canvas";
+import { register } from "../state/keymap";
 import { selectedTrace, tracesState } from "../state/store";
 import { JourneyWaterfall } from "./JourneyWaterfall";
 
@@ -10,6 +12,13 @@ export function JourneyPane() {
   const summary = trace ? tracesState.value.find((t) => t.id === trace.id) : undefined;
   const dropped = Math.max(trace?.facts?.droppedSpans ?? 0, summary?.facts?.droppedSpans ?? 0);
   const mode = canvasMode.value;
+  useEffect(
+    () =>
+      register("trace", "t", "Toggle tree / flame", () =>
+        setCanvasMode(canvasMode.value === "flame" ? "tree" : "flame"),
+      ),
+    [],
+  );
   return (
     <section class="journey-pane" aria-label="Journey">
       <header class="journey-pane-head">
@@ -57,8 +66,8 @@ export function JourneyPane() {
                   onClick={() => setCanvasMode(m)}
                   title={
                     m === "flame"
-                      ? "Flame: nested boxes, width = duration"
-                      : "Tree: one indented row per span, collapsible"
+                      ? "Flame: nested boxes, width = duration (t toggles)"
+                      : "Tree: one indented row per span, collapsible (t toggles)"
                   }
                 >
                   {m === "flame" ? "Flame" : "Tree"}

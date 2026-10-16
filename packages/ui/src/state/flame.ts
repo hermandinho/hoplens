@@ -1,5 +1,5 @@
-import type { HopKind, LogRecord, SpanRecord } from "../api/types";
-import { type SpanGroup, type SpanTree, isMarker, unionLength } from "./traceview";
+import type { HopKind, LogRecord, SpanRecord, TimeBucket } from "../api/types";
+import { type SpanGroup, type SpanTree, bucketOf, isMarker, shapeLabel, shapeOf, unionLength } from "./traceview";
 
 /*
  * Pure model for the single-request canvas (Flame and Tree modes): the critical path with idle
@@ -454,4 +454,268 @@ export function logTicks(spans: readonly SpanRecord[], logs: readonly LogRecord[
     else out.set(owner.id, [tick]);
   }
   return out;
+}
+
+/* ---------------------------------------------------------------- time scale */
+
+/**
+ * Maps trace time (ms) to a 0..1 position across the visible width. `start..end` is the viewport;
+ * an optional `fold` stretch (the untraced cold-start wait) is drawn at a fixed `share` of the
+ * width instead of its true length, so the real work isn't squeezed into the right fifth.
+ */
+export interface TimeScale {
+  start: number;
+  end: number;
+  fold?: { a: number; b: number; share: number };
+  /** 0..1 inside the viewport; < 0 or > 1 outside it. */
+  x(t: number): number;
+  /** Inverse of `x` (axis labels, minimap brush). */
+  invert(f: number): number;
+}
+
+/** Share of the width a folded cold wait takes. */
+export const FOLD_SHARE = 0.12;
+
+export function makeScale(start: number, end: number, fold?: Range, share = FOLD_SHARE): TimeScale {
+  const w = Math.max(1e-6, end - start);
+  // Only fold a stretch that lies entirely in the viewport and leaves real time beside it.
+  if (!fold || fold[0] < start || fold[1] > end || fold[1] <= fold[0] || w - (fold[1] - fold[0]) <= 1e-6) {
+    return { start, end, x: (t) => (t - start) / w, invert: (f) => start + f * w };
+  }
+  const [a, b] = fold;
+  const k = (1 - share) / (w - (b - a));
+  const fa = (a - start) * k;
+  const fb = fa + share;
+  return {
+    start,
+    end,
+    fold: { a, b, share },
+    x: (t) => (t <= a ? (t - start) * k : t >= b ? fb + (t - b) * k : fa + ((t - a) / (b - a)) * share),
+    invert: (f) => (f <= fa ? start + f / k : f >= fb ? b + (f - fb) / k : a + ((f - fa) / share) * (b - a)),
+  };
+}
+
+/* ---------------------------------------------------------------- cold wait */
+
+/** Pre-handler wait over this share of the trace makes it "cold" (verdict rule 1, plan 3.7). */
+export const COLD_WAIT_SHARE = 0.4;
+
+/** Label for the untraced stretch of a cold wait. */
+export const COLD_GAP_LABEL = "Next loading instrumentation / compiling (untraced)";
+
+export interface ColdWait {
+  /** Request start (trace time). */
+  start: number;
+  /** Where the user's work starts: the handler span (or the first non-framework span). */
+  handlerStart: number;
+  /** The untraced idle stretch inside the wait, when it is big enough to fold. */
+  gap?: Range;
+}
+
+/**
+ * The anchor of "your code": the route handler span, else the earliest span that isn't framework
+ * plumbing (pages without a handler span). Late spans and markers are ignored.
+ */
+export function handlerSpan(spans: readonly SpanRecord[]): SpanRecord | undefined {
+  let best: SpanRecord | undefined;
+  for (const s of spans) {
+    if (s.kind !== "handler" || isMarker(s) || isLate(s)) continue;
+    if (!best || s.start < best.start) best = s;
+  }
+  if (best) return best;
+  for (const s of spans) {
+    if (isFramework(s) || isMarker(s) || isLate(s)) continue;
+    if (!best || s.start < best.start) best = s;
+  }
+  return best;
+}
+
+/**
+ * A cold trace: the wait before the handler is over COLD_WAIT_SHARE of the trace. The longest idle
+ * gap inside that wait (nothing traced ran: Next loading instrumentation, compiling the route) is
+ * returned as `gap` when it is at least a quarter of the trace.
+ */
+export function coldWait(spans: readonly SpanRecord[], gaps: ReadonlyArray<Range>, total: number): ColdWait | null {
+  const h = handlerSpan(spans);
+  if (!h || total <= 0) return null;
+  let start = Number.POSITIVE_INFINITY;
+  for (const s of spans) if (s.kind === "request" && !isMarker(s)) start = Math.min(start, s.start);
+  if (!Number.isFinite(start)) start = 0;
+  if (h.start - start <= COLD_WAIT_SHARE * total) return null;
+  let gap: Range | undefined;
+  for (const g of gaps) {
+    const e = Math.min(g[1], h.start);
+    if (g[0] >= h.start || e - g[0] < total * 0.25) continue;
+    if (!gap || e - g[0] > gap[1] - gap[0]) gap = [g[0], e];
+  }
+  return { start, handlerStart: h.start, gap };
+}
+
+/* ------------------------------------------------------------------ viewport */
+
+export type Range = [number, number];
+
+/** Narrowest viewport (ms). */
+export const MIN_VIEW_MS = 0.5;
+
+/** Clamp a range into [0, total], keeping it at least MIN_VIEW_MS (or the total) wide. */
+export function clampRange([a, b]: Range, total: number): Range {
+  const min = Math.min(MIN_VIEW_MS, total);
+  let lo = Math.max(0, Math.min(a, b));
+  let hi = Math.min(total, Math.max(a, b));
+  if (hi - lo < min) {
+    const mid = (lo + hi) / 2;
+    lo = Math.max(0, mid - min / 2);
+    hi = Math.min(total, lo + min);
+    lo = Math.max(0, hi - min);
+  }
+  return [lo, hi];
+}
+
+/** Viewport for "zoom to handler": from the handler's start (a hair before) to the trace end. */
+export function handlerRange(spans: readonly SpanRecord[], total: number): Range | null {
+  const h = handlerSpan(spans);
+  if (!h) return null;
+  let end = h.end;
+  for (const s of spans) if (!isLate(s) && s.end > end) end = s.end;
+  const pad = (end - h.start) * 0.01;
+  return clampRange([h.start - pad, end + pad], total);
+}
+
+/** Viewport framing one span and everything under it, with 8% air on each side. */
+export function spanRange(tree: SpanTree, spanId: string, total: number): Range | null {
+  const s = tree.byId.get(spanId);
+  if (!s) return null;
+  let lo = s.start;
+  let hi = s.end;
+  const stack = [...(tree.children.get(s.id) ?? [])];
+  let guard = 0;
+  while (stack.length && guard++ < 20000) {
+    const c = stack.pop() as SpanRecord;
+    if (c.start < lo) lo = c.start;
+    if (c.end > hi) hi = c.end;
+    const kids = tree.children.get(c.id);
+    if (kids) stack.push(...kids);
+  }
+  const pad = Math.max((hi - lo) * 0.08, MIN_VIEW_MS / 2);
+  return clampRange([lo - pad, hi + pad], total);
+}
+
+/** Pan by `by` viewport widths (negative = earlier), keeping the width. */
+export function panRange([a, b]: Range, by: number, total: number): Range {
+  const w = b - a;
+  const lo = Math.max(0, Math.min(total - w, a + w * by));
+  return [lo, lo + w];
+}
+
+/** Zoom by `factor` (< 1 = in) around the trace time `at`, clamped to [0, total]. */
+export function zoomRange([a, b]: Range, factor: number, at: number, total: number): Range {
+  const w = Math.min(total, Math.max(MIN_VIEW_MS, (b - a) * factor));
+  const f = b > a ? (at - a) / (b - a) : 0.5;
+  let lo = at - w * f;
+  lo = Math.max(0, Math.min(total - w, lo));
+  return [lo, lo + w];
+}
+
+/** Smallest pan that brings [s, e] into view, keeping the width (it starts the view when too long). */
+export function revealRange([a, b]: Range, s: number, e: number, total: number): Range {
+  const w = b - a;
+  if (s >= a && e <= b) return [a, b];
+  const lo = e - s >= w * 0.9 || s < a ? s - w * 0.05 : e - w * 0.95;
+  const c = Math.max(0, Math.min(total - w, lo));
+  return [c, c + w];
+}
+
+/* -------------------------------------------------------------- fold stripes */
+
+export interface FoldSummary {
+  /** Bucket holding most of the group's self time (members and everything under them). */
+  bucket: TimeBucket;
+  /** Self ms in that bucket, summed over the members' subtrees. */
+  ms: number;
+  /** Descendant (by shape: "pg.query", "fetch GET host/users/:id") that contributed most to `bucket`, unless it's the member. */
+  top?: string;
+}
+
+/**
+ * A descendant's name for the fold note, by shape so ten calls to /users/1../users/10 read as one
+ * "fetch GET host/users/:id" rather than whichever concrete url happened to be largest.
+ */
+function foldName(s: SpanRecord): string {
+  const shape = shapeOf(s);
+  if (!shape) return s.name;
+  if (s.kind === "fetch") return `fetch ${shapeLabel(shape)}`;
+  return s.name.split(/\s/)[0] || s.name;
+}
+
+/**
+ * What a folded "xN" group actually spends its time on: 12 getProductRating wrappers that each
+ * run a pg.query are db time, so the folded row is striped db-violet and agrees with the time bar.
+ */
+export function foldSummary(tree: SpanTree, group: SpanGroup, self: ReadonlyMap<string, number>): FoldSummary {
+  const byBucket = new Map<TimeBucket, number>();
+  const byName = new Map<TimeBucket, Map<string, number>>();
+  const memberName = (group.members[0] as SpanRecord | undefined)?.name;
+  const stack: SpanRecord[] = [...group.members];
+  let guard = 0;
+  while (stack.length && guard++ < 20000) {
+    const s = stack.pop() as SpanRecord;
+    const ms = self.get(s.id) ?? 0;
+    if (ms > 0 && !isLate(s)) {
+      const b = bucketOf(s);
+      byBucket.set(b, (byBucket.get(b) ?? 0) + ms);
+      let names = byName.get(b);
+      if (!names) {
+        names = new Map();
+        byName.set(b, names);
+      }
+      const nm = foldName(s);
+      names.set(nm, (names.get(nm) ?? 0) + ms);
+    }
+    const kids = tree.children.get(s.id);
+    if (kids) stack.push(...kids);
+  }
+  let bucket: TimeBucket = bucketOf(group.members[0] as SpanRecord);
+  let ms = 0;
+  for (const [b, v] of byBucket) {
+    if (v > ms) {
+      bucket = b;
+      ms = v;
+    }
+  }
+  let top: string | undefined;
+  let topMs = 0;
+  for (const [name, v] of byName.get(bucket) ?? []) {
+    if (v > topMs) {
+      top = name;
+      topMs = v;
+    }
+  }
+  return { bucket, ms, top: top === memberName ? undefined : top };
+}
+
+/* ------------------------------------------------------------------ search */
+
+/** Text a span search matches against: name, kind, SQL, URL and source file. */
+function searchText(s: SpanRecord): string {
+  const parts: string[] = [s.name, s.kind];
+  for (const k of ["db.statement", "db.query.text", "url.full", "http.url"]) {
+    const v = s.attrs[k];
+    if (v !== undefined) parts.push(String(v));
+  }
+  if (s.location?.file) parts.push(`${s.location.file}:${s.location.line}`);
+  return parts.join("\n").toLowerCase();
+}
+
+/** Span ids matching `query` (case-insensitive; every word must match), in time order. */
+export function searchSpans(spans: readonly SpanRecord[], query: string): string[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  return spans
+    .filter((s) => {
+      const t = searchText(s);
+      return words.every((w) => t.includes(w));
+    })
+    .sort((a, b) => a.start - b.start || b.end - a.end)
+    .map((s) => s.id);
 }

@@ -98,7 +98,7 @@
 }
 
 .tc-band-note {
-  font-size: 11px;
+  font-size: var(--fs-label);
   white-space: nowrap;
 }
 
@@ -108,13 +108,17 @@
 }
 
 .tc-band-track {
-  background: rgba(107, 122, 153, 0.18);
+  background: color-mix(in srgb, var(--b-idle) 18%, transparent);
 }
 
 .tc-late .jw-bar,
 .fl-rect.tc-late {
   opacity: 0.6;
-  background-image: repeating-linear-gradient(90deg, transparent 0 4px, rgba(8, 12, 21, 0.45) 4px 6px);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 4px,
+    color-mix(in srgb, var(--bg) 45%, transparent) 4px 6px
+  );
 }
 
 .tc-late-tag {
@@ -123,7 +127,7 @@
   border: 1px dashed var(--warn);
   border-radius: 3px;
   color: var(--warn);
-  font-size: 10px;
+  font-size: var(--fs-label);
 }
 
 /* idle gaps: hatched, "nothing captured was running here" */
@@ -132,9 +136,13 @@
   top: 2px;
   bottom: 2px;
   min-width: 1px;
-  background: repeating-linear-gradient(-45deg, rgba(134, 146, 171, 0.32) 0 2px, transparent 2px 6px);
-  border-left: 1px dashed rgba(134, 146, 171, 0.4);
-  border-right: 1px dashed rgba(134, 146, 171, 0.4);
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--muted) 32%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+  border-left: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent);
   z-index: 0;
 }
 
@@ -194,11 +202,11 @@
   padding: 0;
   border: 0;
   border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(8, 12, 21, 0.55);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bg) 55%, transparent);
   color: var(--bg);
   text-align: left;
   overflow: hidden;
-  font: 11px / 20px var(--font-mono);
+  font: var(--fs-label) / 20px var(--font-mono);
   white-space: nowrap;
   z-index: 1;
 }
@@ -218,7 +226,11 @@
 }
 
 .fl-group {
-  background-image: repeating-linear-gradient(90deg, transparent 0 3px, rgba(8, 12, 21, 0.3) 3px 4px);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--bg) 30%, transparent) 3px 4px
+  );
 }
 
 .fl-label {
@@ -242,12 +254,12 @@
 }
 
 .fl-rect.selected {
-  box-shadow: inset 0 0 0 2px var(--in), 0 0 0 1px var(--bg);
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 0 1px var(--bg);
   z-index: 3;
 }
 
 .fl-rect.wf-hl {
-  box-shadow: inset 0 0 0 2px var(--in);
+  box-shadow: inset 0 0 0 2px var(--accent);
   filter: brightness(1.15);
 }
 
@@ -269,7 +281,7 @@
 
 .fl-hint {
   margin: 4px 12px 10px;
-  font-size: 11.5px;
+  font-size: var(--fs-label);
 }
 
 .fl-selection {
@@ -283,7 +295,7 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   min-width: 0;
 }
 
@@ -308,4 +320,279 @@
 }
 .wf-group-tick.b-idle {
   background: var(--line-3);
+}
+
+/* ============================================================ toolbar, minimap (WP3) */
+
+/* toolbar + minimap + axis stay put while the rows scroll under them */
+.tc-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--panel);
+}
+
+.tc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 6px;
+  min-width: 0;
+}
+
+.tc-search {
+  flex: 0 1 240px;
+  min-width: 140px;
+}
+
+.tc-search-input {
+  width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+}
+
+.tc-search-input::placeholder {
+  color: var(--dim);
+}
+
+.tc-search-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.tc-search-count {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.tc-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tc-zoom {
+  margin-left: auto;
+}
+
+.tc-zoom-range {
+  font-size: var(--fs-sm);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.tc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+}
+
+.tc-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tc-btn kbd {
+  font-size: var(--fs-label);
+}
+
+.tc-cold-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+.tc-cold-swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--b-compile) 70%, transparent) 0 2px,
+    transparent 2px 5px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--b-compile) 60%, transparent);
+}
+
+/* minimap: the whole trace at a few px per row; window = the viewport */
+.tc-minimap {
+  padding: 0 10px 6px;
+}
+
+.tc-mm {
+  display: block;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.tc-mm-panning {
+  cursor: grabbing;
+}
+
+.tc-mm-r {
+  fill: var(--b-fn);
+}
+.tc-mm-r.mm-db {
+  fill: var(--b-db);
+}
+.tc-mm-r.mm-cache {
+  fill: var(--b-cache);
+}
+.tc-mm-r.mm-ext {
+  fill: var(--b-ext);
+}
+.tc-mm-r.mm-framework {
+  fill: var(--b-framework);
+}
+.tc-mm-r.mm-compile {
+  fill: var(--b-compile);
+}
+.tc-mm-r.mm-idle {
+  fill: var(--line-3);
+}
+
+.tc-mm-dim {
+  opacity: 0.3;
+}
+
+.tc-mm-fold {
+  fill: color-mix(in srgb, var(--b-compile) 22%, transparent);
+}
+
+.tc-mm-shade {
+  fill: color-mix(in srgb, var(--bg) 62%, transparent);
+  pointer-events: none;
+}
+
+.tc-mm-window {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  cursor: grab;
+}
+
+.tc-mm-brush {
+  fill: var(--accent-bg);
+  stroke: var(--accent);
+  stroke-width: 1px;
+  pointer-events: none;
+}
+
+/* zoomed bars are clipped at the viewport edges */
+.tc-clip,
+.waterfall .waterfall-head .waterfall-bar-col {
+  overflow: hidden;
+}
+
+.tc-axis-break {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-left: 2px double var(--b-compile);
+  border-right: 2px double var(--b-compile);
+  background: color-mix(in srgb, var(--b-compile) 14%, transparent);
+  pointer-events: auto;
+}
+
+/* the untraced cold-start wait: sand hatch, labelled, drawn compressed when folded */
+.tc-gap.tc-cold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--b-compile) 34%, transparent) 0 2px,
+    transparent 2px 6px
+  );
+  border-left: 1px dashed color-mix(in srgb, var(--b-compile) 60%, transparent);
+  border-right: 1px dashed color-mix(in srgb, var(--b-compile) 60%, transparent);
+}
+
+.tc-cold-label {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+  color: var(--b-compile);
+  font-size: var(--fs-label);
+  line-height: 1.35;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.waterfall-row .tc-gap.tc-cold {
+  z-index: 2;
+}
+
+.fl-gaps .tc-cold-label {
+  white-space: normal;
+  align-self: flex-start;
+  margin-top: 6px;
+}
+
+.tc-cold-label b {
+  font-weight: 600;
+}
+
+/* folded "xN" rows: striped with the bucket their subtree spends most time in */
+.fl-rect.tc-fold,
+.wf-group-tick.tc-fold {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    color-mix(in srgb, var(--bg) 38%, transparent) 5px 7px
+  );
+}
+
+.tc-fold-note {
+  /* shrinks before the span name does */
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-label);
+}
+
+/* highlight (state/canvas): everything else steps back to 30%, nothing hides */
+.tc-hl-on .fl-rect:not(.wf-hl):not(.selected) {
+  opacity: 0.3;
+}
+
+.tc-hl-on .waterfall-row:not(.wf-hl):not(.selected) > * {
+  opacity: 0.3;
+}
+
+.tc-hl-on.tc-crit-on .fl-rect.wf-hl,
+.tc-hl-on.tc-crit-on .waterfall-row.wf-hl .jw-bar,
+.tc-hl-on.tc-crit-on .waterfall-row.wf-hl .wf-group-track {
+  opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .tc-minimap {
+    display: none;
+  }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/ui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Hoplens UI — Preact + Vite, built to a single inlined HTML file served at /__hoplens.",
   "keywords": [
     "hoplens",

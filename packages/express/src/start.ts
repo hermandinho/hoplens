@@ -3,8 +3,9 @@
 
 import http from "node:http";
 import https from "node:https";
-import type { Discovery, DiscoverySource, HoplensOptions, Runtime } from "@hoplens/core";
+import type { HoplensOptions, Runtime } from "@hoplens/core";
 import { appListening, uiReady } from "./banner";
+import { ExpressDiscoverySource } from "./discovery";
 import { resolveOptions } from "./options";
 import { resolveExpress } from "./resolve";
 import { adapterState } from "./state";
@@ -25,13 +26,6 @@ function failOnce(msg: string, err?: unknown) {
     process.stderr.write(`! hoplens:express ${msg}${detail ? `: ${detail}` : ""}; your app runs without Hoplens\n`);
   } catch {
     /* nothing left to tell */
-  }
-}
-
-/** No routes yet: the router patch fills this in. */
-class ExpressDiscoverySource implements DiscoverySource {
-  scan(): Discovery {
-    return { routes: [], typescript: false, scannedAt: Date.now() };
   }
 }
 
@@ -176,7 +170,7 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
     s.express = resolveExpress(options.root);
     rt = new core.Runtime({
       options,
-      discovery: new ExpressDiscoverySource(),
+      discovery: new ExpressDiscoverySource(options.root),
       httpTap: createTap(core.normalizeUrl, process.env, s.express?.version),
       banner: uiReady,
       framework: { name: "express", version: s.express?.version },

@@ -140,16 +140,27 @@ export function selectRoute(r: RouteInfo, method: string): void {
 }
 
 /**
+ * The builder key of the route a request hit: the entry of its template (Express lists one template
+ * once per registration file) that answers its method, else one that answers ANY.
+ */
+export function routeKeyFor(routes: RouteInfo[], method: string, tpl: string): string | undefined {
+  const same = routes.filter((r) => r.nextRoute === tpl || r.path === tpl);
+  for (const want of [method, "ANY"]) {
+    const r = same.find((x) => x.methods.some((m) => m.method === want));
+    if (r) return `${r.id}::${want}`;
+  }
+  return undefined;
+}
+
+/**
  * Open the builder drawer. With no route picked yet, pre-select the one the given request hit
  * (matched by route template and method) so "New request" from a trace starts somewhere useful.
  */
 export function openBuilder(from?: { method: string; route?: string; path: string }): void {
   batch(() => {
     if (!selectedRouteKey.value && from) {
-      const tpl = from.route ?? from.path;
-      const found = routesState.value?.routes.find((r) => r.nextRoute === tpl || r.path === tpl);
-      const m = found?.methods.find((x) => x.method === from.method) ?? found?.methods.find((x) => x.method === "ANY");
-      if (found && m) selectedRouteKey.value = `${found.id}::${m.method}`;
+      const key = routeKeyFor(routesState.value?.routes ?? [], from.method, from.route ?? from.path);
+      if (key) selectedRouteKey.value = key;
     }
     builderOpen.value = true;
   });

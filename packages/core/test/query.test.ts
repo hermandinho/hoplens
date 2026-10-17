@@ -148,6 +148,12 @@ describe("matchQuery", () => {
     expect(m("route:/pages/*", t())).toBe(false);
   });
 
+  test("compileGlob: a bare / is the root route, not a prefix of every path", () => {
+    expect(compileGlob("/").test("/")).toBe(true);
+    expect(compileGlob("/").test("/api/health")).toBe(false);
+    expect(compileGlob("/api/").test("/api/x")).toBe(true);
+  });
+
   test("compileGlob treats regex specials literally", () => {
     expect(compileGlob("/a.b").test("/axb")).toBe(false);
     expect(compileGlob("/a.b").test("/a.b")).toBe(true);

@@ -286,7 +286,14 @@ export class Runtime {
   }
 
   routeInfo(nextRoute: string, method: string): { file: string; line: number } | undefined {
-    const route: RouteInfo | undefined = this.discover().routes.find((r) => r.nextRoute === nextRoute);
+    // Several entries can share a template (Express lists one per registration file): prefer the one
+    // that declares the method. An entry with no file (a route registered before the adapter could
+    // see its call site) names no location.
+    const all: RouteInfo[] = this.discover().routes.filter((r) => r.nextRoute === nextRoute && r.file);
+    const route =
+      all.find((r) => r.methods.some((x) => x.method === method)) ??
+      all.find((r) => r.methods.some((x) => x.method === "ANY")) ??
+      all[0];
     if (!route) return undefined;
     const m =
       route.methods.find((x) => x.method === method) ??

@@ -17,6 +17,8 @@ const G = globalThis as any;
 export const ROUTE_KEY = Symbol.for("hoplens.express.route");
 /** On a Route: { [method]: stack } formatted where each method was registered. */
 const REG = Symbol.for("hoplens.express.reg");
+/** On a Route's REG record: Map<stack, Loc | null>, the mapped location of each of its stacks. */
+const LOCS = Symbol.for("hoplens.express.locs");
 /** On a router Layer: { path, app? }, the mount path(s) given to use() and the sub-app it mounts. */
 const MOUNT = Symbol.for("hoplens.express.mount");
 const PATCHED = Symbol.for("hoplens.express.patched");
@@ -29,8 +31,12 @@ const MAX_DEPTH = 32;
 const MAX_PREFIXES = 16;
 /** Apps remembered for the walk. */
 const MAX_APPS = 256;
-/** Registration stacks whose mapped location is cached. */
+/** Registration stacks whose mapped location is shared across routes (routes registered per request). */
 const MAX_LOCATIONS = 2048;
+/** Templates remembered from dispatch for discovery (routes the walk could not reach). */
+const MAX_SEEN = 1024;
+/** Routes kept per seen template. */
+const MAX_SEEN_ROUTES = 8;
 
 interface Mount {
   path: unknown;
@@ -60,8 +66,15 @@ export interface RoutesState {
   prefixes: WeakMap<object, string[]>;
   /** Router stacks the last walk went through. A use() or route() on any other stack can't change it. */
   walked: WeakSet<object>;
-  /** Registration stack -> mapped user location (null: none in the project). */
+  /**
+   * Registration stack -> mapped user location (null: none in the project), shared by routes with the
+   * same stack text. Each route also keeps its own (REG[LOCS]), so a full scan never re-maps.
+   */
   locations: Map<string, Loc | null>;
+  /** The routes the last walk reached, in walk order (discovery lists them). */
+  order: WeakRef<object>[];
+  /** Template -> routes a traced dispatch gave it, for routes the walk could not reach. */
+  seen: Map<string, WeakRef<object>[]>;
 }
 
 export function routesState(): RoutesState | undefined {
@@ -119,6 +132,8 @@ export function patchExpress(express: any, major: number): RoutesState | undefin
     prefixes: new WeakMap(),
     walked: new WeakSet(),
     locations: new Map(),
+    order: [],
+    seen: new Map(),
   };
   const routeProto = routePrototype(express);
   if (!routeProto || typeof routeProto.dispatch !== "function") return undefined;
@@ -195,6 +210,10 @@ function routerUse(st: RoutesState, orig: Fn): Fn {
         for (let i = before; i < this.stack.length; i++) {
           const layer = this.stack[i];
           if (layer && !layer[MOUNT]) layer[MOUNT] = { path: mount } satisfies Mount;
+          // Express 4: a router built before the patches (hoplens(app), a router required from its
+          // own module) still calls the original dispatch it bound at route(); mounting it is the
+          // first time we can reach it.
+          if (st.major < 5 && isRouter(layer?.handle)) rebindRoutes(st, layer.handle.stack, 0, new Set());
         }
         touch(st, this.stack);
       }
@@ -247,6 +266,12 @@ function appLazyRouter(st: RoutesState, orig: Fn): Fn {
     }
     return out;
   };
+}
+
+/** Express 5: an app whose lazy `router` getter is not wrapped (it was made before the patches). */
+function unwatchedRouter(app: any): boolean {
+  const desc = Object.getOwnPropertyDescriptor(app, "router");
+  return !!desc && typeof desc.get === "function" && !(desc.get as any)[PATCHED];
 }
 
 /**
@@ -310,6 +335,10 @@ export function adoptApp(app: any): void {
     if (typeof app.use === "function" && !app.use[PATCHED] && Object.hasOwn(app, "use")) {
       wrap(app, "use", (orig) => appUse(st, orig));
     }
+    // Express 4: the app's own lazyrouter copy (from before the patch) builds app._router unseen.
+    if (typeof app.lazyrouter === "function" && Object.hasOwn(app, "lazyrouter")) {
+      wrap(app, "lazyrouter", (orig) => appLazyRouter(st, orig));
+    }
     if (st.major < 5) rebindRoutes(st, stackOf(st, app), 0, new Set());
     st.dirty = true;
   } catch {
@@ -323,8 +352,13 @@ function rebindRoutes(st: RoutesState, stack: any[] | undefined, depth: number, 
   for (const layer of stack) {
     const route = layer?.route;
     if (route) {
-      // A layer bound after the patch already calls it; rebinding that one too is harmless.
-      if (layer.handle?.name === "bound dispatch" && !layer.handle[PATCHED]) {
+      // A layer bound after the patch already calls it; rebinding that one too is harmless. A route
+      // of another express copy keeps its own dispatch.
+      if (
+        layer.handle?.name === "bound dispatch" &&
+        !layer.handle[PATCHED] &&
+        Object.getPrototypeOf(route) === st.routeProto
+      ) {
         const bound = st.routeProto.dispatch.bind(route);
         bound[PATCHED] = true;
         layer.handle = bound;
@@ -429,6 +463,16 @@ function tagSubApps(st: RoutesState, app: any, args: unknown[]): void {
     if (!layer) return;
     if (!layer[MOUNT]) layer[MOUNT] = { path: mount } satisfies Mount;
     layer[MOUNT].app = fn;
+    if (typeof fn.lazyrouter === "function") {
+      // Express 4: a sub-app built before the patches binds the original dispatch (see routerUse).
+      rebindRoutes(st, stackOf(st, fn), 0, new Set());
+    } else if (!st.routed.has(fn) && unwatchedRouter(fn)) {
+      // Express 5: a sub-app built before the patches, so no read of its lazy `router` was seen.
+      // Mounted, its router is read on its first request anyway (and was built already if it has
+      // routes), so the walk may read it now.
+      watchRouter(st, fn);
+      st.routed.add(fn);
+    }
     registerApp(st, fn);
   });
 }
@@ -469,6 +513,7 @@ function openHop(
 ): { hop: HopHandle; next: any } | undefined {
   const template = templateOf(route, req, st);
   req[ROUTE_KEY] = template;
+  noteSeen(st, route, template);
   const method = typeof req.method === "string" ? req.method : "GET";
   const loc = locationOf(st, route, method, rt.root);
   const hop = rt.beginHop("handler", { name: `${method} ${template}`, file: loc?.file, line: loc?.line });
@@ -518,26 +563,60 @@ function trackOnResponse(res: any, hop: HopHandle): void {
 
 let core: typeof import("@hoplens/core") | undefined;
 
-function locationOf(st: RoutesState, route: any, method: string, root: string): Loc | undefined {
+/** Remember which route a traced dispatch grouped under `template`, for discovery. */
+function noteSeen(st: RoutesState, route: object, template: string): void {
+  let refs = st.seen.get(template);
+  if (refs) {
+    for (const r of refs) if (r.deref() === route) return;
+    if (refs.length >= MAX_SEEN_ROUTES) return;
+  } else {
+    if (st.seen.size >= MAX_SEEN) {
+      const oldest = st.seen.keys().next().value;
+      if (oldest !== undefined) st.seen.delete(oldest);
+    }
+    refs = [];
+    st.seen.set(template, refs);
+  }
+  refs.push(new WeakRef(route));
+}
+
+/** A route's registration line for `method` (as the handler hop uses), mapped to the project. */
+export function locationOf(st: RoutesState, route: any, method: string, root: string): Loc | undefined {
   const reg = route?.[REG];
   if (!reg) return undefined;
   const m = method.toLowerCase();
   const stack: string | undefined =
     reg[m] ?? (m === "head" ? reg.get : undefined) ?? reg.all ?? reg[Object.keys(reg)[0] ?? ""];
   if (!stack) return undefined;
+  let own: Map<string, Loc | null> | undefined = reg[LOCS];
+  const mine = own?.get(stack);
+  if (mine !== undefined) return mine ?? undefined;
   // Keyed by the stack text: a route registered per request maps its (same) call site once.
-  const hit = st.locations.get(stack);
-  if (hit !== undefined) return hit ?? undefined;
-  let loc: Loc | null = null;
-  try {
-    core ??= require("@hoplens/core") as typeof import("@hoplens/core");
-    const l = core.mapStack(stack, root).location;
-    if (l) loc = { file: l.file, line: l.line };
-  } catch {
-    /* no location */
+  let loc = st.locations.get(stack);
+  if (loc === undefined) {
+    loc = null;
+    try {
+      core ??= require("@hoplens/core") as typeof import("@hoplens/core");
+      const l = core.mapStack(stack, root).location;
+      if (l) loc = { file: l.file, line: l.line };
+    } catch {
+      /* no location */
+    }
+    if (st.locations.size >= MAX_LOCATIONS) {
+      const oldest = st.locations.keys().next().value;
+      if (oldest !== undefined) st.locations.delete(oldest);
+    }
+    st.locations.set(stack, loc);
   }
-  if (st.locations.size >= MAX_LOCATIONS) st.locations.clear();
-  st.locations.set(stack, loc);
+  try {
+    if (!own) {
+      own = new Map();
+      Object.defineProperty(reg, LOCS, { value: own });
+    }
+    own.set(stack, loc);
+  } catch {
+    /* a frozen record: the shared cache still answers */
+  }
   return loc ?? undefined;
 }
 
@@ -603,10 +682,11 @@ export function rebuild(st: RoutesState): void {
     else st.apps.delete(ref);
   }
   const reached = new Set<unknown>();
+  const order: object[] = [];
   const visit = (app: any, prefixes: string[]) => {
     // One app that can't be walked (a foreign copy, a throwing getter) never voids the others.
     try {
-      walk(st, stackOf(st, app), prefixes, 0, new Set(), map, reached, walked);
+      walk(st, stackOf(st, app), prefixes, 0, new Set(), map, reached, walked, order);
     } catch {
       /* this app's routes fall back to req.baseUrl */
     }
@@ -622,6 +702,60 @@ export function rebuild(st: RoutesState): void {
   }
   st.prefixes = map;
   st.walked = walked;
+  st.order = order.map((r) => new WeakRef(r));
+}
+
+/** A route and the full templates it is listed under. */
+export interface RouteEntry {
+  route: any;
+  templates: string[];
+}
+
+/**
+ * Every route the walk reaches, with the templates templateOf gives it (one per mount prefix and,
+ * for an array path, per element), then routes only seen at dispatch under the templates they got.
+ * Walks again when something changed, as templateOf does; never reads a lazy Express 5 router.
+ */
+export function routeEntries(st: RoutesState): RouteEntry[] {
+  if (st.dirty) rebuild(st);
+  const out: RouteEntry[] = [];
+  const index = new Map<object, RouteEntry>();
+  for (const ref of st.order) {
+    const route = ref.deref() as any;
+    if (!route || index.has(route)) continue;
+    const prefixes = st.prefixes.get(route) ?? [""];
+    const own = ownPaths(route.path, st.major);
+    const templates: string[] = [];
+    for (const p of prefixes) for (const o of own) pushUnique(templates, joinPath(p, o));
+    const entry = { route, templates };
+    index.set(route, entry);
+    out.push(entry);
+  }
+  for (const [template, refs] of st.seen) {
+    for (const ref of refs) {
+      const route = ref.deref();
+      if (!route) continue;
+      let entry = index.get(route);
+      if (!entry) {
+        entry = { route, templates: [] };
+        index.set(route, entry);
+        out.push(entry);
+      }
+      pushUnique(entry.templates, template);
+    }
+  }
+  return out;
+}
+
+function pushUnique(list: string[], v: string): void {
+  if (!list.includes(v)) list.push(v);
+}
+
+/** Each path a route answers, as ownPath() would show it for a request matching that path. */
+function ownPaths(p: unknown, major: number): string[] {
+  if (!Array.isArray(p)) return [displayPath(p, major)];
+  const flat = p.flat(Number.POSITIVE_INFINITY);
+  return flat.length ? flat.map((el) => displayPath(el, major)) : [""];
 }
 
 function prefixOf(prefix: string, mount: unknown, major: number): string {
@@ -638,6 +772,7 @@ function walk(
   map: WeakMap<object, string[]>,
   reached: Set<unknown>,
   walked: WeakSet<object>,
+  order: object[],
 ): void {
   if (!stack || depth > MAX_DEPTH || ancestors.has(stack)) return;
   ancestors.add(stack);
@@ -647,7 +782,10 @@ function walk(
     const route = layer.route;
     if (route && typeof route === "object") {
       let list = map.get(route);
-      if (!list) map.set(route, (list = []));
+      if (!list) {
+        map.set(route, (list = []));
+        order.push(route);
+      }
       for (const p of prefixes) if (list.length < MAX_PREFIXES && !list.includes(p)) list.push(p);
       continue;
     }
@@ -667,7 +805,7 @@ function walk(
         const joined = prefixOf(p, m, st.major);
         if (next.length < MAX_PREFIXES && !next.includes(joined)) next.push(joined);
       }
-    walk(st, child, next, depth + 1, ancestors, map, reached, walked);
+    walk(st, child, next, depth + 1, ancestors, map, reached, walked, order);
   }
   ancestors.delete(stack);
 }

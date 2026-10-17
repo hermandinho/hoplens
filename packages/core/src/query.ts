@@ -290,7 +290,8 @@ export interface GlobMatcher {
 
 /**
  * `*` (and `**`) match anything including `/`, `?` matches one character, case-insensitive. Without a
- * `*` the pattern matches exactly or as a path prefix: `/api` matches `/api` and `/api/x`, not `/apix`.
+ * `*` the pattern matches exactly or as a path prefix: `/api` matches `/api` and `/api/x`, not `/apix`
+ * (a bare `/` matches `/` only).
  *
  * Deliberately not a RegExp: `*` as `.*` backtracks catastrophically (`/*a*a*a*a*z` against a long
  * path ran for minutes), and this runs in the user's dev server and the UI tab. The two-pointer walk
@@ -303,7 +304,8 @@ export function compileGlob(glob: string): GlobMatcher {
       test(input: string): boolean {
         const s = input.toLowerCase();
         if (s.length < p.length || !segMatch(p, s, 0, p.length)) return false;
-        if (s.length === p.length || p.endsWith("/")) return true;
+        // A bare `/` is the root route only: as a prefix it would match every path.
+        if (s.length === p.length || (p.length > 1 && p.endsWith("/"))) return true;
         return s[p.length] === "/";
       },
     };

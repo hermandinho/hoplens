@@ -5,7 +5,7 @@
 
 New `@hoplens/express` adapter for Express 4 and 5, also exposed as `hoplens/express` and
 `hoplens/express/register`. An early preview: it captures requests, request bodies (redacted),
-static assets, route templates and handler hops; middleware hops and the route list come next.
+static assets, route templates, handler hops and the route list; middleware hops come next.
 
 - `node -r hoplens/express/register` or `node --import hoplens/express/register` starts the runtime
   right before the app's first `listen()`. `hoplens(app)` does the same from code; called after the
@@ -29,3 +29,8 @@ static assets, route templates and handler hops; middleware hops and the route l
   throws and Express 5 promise rejections behave as without Hoplens.
 - ESM type entries: `import hoplens from "@hoplens/express"` (and from `hoplens/express`) is typed as
   the function it is at runtime.
+- The route list (`/__hoplens/api/routes`, the request builder's route picker) is read from the
+  app's router: one entry per full template, with each method (`app.all()` as `ANY`) at the line
+  that registered it, sub-app and parameterised-mount routes included. Routes registered later show
+  on the next scan; a route under a mount Hoplens could not see is listed once a request reached it.
+  Its template is the one the route's requests are grouped under.

@@ -48,8 +48,18 @@ export function describeRequest(
   const pathname = String((req as any).originalUrl ?? req.url ?? "/").split(/[?#]/)[0] || "/";
   const type = String(res.getHeader("content-type") ?? "");
   const asset = type ? ASSET_TYPE.test(type) : status === 304 && ASSET_EXT.test(pathname);
-  if (!asset) return undefined;
+  if (!asset && !sentFile(res)) return undefined;
   return { route: normalizeUrl(pathname), kind: "asset" };
+}
+
+/**
+ * A file `send` streamed (express.static, its directory index.html, res.sendFile outside a route):
+ * send sets Accept-Ranges with a validator on every file and on its 304, while res.send never sets
+ * Accept-Ranges.
+ */
+function sentFile(res: ServerResponse): boolean {
+  if (!res.getHeader("accept-ranges")) return false;
+  return !!(res.getHeader("last-modified") || res.getHeader("etag"));
 }
 
 /**

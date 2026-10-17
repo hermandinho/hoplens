@@ -328,7 +328,14 @@ app.get("/early/:id", (req, res) => res.json({ id: req.params.id }));
 const pre = express.Router({ mergeParams: true });
 pre.get("/orders/:id", (req, res) => res.json({ uid: req.params.uid }));
 app.use("/pre/:uid", pre);
+// Built before the call, mounted after it (a router or sub-app required from its own module).
+const built = express.Router({ mergeParams: true });
+built.get("/orders/:id", (req, res) => res.json({ uid: req.params.uid }));
+const builtSub = express();
+builtSub.get("/stats", (req, res) => res.send("stats"));
 require(${JSON.stringify(index)}).hoplens(app);
+app.use("/built/:uid", built);
+app.use("/admin", builtSub);
 const r = express.Router();
 r.get("/late/:id", (req, res) => res.json({ id: req.params.id })); // @late
 app.use("/m/:k", r);
@@ -367,6 +374,17 @@ describe.each(["express4", "express5"] as const)("hoplens(app) on %s", (alias) =
     const line = src.split("\n").findIndex((l) => l.includes("// @late")) + 1;
     expect(handlers(late)[0].location).toEqual({ file: "code.cjs", line });
     expect((await traceFor(port, "GET", "/sub/s")).route).toBe("/sub/s");
+  });
+
+  test("a router or sub-app built before the call and mounted after it gets templates and handler hops", async () => {
+    expect((await request(port, "GET", "/built/7/orders/9")).body).toBe('{"uid":"7"}');
+    const t = await traceFor(port, "GET", "/built/7/orders/9");
+    expect(t.route).toBe("/built/:uid/orders/:id");
+    expect(handlers(t)).toHaveLength(1);
+    expect((await request(port, "GET", "/admin/stats")).body).toBe("stats");
+    const s = await traceFor(port, "GET", "/admin/stats");
+    expect(s.route).toBe("/admin/stats");
+    expect(handlers(s)).toHaveLength(1);
   });
 
   test("a router mounted before the call: mount param values never become part of the route", async () => {

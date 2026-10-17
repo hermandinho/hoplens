@@ -3,10 +3,11 @@ import Module from "node:module";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { bannerText } from "../src/banner";
+import { ExpressDiscoverySource, builderPath, discoverRoutes, methodsOf, paramsOf } from "../src/discovery";
 import { shouldStart } from "../src/gate";
 import { ignoredPrefixes, resolveOptions } from "../src/options";
 import { resolveExpress } from "../src/resolve";
-import { ROUTE_KEY, joinPath, mountArg, normalizeTemplate, segmentsMatch } from "../src/routes";
+import { ROUTE_KEY, joinPath, locationOf, mountArg, normalizeTemplate, segmentsMatch } from "../src/routes";
 import { requestedPort } from "../src/start";
 import { createTap, describeRequest, requestBody } from "../src/tap";
 import { PKG, makeFixture } from "./helpers";
@@ -118,6 +119,25 @@ describe("tap.describe", () => {
     expect(describeRequest(fakeReq("/"), fakeRes(200, "text/html"), norm)).toBeUndefined();
     expect(describeRequest(fakeReq("/missing.css"), fakeRes(404, "text/css"), norm)).toBeUndefined();
     expect(describeRequest(fakeReq("/api/items"), fakeRes(304), norm)).toBeUndefined();
+  });
+
+  test("a file sent by express.static / res.sendFile (send's headers) is an asset, index.html included", () => {
+    const sent = (status: number, type?: string, validator: "last-modified" | "etag" = "last-modified") => {
+      const res = fakeRes(status, type);
+      res.setHeader("accept-ranges", "bytes");
+      res.setHeader(validator, validator === "etag" ? 'W/"1f-1"' : "Thu, 01 Jan 2026 00:00:00 GMT");
+      return res;
+    };
+    expect(describeRequest(fakeReq("/"), sent(200, "text/html; charset=utf-8"), norm)).toEqual({
+      route: "/",
+      kind: "asset",
+    });
+    expect(describeRequest(fakeReq("/docs/"), sent(304, undefined, "etag"), norm)?.kind).toBe("asset");
+    // A validator without accept-ranges is res.send's ETag on a page some middleware rendered.
+    const page = fakeRes(200, "text/html");
+    page.setHeader("etag", 'W/"1f-1"');
+    expect(describeRequest(fakeReq("/"), page, norm)).toBeUndefined();
+    expect(describeRequest(fakeReq("/"), sent(404, "text/html"), norm)).toBeUndefined();
   });
 
   test("uses originalUrl when a mounted router rewrote req.url", () => {
@@ -252,5 +272,100 @@ describe("route templates", () => {
       route: "/x",
       kind: "route",
     });
+  });
+});
+
+describe("discovery", () => {
+  test.each([
+    ["/a/:id", "/a/:id"],
+    ["/a/:id(\\d+)", "/a/:id"],
+    ["/a/:id(\\d+)?", "/a/:id*"],
+    ["/opt/:maybe?", "/opt/:maybe*"],
+    ["/f/:rest+", "/f/:rest+"],
+    ["/f/:rest*", "/f/:rest*"],
+    // Optional literal groups and Express 4 string-pattern quantifiers: the shortest path that matches.
+    ["/file(.json)?", "/file"],
+    ["/report(.:format)?", "/report"],
+    ["/ab?cd", "/acd"],
+    ["/ab+cd", "/abcd"],
+    ["/ab*cd", "/abcd"],
+    ["/ab(cd)?e", "/abe"],
+    ["/ab(cd)+e", "/abcde"],
+    ["/files/*", "/files/"],
+  ])("builderPath(%s) = %s", (t, p) => {
+    expect(builderPath(t)).toBe(p);
+  });
+
+  test("paramsOf reads every modifier and skips a param's regex", () => {
+    expect(paramsOf("/u/:uid/o/:id(\\d+)/:opt?/:rest*/:more+")).toEqual([
+      { name: "uid", catchAll: false, optional: false },
+      { name: "id", catchAll: false, optional: false },
+      { name: "opt", catchAll: false, optional: true },
+      { name: "rest", catchAll: true, optional: true },
+      { name: "more", catchAll: true, optional: false },
+    ]);
+  });
+
+  test("methodsOf: registration order, _all and app.all() as ANY", () => {
+    expect(methodsOf({ methods: { post: true, get: true } })).toEqual(["POST", "GET"]);
+    expect(methodsOf({ methods: { _all: true, get: true } })).toEqual(["ANY"]);
+    const every = Object.fromEntries(http.METHODS.map((m) => [m.toLowerCase(), true]));
+    expect(methodsOf({ methods: every })).toEqual(["ANY"]);
+    expect(methodsOf({ methods: {} })).toEqual([]);
+    expect(methodsOf({})).toEqual([]);
+  });
+
+  test("discoverRoutes merges one template's routes, splits by file, never lets a locate throw out", () => {
+    const get = { path: "/x", methods: { get: true } };
+    const post = { path: "/x", methods: { post: true } };
+    const other = { path: "/x", methods: { put: true } };
+    const boom = { path: "/b", methods: { get: true } };
+    const out = discoverRoutes(
+      [
+        { route: get, templates: ["/x"] },
+        { route: post, templates: ["/x"] },
+        { route: other, templates: ["/x"] },
+        { route: boom, templates: ["/b"] },
+      ],
+      (route, method) => {
+        if (route === boom) throw new Error("no");
+        return { file: route === other ? "b.js" : "a.js", line: method === "GET" ? 1 : 2 };
+      },
+    );
+    expect(out.map((r) => [r.nextRoute, r.file, r.methods.map((m) => `${m.method}:${m.line}`)])).toEqual([
+      ["/x", "a.js", ["GET:1", "POST:2"]],
+      ["/x", "b.js", ["PUT:2"]],
+      ["/b", "", ["GET:0"]],
+    ]);
+    expect(new Set(out.map((r) => r.id)).size).toBe(3);
+  });
+
+  test("locationOf maps each route's registration stack once, even past the shared cache's cap", () => {
+    const REG = Symbol.for("hoplens.express.reg");
+    const routes = Array.from({ length: 3000 }, (_, i) => {
+      const reg = Object.create(null);
+      reg.get = `Error: hoplens route registration\n    at Object.<anonymous> (${path.join(PKG, `r${i}.js`)}:${i + 1}:5)`;
+      return Object.defineProperty({}, REG, { value: reg });
+    });
+    let mapped = 0;
+    const st: any = {
+      locations: new (class extends Map {
+        override set(k: unknown, v: unknown) {
+          mapped++;
+          return super.set(k, v);
+        }
+      })(),
+    };
+    const first = routes.map((r) => locationOf(st, r, "GET", PKG));
+    expect(mapped).toBe(3000);
+    mapped = 0;
+    const again = routes.map((r) => locationOf(st, r, "GET", PKG));
+    expect(mapped).toBe(0);
+    expect(again).toEqual(first);
+  });
+
+  test("scan with no patched express is empty, not a throw", () => {
+    const d = new ExpressDiscoverySource(path.join(PKG, "no-such-dir")).scan();
+    expect(d).toMatchObject({ routes: [], typescript: false });
   });
 });

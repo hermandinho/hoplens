@@ -110,8 +110,9 @@ export interface Child {
   kill(): Promise<void>;
 }
 
-export function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): Child {
-  const proc = spawn(process.execPath, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+/** `stdin`: pipe the child's stdin (for a test that signals it), else ignored. */
+export function run(args: string[], cwd: string, env: NodeJS.ProcessEnv, stdin = false): Child {
+  const proc = spawn(process.execPath, args, { cwd, env, stdio: [stdin ? "pipe" : "ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
   const waiters: Array<() => void> = [];

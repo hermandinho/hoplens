@@ -1004,10 +1004,16 @@
   color: var(--muted);
 }
 
-.sbtn:hover,
+.sbtn:not(:disabled):hover,
 .sbtn:focus-visible {
   color: var(--fg);
   border-color: var(--line-3);
+}
+
+/* Without this a disabled action looked clickable and "did nothing". */
+.sbtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pane-issue {

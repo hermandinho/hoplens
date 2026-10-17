@@ -34,6 +34,15 @@ import "../styles/changes.css";
 
 /* ------------------------------------------------------------- verdict row */
 
+/** Hover text for describeRegression's glyphs. */
+const GLYPH_TITLES: Record<string, string> = {
+  "!": "Slower after this edit",
+  "-": "Faster after this edit",
+  "=": "Unchanged",
+  "~": "Waiting for traffic",
+  "?": "No traffic since the edit",
+};
+
 type ReplayState = { state: "running" } | { state: "done"; text: string } | { state: "error"; text: string };
 /** Replay x10 progress per verdict row (`key@epoch`). */
 const replays = signal<ReadonlyMap<string, ReplayState>>(new Map());
@@ -55,7 +64,10 @@ async function replay(r: RouteRegression, path: string): Promise<void> {
     const stopped = res.stopped ? ` (stopped: ${res.stopped})` : "";
     setReplay(id, {
       state: "done",
-      text: w && w.n > 0 ? `warm p50 ${fmtMs(w.p50)} over ${w.n}${cold}${stopped}` : `no warm run${cold}${stopped}`,
+      text:
+        w && w.n > 0
+          ? `replayed: p50 ${fmtMs(w.p50)} over ${w.n} warm runs${cold}${stopped}`
+          : `no warm run${cold}${stopped}`,
     });
   } catch (err) {
     setReplay(id, { state: "error", text: err instanceof Error ? err.message.slice(0, 120) : "replay failed" });
@@ -75,9 +87,11 @@ export function VerdictRow({ r, traces }: { r: RouteRegression; traces: readonly
   const path = r.status !== "improved" && r.status !== "unchanged" ? replayPath(r, traces) : undefined;
   const rp = replays.value.get(regressionId(r));
   const since = route.value.since;
+  // "low confidence" alone left people guessing what to do: name the action when there is one.
+  const note = d.note && r.lowConfidence && judged && path && !rp ? `${d.note}: replay ×10 to confirm` : d.note;
   return (
     <li class={`vrow vrow-${r.status} ${r.lowConfidence && judged ? "vrow-low" : ""}`}>
-      <span class={`vrow-glyph vrow-tone-${d.tone} mono`} aria-hidden="true">
+      <span class={`vrow-glyph vrow-tone-${d.tone} mono`} title={GLYPH_TITLES[d.glyph]} aria-hidden="true">
         {d.glyph}
       </span>
       <button
@@ -89,8 +103,22 @@ export function VerdictRow({ r, traces }: { r: RouteRegression; traces: readonly
         {r.method} {r.route}
       </button>
       <span class="vrow-facts">
-        {d.p50 && <span class="mono">p50 {d.p50}</span>}
-        {d.pct && <span class={`ov-delta ov-delta-${d.tone === "none" ? "same" : d.tone} mono`}>{d.pct}</span>}
+        {d.p50 && (
+          <span
+            class="mono"
+            title={`Typical (median, warm) response time before the edit (e${r.baselineEpoch}) -> after it (e${r.epoch})`}
+          >
+            p50 {d.p50}
+          </span>
+        )}
+        {d.pct && (
+          <span
+            class={`ov-delta ov-delta-${d.tone === "none" ? "same" : d.tone} mono`}
+            title="Change in the typical response time"
+          >
+            {d.pct}
+          </span>
+        )}
         {d.io && (
           <span class="mono" title="Average calls per request, before -> after">
             {d.io}
@@ -106,7 +134,18 @@ export function VerdictRow({ r, traces }: { r: RouteRegression; traces: readonly
             {d.n}
           </span>
         )}
-        {d.note && <span class={r.lowConfidence ? "vrow-note-low" : "dim"}>{d.note}</span>}
+        {note && (
+          <span
+            class={r.lowConfidence ? "vrow-note-low" : "dim"}
+            title={
+              r.lowConfidence
+                ? `Fewer than ${regressionRule.value?.confidentN ?? 8} warm requests on one side: the numbers can still move`
+                : undefined
+            }
+          >
+            {note}
+          </span>
+        )}
         {r.findings.added.length > 0 && (
           <span class="vrow-find" title={r.findings.added.map((f) => f.title).join("\n")}>
             + {r.findings.added.length} new finding{r.findings.added.length === 1 ? "" : "s"}
@@ -122,11 +161,11 @@ export function VerdictRow({ r, traces }: { r: RouteRegression; traces: readonly
             onClick={() => pair && go({ view: "compare", a: pair.a, b: pair.b })}
             title={
               pair
-                ? `Compare a typical request before the edit (e${r.baselineEpoch}) with one after it (e${r.epoch})`
-                : "No retained warm request on one side any more"
+                ? `Open a typical request from before the edit (e${r.baselineEpoch}) next to one from after it (e${r.epoch}), to see which spans changed`
+                : "Can't compare: this page no longer holds a warm request from both sides. Send the route again (or replay ×10) to get one."
             }
           >
-            compare pair
+            compare before / after
           </button>
         )}
         {path && (

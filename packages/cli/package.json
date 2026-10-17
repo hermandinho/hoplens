@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Hoplens CLI — bin `hoplens`. init / doctor / remove.",
   "keywords": ["hoplens", "cli", "nextjs", "devtools", "init"],
   "license": "MIT",
@@ -10,7 +10,9 @@
     "url": "git+https://github.com/hermandinho/hoplens.git",
     "directory": "packages/cli"
   },
-  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
   "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/cli#readme",
   "type": "commonjs",
   "main": "./dist/cli.js",
@@ -27,7 +29,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "dependencies": {
     "@hoplens/transform": "workspace:*"
   },

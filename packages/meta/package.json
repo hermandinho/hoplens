@@ -1,6 +1,6 @@
 {
   "name": "hoplens",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js adapter.",
   "keywords": [
     "nextjs",
@@ -20,7 +20,9 @@
     "url": "git+https://github.com/hermandinho/hoplens.git",
     "directory": "packages/meta"
   },
-  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
   "homepage": "https://github.com/hermandinho/hoplens#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
@@ -58,12 +60,16 @@
     "typecheck": "tsc --noEmit",
     "test": "echo 'meta: nothing to test'"
   },
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "peerDependencies": {
     "next": ">=15.3.0"
   },
   "peerDependenciesMeta": {
-    "next": { "optional": true }
+    "next": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@hoplens/cli": "workspace:*",

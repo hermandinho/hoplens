@@ -1,6 +1,6 @@
 {
   "name": "hoplens",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js adapter.",
   "keywords": [
     "nextjs",

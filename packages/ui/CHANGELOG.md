@@ -1,5 +1,17 @@
 # @hoplens/ui
 
+## 0.3.1
+
+### Patch Changes
+
+- 35d2b68: Changes explains itself before your first edit: the "save a source file and send a request" hint now shows
+  whenever this session has no edits yet, instead of only when the list was empty, which the always-present
+  `e0 session start` row meant it never was.
+- 11e1b1f: Changes says what its rows mean and what to do with them: a one-line guide above the timeline, hover text
+  on the verdict glyph, p50 and % change, "low confidence" now suggests "replay ×10 to confirm", and
+  "compare pair" is "compare before / after". A disabled action button now looks disabled; before, one
+  that couldn't run looked clickable and silently did nothing.
+
 ## 0.3.0
 
 ### Patch Changes

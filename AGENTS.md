@@ -92,7 +92,7 @@ Hoplens is split so that **everything downstream of the HTTP tap is framework-ne
 
 Two interfaces in `@hoplens/core` make the multi-framework story possible without touching core:
 
-- **`DiscoverySource`** — `scan(): Discovery`. Each adapter ships one. Next walks the filesystem (`app/**/route.*`, `pages/api/**`), Nest will reflect decorators, Express will tap the router at install time.
+- **`DiscoverySource`** — `scan(): Discovery`. Each adapter ships one. Next walks the filesystem (`app/**/route.*`, `pages/api/**`), Nest will reflect decorators, Express will tap the router at install time (the route and mount tags in `packages/express/src/routes.ts` are the groundwork).
 - **`HttpTap`** — tells core what to filter out (framework internals), what to classify as the "app's own" port, and how to recognise an in-flight request belongs to this framework.
 
 The runtime never imports a framework. Adapters inject.
@@ -163,6 +163,7 @@ When refactoring a file called out below, re-read the matching lesson before cha
 23. **Request-path work is measured, not assumed.** Facts, findings, stats and persistence run after the response; the bench gates the whole pipeline at < 2ms. Call-site capture keeps a few structured V8 frames only on the 2nd call of a wrapped function under one parent (an N+1 needs repeats), and `.stack` is formatted lazily after the response. → `packages/core/src/callsite.ts`, `test/benchmark.test.ts`.
 24. **Persistence never writes free text.** Finding titles that quote a log line or an error message are rebuilt without it, and URL query values are masked unless they match `^[\w.-]{0,8}$`. → `packages/core/src/persist.ts` (`persistedTitle`, `persistedUrl`).
 25. **The request log is windowed** (visible rows plus overscan). DOM order of `[data-trace-id]` is not screen order, so a probe for "the row under the pointer stays put" must use `elementFromPoint`. → `packages/ui/src/components/RequestLog.tsx`.
+26. **Express 4 binds `Route#dispatch` when a route is created** (`route.dispatch.bind(route)` in `Router#route`), so the dispatch patch must be on `Route.prototype` before user code registers a route: the register hook installs the route patches at load (it requires the app's express from its root, not `@hoplens/core`). Express 5 (`router` 2.x) calls `route.dispatch` per request. `hoplens(app)` rebinds the v4 route layers it finds. Never read `app.router` on 4 (a throwing deprecation getter); its stack is `app._router.stack`. Layers keep no mount path string, so `use()` is patched to tag them, and `next()` from a handler runs in the hop's parent context (`HopHandle.exit`) so the next route's hop is a sibling. → `packages/express/src/routes.ts`.
 
 ## Working rules (from the project brief)
 

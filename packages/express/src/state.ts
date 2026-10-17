@@ -3,6 +3,7 @@
 
 import type { HoplensOptions, Runtime } from "@hoplens/core";
 import type { ExpressInfo } from "./resolve";
+import type { RoutesState } from "./routes";
 
 export interface AdapterState {
   /** http/https Server.prototype.listen is wrapped (undone after the first app listen). */
@@ -15,6 +16,10 @@ export interface AdapterState {
   /** A boot failed once: never retry, never log again. */
   failed: boolean;
   express?: ExpressInfo;
+  /** Route/dispatch patches on the app's express (routes.ts), once per process. */
+  routes?: RoutesState;
+  /** Patching express failed once: never retried. */
+  routesFailed?: boolean;
   /** Options from hoplens(app, opts), applied when the deferred boot runs. */
   pendingOpts?: HoplensOptions;
   /** hoplens() with no app listen ahead of it: boot anyway after a while. */

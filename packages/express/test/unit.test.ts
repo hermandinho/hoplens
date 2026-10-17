@@ -6,6 +6,7 @@ import { bannerText } from "../src/banner";
 import { shouldStart } from "../src/gate";
 import { ignoredPrefixes, resolveOptions } from "../src/options";
 import { resolveExpress } from "../src/resolve";
+import { ROUTE_KEY, joinPath, mountArg, normalizeTemplate, segmentsMatch } from "../src/routes";
 import { requestedPort } from "../src/start";
 import { createTap, describeRequest, requestBody } from "../src/tap";
 import { PKG, makeFixture } from "./helpers";
@@ -194,5 +195,62 @@ describe("banner", () => {
   test("UI only, and notes", () => {
     expect(bannerText(4983, undefined, ["x"])).toContain("http://127.0.0.1:4983\n   ! x");
     expect(bannerText(undefined, 3001)).not.toContain("also");
+  });
+});
+
+describe("route templates", () => {
+  test.each([
+    ["/files/*splat", "/files/:splat+"],
+    ["/opt{/:maybe}", "/opt/:maybe?"],
+    ["/a{/:b}{/:c}", "/a/:b?/:c?"],
+    ["/f{.json}", "/f(.json)?"],
+    ["/x{/*rest}", "/x/:rest*"],
+    ["/x{*rest}", "/x:rest*"],
+    ["/users/:id", "/users/:id"],
+  ])("Express 5 %s -> %s", (input, out) => {
+    expect(normalizeTemplate(input)).toBe(out);
+  });
+
+  test.each([
+    ["", "/", "/"],
+    ["", "/x", "/x"],
+    ["/api", "/", "/api"],
+    ["/api/", "/x", "/api/x"],
+    ["/api", "x", "/api/x"],
+  ])("joinPath(%j, %j) = %s", (a, b, out) => {
+    expect(joinPath(a, b)).toBe(out);
+  });
+
+  test.each([
+    ["/v2/:tenant", "/v2/acme", true],
+    ["/v1", "/v2/acme", false],
+    ["/v1", "/V1", true],
+    ["/a/:b?", "/a", true],
+    ["/a/:b", "/a", false],
+    ["/a", "/a/b", false],
+    ["/^\\/re/", "/anything", true],
+    ["/files/:splat+", "/files/a/b", true],
+  ])("segmentsMatch(%s, %s) = %s", (t, c, out) => {
+    expect(segmentsMatch(t, c)).toBe(out);
+  });
+
+  test("mountArg reads use()'s path argument the way Express does", () => {
+    const fn = () => {};
+    expect(mountArg([fn])).toBe("/");
+    expect(mountArg([[fn, fn]])).toBe("/");
+    expect(mountArg(["/api", fn])).toBe("/api");
+    expect(mountArg([["/a", "/b"], fn])).toEqual(["/a", "/b"]);
+  });
+
+  test("describeRequest prefers the dispatched route's template over asset tagging", () => {
+    const res = { statusCode: 200, getHeader: () => "text/css" } as any;
+    const req = { url: "/static/app.css" } as any;
+    expect(describeRequest(req, res, (u) => u)).toEqual({ route: "/static/app.css", kind: "asset" });
+    req[ROUTE_KEY] = "/static/:file";
+    expect(describeRequest(req, res, (u) => u)).toEqual({ route: "/static/:file", kind: "route" });
+    expect(describeRequest({ url: "/x", [ROUTE_KEY]: "/x" } as any, { statusCode: 500 } as any, (u) => u)).toEqual({
+      route: "/x",
+      kind: "route",
+    });
   });
 });

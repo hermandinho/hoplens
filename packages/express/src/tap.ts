@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { HttpTap } from "@hoplens/core";
 import type { Env } from "./gate";
 import { ignoredPrefixes } from "./options";
+import { ROUTE_KEY } from "./routes";
 
 /** Response types counted as static assets when no route handled the request. */
 const ASSET_TYPE =
@@ -30,15 +31,18 @@ export function createTap(
 }
 
 /**
- * No route is dispatched yet (route templates arrive with the router patch), so core groups requests
- * by normalized URL. A static file is tagged `asset`; core applies a kind only alongside a route, so
- * it carries the normalized path core would group it under anyway.
+ * The template of the route that handled the request (left on it by the dispatch patch), kind
+ * `route`. With no route dispatched core groups requests by normalized URL; a static file is tagged
+ * `asset`, which core applies only alongside a route, so it carries the normalized path core would
+ * group it under anyway.
  */
 export function describeRequest(
   req: IncomingMessage,
   res: ServerResponse,
   normalizeUrl: (url: string) => string,
-): { route?: string; kind?: "asset" } | undefined {
+): { route?: string; kind?: "asset" | "route" } | undefined {
+  const route = (req as any)[ROUTE_KEY];
+  if (typeof route === "string" && route) return { route, kind: "route" };
   const status = res.statusCode;
   if (status !== 200 && status !== 304) return undefined;
   const pathname = String((req as any).originalUrl ?? req.url ?? "/").split(/[?#]/)[0] || "/";

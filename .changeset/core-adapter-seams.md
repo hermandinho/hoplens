@@ -13,7 +13,8 @@ importing core's AsyncLocalStorage or `@opentelemetry/api`:
   `Request` hooks saw no body on. It is redacted and previewed like any captured JSON body.
 - `Runtime.currentTrace()` and `Runtime.beginHop(kind, { name, file, line })` let an adapter
   annotate the current request and open its own hops; `end(err)` records a failure the way a
-  throwing traced function does.
+  throwing traced function does. `exit(fn)` runs work the hop hands off to (an Express `next()`) in
+  the context the hop began in, so it lands as the hop's sibling.
 - `RuntimeConfig.epochs: { mode: "none" }` never bumps the epoch on a rebuild, so each process is
   one epoch (with `persist`, a restart starts the next one), for frameworks with no build output:
   no build-output or source watchers, no chunk index. `"build"` stays the default.

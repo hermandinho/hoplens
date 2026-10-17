@@ -1,5 +1,6 @@
 import type { HoplensOptions, Runtime } from "@hoplens/core";
 import { shouldStart } from "./gate";
+import { adoptApp, earlyRoot, installRoutes } from "./routes";
 import { bootDeferred } from "./start";
 
 /**
@@ -16,10 +17,17 @@ import { bootDeferred } from "./start";
  * ```
  */
 export function hoplens(app?: unknown, opts?: HoplensOptions): Runtime | undefined {
-  // The app itself is wired in a later milestone (route templates, handler hops).
-  void app;
   try {
     if (!shouldStart()) return undefined;
+    // Routes registered from here on get templates and registration lines; earlier ones templates.
+    if (opts?.enabled !== false) {
+      // The app's express resolves from the root boot will use: opts.root, else HOPLENS_OPTIONS / cwd.
+      const early = earlyRoot();
+      const given = (opts as { root?: unknown } | undefined)?.root;
+      const root = typeof given === "string" && given ? given : early;
+      if (early !== undefined || opts?.enabled === true) installRoutes(root);
+      adoptApp(app);
+    }
     return bootDeferred(opts);
   } catch {
     return undefined;

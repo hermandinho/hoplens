@@ -103,6 +103,31 @@ describe("adapter seams over the http tap", () => {
     expect(t.spans.filter((s) => s.name === "jsonParser")).toHaveLength(1);
   });
 
+  test("exit(): work handed off from inside a hop runs as its sibling, not its child", async () => {
+    handler = (_req, res) => {
+      const outer = beginHop.call(rt, "custom", { name: "outer" })!;
+      outer.run(() => {
+        const h = beginHop.call(rt, "handler", { name: "GET /a" })!;
+        h.run(() => {
+          // Express's next(): called from inside the handler, continues the parent's chain.
+          h.end();
+          h.exit(() => {
+            beginHop.call(rt, "handler", { name: "GET /b" })!.end();
+            outer.end();
+            res.end();
+          });
+        });
+      });
+    };
+    const t = await hit();
+    const outer = t.spans.find((s) => s.name === "outer");
+    const a = t.spans.find((s) => s.name === "GET /a");
+    const b = t.spans.find((s) => s.name === "GET /b");
+    expect(outer).toBeDefined();
+    expect(a?.parentId).toBe(outer?.id);
+    expect(b?.parentId).toBe(outer?.id);
+  });
+
   test("bindRequestEmitter: a hop opened from a late 'end' nests under the hop that registered it", async () => {
     rt.httpTap.bindRequestEmitter = true;
     let kept: any;

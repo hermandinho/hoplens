@@ -1365,6 +1365,11 @@ export interface HopHandle {
   run<T>(fn: () => T): T;
   /** Close the hop; an `err` marks it failed the way a throwing wrapped function is. Idempotent. */
   end(err?: unknown): void;
+  /**
+   * Run `fn` in the context that was active when this hop began, so work the hop hands off to (an
+   * Express handler's `next()`) is a sibling of the hop, not a child.
+   */
+  exit<T>(fn: () => T): T;
 }
 
 /**
@@ -1380,10 +1385,16 @@ export function beginHop(kind: HopKind, meta: HopMeta): HopHandle | undefined {
     attributes["hoplens.line"] = meta.line ?? 1;
   }
   const parent = context.active();
+  const parentOtel = ctx.otel;
   const span = trace.getTracer("hoplens").startSpan(meta.name, { attributes }, parent);
   const active = trace.setSpan(parent, span);
   let ended = false;
   return {
+    exit: (fn) => {
+      // Hand the bound request emitter's fallback back to whatever was entered before this hop.
+      if (ctx.otel === active) ctx.otel = parentOtel;
+      return als.run(ctx, () => context.with(parent, fn));
+    },
     run: (fn) => {
       // Not restored on return: a body parser's next() runs from a later 'end', after this returns.
       ctx.otel = active;

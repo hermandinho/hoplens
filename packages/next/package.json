@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/next",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Hoplens adapter for Next.js — withHoplens() config wrap and the Next route scanner.",
   "keywords": ["hoplens", "nextjs", "next", "adapter", "instrumentation", "devtools"],
   "license": "MIT",

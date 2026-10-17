@@ -1,5 +1,13 @@
 # @hoplens/core
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [35d2b68]
+- Updated dependencies [11e1b1f]
+  - @hoplens/ui@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

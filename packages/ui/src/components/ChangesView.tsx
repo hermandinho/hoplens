@@ -142,12 +142,15 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
         </p>
       )}
 
-      {all.length === 0 ? (
+      {/* Keyed on this session's edits, not on `all`: e0 (session start) is always listed, so an
+          `all.length === 0` check never showed this to someone who hadn't saved a file yet. */}
+      {edits === 0 && (
         <p class="chg-empty muted">
           No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up
           here with the files it changed and how each affected route moved.
         </p>
-      ) : (
+      )}
+      {all.length > 0 && (
         <>
           <ChangesTrack selected={selected} />
           {hidden > 0 && (

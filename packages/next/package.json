@@ -43,6 +43,11 @@
   "peerDependencies": {
     "next": ">=15.3.0"
   },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@hoplens/core": "workspace:*",
     "@hoplens/schema": "workspace:*",

@@ -1,0 +1,66 @@
+{
+  "name": "@hoplens/express",
+  "version": "0.3.0",
+  "description": "Hoplens adapter for Express 4 and 5 — a register hook and hoplens(app).",
+  "keywords": ["hoplens", "express", "adapter", "instrumentation", "devtools"],
+  "license": "MIT",
+  "author": "Hoplens contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hermandinho/hoplens.git",
+    "directory": "packages/express"
+  },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
+  "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/express#readme",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./esm/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./esm/index.d.mts",
+        "default": "./esm/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./register": {
+      "types": "./dist/register.d.ts",
+      "default": "./dist/register.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "esm", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "tsup --silent && vitest run"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "peerDependencies": {
+    "express": ">=4.18 <6"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@hoplens/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "express4": "npm:express@^4.21.2",
+    "express5": "npm:express@^5.1.0",
+    "tsup": "^8.3.5",
+    "typescript": "~5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

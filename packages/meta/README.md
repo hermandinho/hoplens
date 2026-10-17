@@ -54,7 +54,11 @@ This meta-package pulls in:
 - [`@hoplens/core`](https://www.npmjs.com/package/@hoplens/core) — the
   framework-agnostic runtime that drives the UI.
 
-For Nest / Express / Fastify (planned), pair the direct adapter package with
+- [`@hoplens/express`](https://www.npmjs.com/package/@hoplens/express) — the
+  Express 4/5 adapter (early preview), as `hoplens/express` and
+  `node -r hoplens/express/register` (or `--import`).
+
+For Nest / Fastify (planned), pair the direct adapter package with
 `@hoplens/cli` instead.
 
 ## Dev-only guarantee

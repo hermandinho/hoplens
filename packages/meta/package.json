@@ -1,6 +1,6 @@
 {
   "name": "hoplens",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js adapter.",
   "keywords": [
     "nextjs",
@@ -54,11 +54,7 @@
   "bin": {
     "hoplens": "./bin/hoplens.js"
   },
-  "files": [
-    "dist",
-    "bin",
-    "README.md"
-  ],
+  "files": ["dist", "bin", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

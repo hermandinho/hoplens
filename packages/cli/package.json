@@ -2,13 +2,7 @@
   "name": "@hoplens/cli",
   "version": "0.2.0",
   "description": "Hoplens CLI — bin `hoplens`. init / doctor / remove.",
-  "keywords": [
-    "hoplens",
-    "cli",
-    "nextjs",
-    "devtools",
-    "init"
-  ],
+  "keywords": ["hoplens", "cli", "nextjs", "devtools", "init"],
   "license": "MIT",
   "author": "Hoplens contributors",
   "repository": {
@@ -29,10 +23,7 @@
     ".": "./dist/cli.js",
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

@@ -30,7 +30,7 @@ import "../styles/changes.css";
  * Changes (plan 3.5, #/changes[/e<id>]): the regression timeline. A track with one tick per edit and
  * one dot per request (ok / slow / error), then the edits newest first: the files saved, the routes
  * the edit affects, and each route's verdict (p50 before -> after, the bucket that grew, the I/O
- * change, n on both sides) with "compare pair" and "replay x10". Clicking a tick selects that edit;
+ * change, n on both sides) with "compare before / after" and "replay x10". Clicking a tick selects that edit;
  * dragging across the track sets the since scope. Filters always say what they hide.
  */
 
@@ -144,6 +144,14 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
 
       {/* Keyed on this session's edits, not on `all`: e0 (session start) is always listed, so an
           `all.length === 0` check never showed this to someone who hadn't saved a file yet. */}
+      {edits > 0 && (
+        <p class="chg-note dim">
+          Each save is an edit. For each route it affects, Hoplens compares the typical response time (p50) of warm
+          requests before and after it; <span class="mono">n 6|3</span> counts them on each side. Too few is low
+          confidence: <b>replay ×10</b> sends more. <b>compare before / after</b> opens one request from each side next
+          to each other, to see what changed.
+        </p>
+      )}
       {edits === 0 && (
         <p class="chg-empty muted">
           No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up

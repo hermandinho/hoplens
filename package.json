@@ -16,7 +16,7 @@
     "format": "biome format --write .",
     "clean": "pnpm -r --parallel exec rimraf dist .next",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && biome format --write .",
     "release": "pnpm -r --filter=\"./packages/*\" run build && changeset publish"
   },
   "devDependencies": {

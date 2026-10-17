@@ -2,6 +2,10 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import {
+  type HopHandle,
+  type HopMeta,
+  als,
+  beginHop,
   installBodyHooks,
   installConsoleHook,
   installFetchHook,
@@ -14,7 +18,7 @@ import {
   makeWrap,
   markOwnServer,
 } from "./capture";
-import { type EpochInfo, type EpochTracker, createEpochTracker } from "./epoch";
+import { type EpochInfo, EpochTracker, createEpochTracker, nullProbe } from "./epoch";
 import { HoplensError } from "./errors";
 import { HealthMonitor } from "./health";
 import { type Logger, createLogger } from "./logger";
@@ -28,7 +32,7 @@ import { handleUi, startApiModules } from "./server";
 import { setDistDir } from "./sourcemap";
 import { RouteStatsStore } from "./stats";
 import { TraceStore } from "./store";
-import type { Discovery, DiscoverySource, HttpTap, ProxyInfo, RouteInfo, TraceRecord } from "./types";
+import type { Discovery, DiscoverySource, HopKind, HttpTap, ProxyInfo, RouteInfo, TraceRecord } from "./types";
 
 export interface RuntimeConfig {
   options: ResolvedOptions;
@@ -40,6 +44,14 @@ export interface RuntimeConfig {
   banner?: (rt: Runtime) => void;
   /** Tests: persistence tuning (dir, file cap, flush interval). Used only with `options.persist`. */
   persist?: PersisterOptions & { dir?: string };
+  /**
+   * Dev-rebuild epochs. `"build"` (default) watches the build output and the source dirs; `"none"`
+   * never bumps on a rebuild, so each process is one epoch (0, or the next one after a `persist`
+   * restore), for frameworks with no build output (no watchers, no chunk index).
+   */
+  epochs?: { mode: "build" | "none" };
+  /** The host framework, reported by GET /api/meta. */
+  framework?: { name: string; version?: string };
 }
 
 /**
@@ -58,6 +70,7 @@ export class Runtime {
   readonly store: TraceStore;
   readonly discovery: DiscoverySource;
   readonly httpTap?: HttpTap;
+  readonly framework?: { name: string; version?: string };
   readonly log: Logger;
   readonly startedAt = Date.now();
   /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
@@ -86,6 +99,10 @@ export class Runtime {
   private discoveredAt = 0;
   private started = false;
   private stopped = false;
+  /** stop() ran: the installed hooks pass every request through untouched. */
+  get isStopped(): boolean {
+    return this.stopped;
+  }
   private server?: http.Server;
   private readonly persistCfg?: PersisterOptions & { dir?: string };
   private unsubEpoch?: () => void;
@@ -97,12 +114,19 @@ export class Runtime {
     this.store = new TraceStore(cfg.options.maxTraces ?? 300);
     this.discovery = cfg.discovery;
     this.httpTap = cfg.httpTap;
+    this.framework = cfg.framework;
     this.banner = cfg.banner;
     this.persistCfg = cfg.persist;
     this.log = createLogger("runtime");
-    setDistDir(this.root, this.options.distDir);
-    // Rebuild signal from the build output, attribution from a watcher on the project's source dirs.
-    this.epochs = createEpochTracker(this.root, this.options.distDir ?? ".next");
+    if (cfg.epochs?.mode === "none") {
+      // No build output: the eval-source-map scan has nothing to read either.
+      if (this.options.distDir !== "") setDistDir(this.root, this.options.distDir);
+      this.epochs = new EpochTracker(nullProbe);
+    } else {
+      setDistDir(this.root, this.options.distDir);
+      // Rebuild signal from the build output, attribution from a watcher on the project's source dirs.
+      this.epochs = createEpochTracker(this.root, this.options.distDir ?? ".next");
+    }
     // Both aggregates swallow their own errors: a listener that threw would surface in finish()'s timer.
     this.store.on("done", (t) => {
       this.stats.add(t);
@@ -167,7 +191,7 @@ export class Runtime {
   /** Restore earlier sessions (epochs, then stats) and start writing this one. Never throws. */
   private startPersistence(): void {
     try {
-      const dir = this.persistCfg?.dir ?? persistDir(this.root, this.options.distDir);
+      const dir = this.persistCfg?.dir ?? persistDir(this.root, this.options.distDir, this.options.stateDir);
       const p = new Persister(dir, {
         ...this.persistCfg,
         header: () => this.epochs.list().map((info) => this.epochRow(info)),
@@ -225,12 +249,19 @@ export class Runtime {
         this.banner?.(this);
       }
     });
-    server.listen(port, "127.0.0.1", () => {
-      if (this.stopped) return void server.close();
-      this.uiPort = port;
-      server.unref();
+    try {
+      server.listen(port, "127.0.0.1", () => {
+        if (this.stopped) return void server.close();
+        this.uiPort = port;
+        server.unref();
+        this.banner?.(this);
+      });
+    } catch (err) {
+      // An invalid port throws synchronously; start() has installed its hooks by now, so report it
+      // like a busy port instead of throwing out of start() with the hooks half-owned.
+      this.log.warn(`UI port ${port} unavailable, giving up: ${err instanceof Error ? err.message : String(err)}`);
       this.banner?.(this);
-    });
+    }
   }
 
   handleUi(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -262,6 +293,19 @@ export class Runtime {
       route.methods.find((x) => x.method === "ANY") ??
       route.methods[0];
     return { file: route.file, line: m?.line ?? 1 };
+  }
+
+  /** The trace of the request the caller runs in, for adapters that annotate it. */
+  currentTrace(): TraceRecord | undefined {
+    return als.getStore()?.trace;
+  }
+
+  /**
+   * Open a hop in the current request (an adapter's middleware or handler). Undefined outside a
+   * request context. The caller must `end()` it; `run(fn)` nests spans started in `fn` under it.
+   */
+  beginHop(kind: HopKind, meta: HopMeta): HopHandle | undefined {
+    return beginHop(kind, meta);
   }
 
   proxyFile(): ProxyInfo | undefined {

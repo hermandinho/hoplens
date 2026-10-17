@@ -60,7 +60,8 @@ if (!G.__hoplens_runtime && shouldStart()) {
     const { options, configured } = readOptions();
     options.configured = configured;
     const discovery = new NextDiscoverySource(options.root, options.basePath);
-    G.__hoplens_runtime = new Runtime({ options, discovery, banner: printBanner }).start();
+    const framework = { name: "next", version: nextVersion(options.root) };
+    G.__hoplens_runtime = new Runtime({ options, discovery, framework, banner: printBanner }).start();
   } catch (err) {
     log.error("failed to start", err);
   }
@@ -78,18 +79,17 @@ function printBanner(rt: Runtime) {
   process.stdout.write(`\n \x1b[35m◆ Hoplens\x1b[0m  ${appUrl}${standalone}${suffix}\n\n`);
 }
 
+function nextVersion(root: string): string | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(require.resolve("next/package.json", { paths: [root] }), "utf8")).version;
+  } catch {
+    return undefined;
+  }
+}
+
 function functionTracingReason(rt: Runtime): string | undefined {
   if (rt.options.autoTrace === false) return "autoTrace is off in withHoplens options";
-  let major = 0;
-  try {
-    major = Number(
-      JSON.parse(fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8")).version.split(
-        ".",
-      )[0],
-    );
-  } catch {
-    /* unknown */
-  }
+  const major = Number(nextVersion(rt.root)?.split(".")[0]) || 0;
   if (major && major < 16 && process.env.TURBOPACK) {
     return "Next.js 15 with Turbopack: run `next dev --webpack` to see your functions";
   }

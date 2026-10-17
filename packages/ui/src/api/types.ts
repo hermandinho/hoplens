@@ -202,6 +202,8 @@ export interface Discovery {
 export interface Meta {
   app?: string;
   next?: string;
+  /** The host framework, as its adapter reported it. */
+  framework?: { name: string; version?: string };
   root: string;
   appPort?: number;
   uiPort?: number;

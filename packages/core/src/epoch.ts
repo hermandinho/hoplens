@@ -36,6 +36,13 @@ export type MtimeProbe = (() => number) & {
   close?: () => void;
 };
 
+/**
+ * A probe that never sees a rebuild: one epoch for the whole process (0, or the restored one with
+ * `persist`). For adapters with no build output to watch (`RuntimeConfig.epochs.mode: "none"`); no
+ * watchers, so nothing to close.
+ */
+export const nullProbe: MtimeProbe = () => 0;
+
 /** Build-output names kept between two drains. */
 const MAX_PROBE_NAMES = 100;
 /** Build-output paths kept between two drains for the chunk diff; past this the diff is untrusted. */

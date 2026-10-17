@@ -412,7 +412,8 @@ function fileSize(f: string): number {
   }
 }
 
-/** `<root>/<distDir>/cache/hoplens`. */
-export function persistDir(root: string, distDir: string): string {
+/** `<root>/<distDir>/cache/hoplens`, or `stateDir` (resolved against root) when the adapter set one. */
+export function persistDir(root: string, distDir: string, stateDir?: string): string {
+  if (stateDir) return path.resolve(root, stateDir);
   return path.join(root, distDir || ".next", PERSIST_DIR);
 }

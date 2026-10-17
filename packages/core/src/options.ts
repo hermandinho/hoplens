@@ -64,6 +64,11 @@ export interface ResolvedOptions extends HoplensOptions {
   root: string;
   /** True when the host app's config wrapper ran successfully. */
   configured?: boolean;
+  /**
+   * Where `persist` writes its files, for adapters with no build-output dir (absolute, or relative to
+   * root). Default: `<distDir>/cache/hoplens`.
+   */
+  stateDir?: string;
 }
 
 export const DEFAULT_REDACT = [

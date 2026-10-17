@@ -30,6 +30,8 @@ export {
   serverTimingValue,
   redisReadResult,
   redisWriteSize,
+  type HopHandle,
+  type HopMeta,
 } from "./capture";
 export { recordTarget } from "./server";
 export {
@@ -48,7 +50,7 @@ export {
   type InsightThresholds,
   type InsightsOptions,
 } from "./insights";
-export { EpochTracker, distMtimeProbe } from "./epoch";
+export { EpochTracker, distMtimeProbe, nullProbe, type MtimeProbe } from "./epoch";
 export {
   RouteStatsStore,
   LogHistogram,

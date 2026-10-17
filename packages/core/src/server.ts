@@ -133,17 +133,22 @@ addRoute("GET", "/index.html", ({ res }) => {
 addRoute("GET", "/api/meta", ({ rt, res }) => {
   let nextVersion: string | undefined;
   let appName: string | undefined;
+  const framework = rt.framework;
   try {
     appName = JSON.parse(fs.readFileSync(path.join(rt.root, "package.json"), "utf8")).name;
-    nextVersion = JSON.parse(
-      fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8"),
-    ).version;
+    // Other adapters report their own version through `framework`; only Next's keeps the `next` field.
+    if (!framework || framework.name === "next") {
+      nextVersion = JSON.parse(
+        fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8"),
+      ).version;
+    }
   } catch {
     /* optional */
   }
   json(res, 200, {
     app: appName,
     next: nextVersion,
+    framework,
     root: rt.root,
     appPort: rt.appPort ?? (Number(process.env.PORT) || undefined),
     uiPort: rt.uiPort,

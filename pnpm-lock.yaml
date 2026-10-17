@@ -130,6 +130,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.20.5
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
       tsup:
         specifier: ^8.3.5
         version: 8.5.1(postcss@8.5.30)(tsx@4.23.15)(typescript@5.7.3)
@@ -2200,6 +2203,10 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
+  postgres@3.4.9:
+    resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
+    engines: {node: '>=12'}
+
   preact@10.29.8:
     resolution: {integrity: sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==}
     peerDependencies:
@@ -4258,6 +4265,8 @@ snapshots:
   postgres-interval@1.2.0:
     dependencies:
       xtend: 4.0.2
+
+  postgres@3.4.9: {}
 
   preact@10.29.8: {}
 

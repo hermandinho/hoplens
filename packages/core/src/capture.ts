@@ -4,6 +4,7 @@ import https from "node:https";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { pathToFileURL } from "node:url";
 import util from "node:util";
 import zlib from "node:zlib";
 import { type Span, context, trace } from "@opentelemetry/api";
@@ -20,6 +21,7 @@ import type {
   BodyCapture,
   CapturedError,
   HopKind,
+  SourceLocation,
   SpanRecord,
   TimeBucket,
   TraceFacts,
@@ -806,6 +808,167 @@ export function installPgHook(rt: Runtime) {
       }
     });
   };
+}
+
+/* ------------------------------------------------------- postgres.js driver */
+
+/**
+ * `postgres` (postgres.js) has no OTel or diagnostics_channel either. Every query is a lazy
+ * `Query` (a Promise subclass) that runs once, from `handle()`, the first time it is awaited,
+ * `.execute()`d or `.forEach()`ed, and settles through its own `resolve` / `reject`. We patch
+ * `Query.prototype.handle` to open a span and wrap those two to close it.
+ *
+ * The package ships separate CJS (`cjs/src`) and ESM (`src`) builds, and which one the app gets
+ * depends on how it imports it, so both copies are patched. Under Next the app's copy is only
+ * the one patched here if `postgres` is a server external (`withHoplens` adds it in dev).
+ *
+ * Patched once per process; safe when postgres isn't installed (silent no-op).
+ */
+const POSTGRES_PATCHED = Symbol.for("hoplens.postgresPatched");
+
+export function installPostgresHook(rt: Runtime): Promise<void> {
+  const g = globalThis as any;
+  if (g[POSTGRES_PATCHED]) return Promise.resolve();
+  let dir: string;
+  let req: NodeRequire;
+  try {
+    req = createRequire(path.join(rt.root, "package.json"));
+    // Resolves to <pkg>/cjs/src/index.js; query.js isn't in the exports map, so go by path.
+    dir = path.dirname(path.dirname(path.dirname(req.resolve("postgres"))));
+  } catch {
+    return Promise.resolve();
+  }
+  g[POSTGRES_PATCHED] = true;
+  try {
+    patchPostgresQuery(rt, req(path.join(dir, "cjs", "src", "query.js"))?.Query);
+  } catch {
+    /* older layout: the ESM copy may still be there */
+  }
+  // ESM can only be loaded asynchronously; the first query is always a request away. When Next
+  // bundles this runtime (a workspace-linked @hoplens/core), both bundlers would otherwise
+  // replace this computed import with one that always fails.
+  return import(
+    /* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(path.join(dir, "src", "query.js")).href
+  ).then(
+    (m) => patchPostgresQuery(rt, m?.Query),
+    () => undefined,
+  );
+}
+
+function patchPostgresQuery(rt: Runtime, Query: any) {
+  const proto = Query?.prototype;
+  if (typeof proto?.handle !== "function" || proto.__hoplensPatched) return;
+  proto.__hoplensPatched = true;
+  const tracer = trace.getTracer("hoplens");
+  const origHandle = proto.handle;
+
+  proto.handle = function patchedHandle(this: any, ...args: any[]) {
+    if (
+      this.executed ||
+      // Already rejected, and the connection drops it without settling again: the span would leak.
+      this.cancelled ||
+      // Cursors swap resolve/reject on every batch and streams resolve at hand-off, so a span
+      // would be lost or end too early: leave them alone.
+      this.cursorFn ||
+      this.cursorRows ||
+      this.streaming ||
+      // The driver's own queries (array-type fetch, session state) run on the raw connection
+      // handler; only the pool handler built by Sql() carries `debug`.
+      !(this.handler && "debug" in this.handler) ||
+      !als.getStore()
+    ) {
+      return origHandle.apply(this, args);
+    }
+    try {
+      traceQuery(this);
+    } catch {
+      /* never break the query */
+    }
+    return origHandle.apply(this, args);
+  };
+
+  function traceQuery(q: any) {
+    // An awaited query reaches handle() from a microtask with no user frame on the stack, so
+    // prefer the stack postgres.js keeps from construction (tagged templates only).
+    let location: SourceLocation | undefined;
+    try {
+      const origin = q.origin;
+      if (typeof origin === "string" && origin) location = mapStack(origin, rt.root).location;
+    } catch {
+      /* fall back below */
+    }
+    location ??= callerLocation(rt.root, 3);
+    const attrs: Record<string, any> = {
+      "hoplens.kind": "db",
+      "db.system": "postgresql",
+      "db.statement": clipSql(sqlOf(q)),
+    };
+    if (location) {
+      attrs["hoplens.file"] = location.file;
+      attrs["hoplens.line"] = location.line;
+    }
+    const span = tracer.startSpan("postgres.query", { attributes: attrs });
+    const started = now();
+    const origResolve = q.resolve;
+    const origReject = q.reject;
+    let done = false;
+    const finish = (err?: any, result?: any) => {
+      if (done) return;
+      done = true;
+      try {
+        // Set by the connection once it builds the statement: the exact SQL and serialized params.
+        span.setAttribute("hoplens.duration", Math.round(now() - started));
+        if (typeof q.string === "string" && q.string) span.setAttribute("db.statement", clipSql(q.string));
+        if (err !== undefined) {
+          if (err instanceof Error) span.recordException(err);
+          span.setStatus({ code: 2, message: err?.message ?? String(err) });
+        } else {
+          const rows = rowCount(result);
+          if (rows !== undefined) span.setAttribute("db.rows", rows);
+        }
+        // Last, so an odd value that preview can't take costs only the params.
+        // `args` also holds identifier/unsafe fragments; only fall back to it before a build.
+        const params = Array.isArray(q.parameters) ? q.parameters : q.args;
+        if (Array.isArray(params) && params.length) {
+          span.setAttribute("hoplens.db.params", JSON.stringify(preview(params, rt.redactor)));
+        }
+      } catch {
+        /* best effort */
+      }
+      span.end();
+    };
+    q.resolve = (x: any) => {
+      finish(undefined, x);
+      return origResolve(x);
+    };
+    q.reject = (x: any) => {
+      finish(x);
+      return origReject(x);
+    };
+  }
+}
+
+/** The SQL before the connection builds it: the template's literal parts joined with `$n`. */
+function sqlOf(q: any): string {
+  const s = q.strings;
+  if (typeof s === "string") return s;
+  // sql.file() passes [] until the file is read.
+  if (Array.isArray(s) && s.length) return s.reduce((acc: string, part: string, i: number) => `${acc}$${i}${part}`);
+  return "";
+}
+
+/** A Result's `count`; a multi-statement simple query resolves to an array of Results: sum them. */
+function rowCount(result: any): number | undefined {
+  if (result && typeof result.count === "number") return result.count;
+  if (!Array.isArray(result)) return undefined;
+  if (result.length && result.every((r) => Array.isArray(r) && "count" in r)) {
+    return result.reduce((n: number, r: any) => n + (typeof r.count === "number" ? r.count : 0), 0);
+  }
+  return result.length;
+}
+
+function clipSql(sql: string): string {
+  return sql.length > 4000 ? `${sql.slice(0, 4000)}…` : sql;
 }
 
 /* ---------------------------------------------------------------- redis */

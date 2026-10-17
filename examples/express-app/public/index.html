@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>example-express-app</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main>
+      <img src="/logo.svg" alt="" width="48" height="48" />
+      <h1>example-express-app</h1>
+      <p>An Express 5 app with seeded problems for Hoplens. Open <a href="/__hoplens">/__hoplens</a> (dev script only).</p>
+      <ul>
+        <li><a href="/api/health">/api/health</a> (baseline)</li>
+        <li><a href="/api/users/2/orders/3">/api/users/2/orders/3</a> (N+1)</li>
+        <li><a href="/api/dashboard">/api/dashboard</a> (sequential queries)</li>
+        <li><a href="/api/products/7">/api/products/7</a> (duplicate query)</li>
+        <li><a href="/api/report">/api/report</a> (~2 MB JSON)</li>
+        <li><a href="/api/flaky">/api/flaky</a> (fails ~1 in 3)</li>
+        <li><a href="/api/boom">/api/boom</a> (sync throw)</li>
+        <li><a href="/files/docs/guide.md">/files/docs/guide.md</a> (wildcard)</li>
+      </ul>
+    </main>
+  </body>
+</html>

@@ -29,6 +29,10 @@ pnpm format
 pnpm --filter example-next16-app dev
 # → http://localhost:3000/__hoplens
 
+# run the Express example (register hook via the `hoplens` meta package; seeded problems in its README)
+pnpm --filter example-express-app dev
+# → http://localhost:3100/__hoplens   (then: pnpm --filter example-express-app traffic)
+
 # release workflow
 pnpm changeset           # describe your change
 pnpm release             # publishes (CI does this)

@@ -1,0 +1,69 @@
+# example-express-app
+
+Walkthrough target for the Express adapter. Not part of any published package.
+
+An Express 5 app (plain ESM JavaScript) wired the way users will wire it: `hoplens` as a dev
+dependency and the register hook preloaded from the `dev` script.
+
+```bash
+pnpm build                                    # once, from the repo root: builds packages/*
+pnpm --filter example-express-app dev         # node --watch --import hoplens/express/register src/server.js
+# → http://localhost:3100/__hoplens
+pnpm --filter example-express-app traffic     # in another terminal
+```
+
+`PORT` sets the app port (default 3100), `HOPLENS_PORT` the standalone UI port (default 4983):
+
+```bash
+PORT=3101 HOPLENS_PORT=4991 pnpm --filter example-express-app dev
+PORT=3101 ROUNDS=10 pnpm --filter example-express-app traffic
+```
+
+The same in PowerShell (the variables stay set for the rest of that session):
+
+```powershell
+$env:PORT=3101; $env:HOPLENS_PORT=4991; pnpm --filter example-express-app dev
+$env:PORT=3101; $env:ROUNDS=10; pnpm --filter example-express-app traffic
+```
+
+`pnpm --filter example-express-app start` runs the same app without the register hook, so with no
+Hoplens at all.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/server.js` | Waits for the database, then `app.listen(PORT)` |
+| `src/app.js` | The express app: middleware, static files, router mounts, 404 and error middleware |
+| `src/routes/*.js` | One router per area; each seeded problem is commented at its route |
+| `src/middleware/*.js` | Request id, the slow auth middleware, the 404 and 4-arg error handlers |
+| `src/lib/db.js` | In-memory Postgres: [PGlite](https://pglite.dev) behind a stock `pg.Pool` |
+| `public/` | `index.html`, `style.css`, `logo.svg`, served by `express.static` |
+| `scripts/traffic.mjs` | Hits every route `ROUNDS` times (default 5) and checks each status |
+
+`src/lib/db.js` is adapted from the Next example: PGlite (Postgres compiled to WASM) runs inside the
+process and `pg` talks to it over an in-memory stream, so every query goes through
+`pg.Client.prototype.query` and Hoplens records it as a `db` hop with the SQL, the bound params and
+the row count. Each round trip waits 2 ms (`EXAMPLE_DB_LATENCY_MS`, `0` turns it off) so an N+1
+costs something. The seed (20 users, 30 products, 100 orders with 6 line items each) runs at boot
+on PGlite directly and never shows up as queries.
+
+## Seeded problems
+
+| Route | Seeded problem | What Hoplens shows |
+|---|---|---|
+| `GET /api/health` | none: the healthy, fast baseline (registered before the auth middleware) | a ~1 ms request with just its handler hop and no findings |
+| `GET /api/users/:uid/orders/:id` | N+1: a router mounted at `/api/users/:uid` (`mergeParams`) loads the order, its items, then each item's product with one query per item | `n-plus-1` (`select ... from products where id = ? x6`) on the handler hop `GET /api/users/:uid/orders/:id`, located at `src/routes/users.js`; the loop's queries are not reported again as `parallelizable` |
+| `GET /api/dashboard` | three independent queries awaited one after another | `parallelizable` (3 sequential calls could run in parallel) |
+| `GET /api/products/:id` | the same product lookup runs twice | `duplicate` (same SQL, same params, x2) |
+| `GET /api/report` | a ~2 MB JSON export in one response | `large-payload` (response body 2.1 MB) |
+| `POST /api/orders` | `express.json` + a zod schema; the body carries the customer email and a `password` | the request body with the email as sent and `password: "[redacted]"` (the `authorization` header is redacted too); the invalid body in the traffic script answers 400 and counts as a swallowed error |
+| `GET /api/flaky` | about 1 request in 3 rejects after a query and reaches the 4-arg error middleware | ~1 in 3 requests 500, counted as thrown errors in the route's error rate |
+| `GET /api/boom` | a synchronous throw | every request 500, a thrown error |
+| `/api/*` (all but health) | an auth middleware waits ~30 ms before `next()` | ~30 ms of `idle` time before the handler hop starts (middleware hops are not captured yet) |
+| `GET /files/*splat` | an Express 5 named wildcard serving a fake file listing | every path grouped under one route, `GET /files/:splat+` |
+| `GET /`, `/style.css`, `/logo.svg` | `express.static("public")` | static assets listed under their path (`/` is `index.html`), not as routes |
+
+The first request to each route and each static file after a (re)start also gets an informational
+`cold-compile` finding: the rule is shared with the Next adapter, where a first hit compiles the
+route; on Express it only marks the first request since the process started. `node --watch` restarts the app when one of its files, or a rebuilt Hoplens package, changes.

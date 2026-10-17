@@ -227,6 +227,7 @@ packages/
   ui/          @hoplens/ui          Preact + Vite single-HTML dashboard
 examples/
   next16-app/                       Turbopack + proxy.ts + Zod v4 + pg, with seeded problems
+  express-app/                      Express 5 (ESM) + pg + Zod v4 via hoplens/express/register, with seeded problems
 e2e/                                Playwright suite + install-flow smoke
 ```
 
@@ -243,6 +244,7 @@ pnpm typecheck
 pnpm lint
 pnpm --filter @hoplens/core bench          # the per-request pipeline must stay under 2 ms
 pnpm --filter example-next16-app dev       # try the UI against the live example
+pnpm --filter example-express-app dev      # the Express example, http://localhost:3100/__hoplens
 ```
 
 End-to-end checks (opt-in, slow):

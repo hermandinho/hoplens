@@ -2,14 +2,7 @@
   "name": "@hoplens/core",
   "version": "0.3.0",
   "description": "Hoplens runtime — framework-agnostic capture, OTel bridge, UI server, source maps, redactor.",
-  "keywords": [
-    "hoplens",
-    "tracing",
-    "request-journey",
-    "nodejs",
-    "opentelemetry",
-    "devtools"
-  ],
+  "keywords": ["hoplens", "tracing", "request-journey", "nodejs", "opentelemetry", "devtools"],
   "license": "MIT",
   "author": "Hoplens contributors",
   "repository": {
@@ -43,10 +36,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

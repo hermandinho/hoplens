@@ -2,14 +2,7 @@
   "name": "@hoplens/next",
   "version": "0.3.0",
   "description": "Hoplens adapter for Next.js — withHoplens() config wrap and the Next route scanner.",
-  "keywords": [
-    "hoplens",
-    "nextjs",
-    "next",
-    "adapter",
-    "instrumentation",
-    "devtools"
-  ],
+  "keywords": ["hoplens", "nextjs", "next", "adapter", "instrumentation", "devtools"],
   "license": "MIT",
   "author": "Hoplens contributors",
   "repository": {
@@ -37,10 +30,7 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",

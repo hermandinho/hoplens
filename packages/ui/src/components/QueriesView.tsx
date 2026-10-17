@@ -49,7 +49,7 @@ import { Split } from "./Split";
  */
 
 const SUPPORTED_DB =
-  "pg (node-postgres), Prisma with tracing enabled, Drizzle through drizzleLogger() from @hoplens/core/trace, ioredis, node-redis, and any OpenTelemetry span carrying db.system / db.statement";
+  "pg (node-postgres), postgres.js, Prisma with tracing enabled, Drizzle through drizzleLogger() from @hoplens/core/trace, ioredis, node-redis, and any OpenTelemetry span carrying db.system / db.statement";
 
 const KINDS: Array<{ id: KindFilter; label: string }> = [
   { id: "all", label: "All" },

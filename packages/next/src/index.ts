@@ -73,7 +73,15 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     const out: AnyConfig = { ...base };
 
     // The runtime is loaded with Node's own require from the instrumentation hook so it can patch globals.
-    out.serverExternalPackages = unique([...(base.serverExternalPackages ?? []), "@hoplens/core"]);
+    // postgres.js too: Next bundles it by default, and the bundled copy can't be patched (`pg` is
+    // already on Next's built-in external list). Not when the app transpiles it: Next refuses a
+    // package that is in both lists.
+    const pgjs = resolvable(resolved.root, "postgres") && !(base.transpilePackages ?? []).includes("postgres");
+    out.serverExternalPackages = unique([
+      ...(base.serverExternalPackages ?? []),
+      "@hoplens/core",
+      ...(pgjs ? ["postgres"] : []),
+    ]);
 
     // Next 16 loads instrumentation lazily, so the first request can miss the emit hook. The rewrite
     // is a fallback that proxies it to the standalone UI port.
@@ -152,6 +160,15 @@ function nextMajor(root: string): number {
 
 function unique<T>(xs: T[]): T[] {
   return Array.from(new Set(xs));
+}
+
+function resolvable(root: string, pkg: string): boolean {
+  try {
+    createRequire(path.join(root, "package.json")).resolve(pkg);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export default withHoplens;

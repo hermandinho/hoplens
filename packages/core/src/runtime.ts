@@ -8,6 +8,7 @@ import {
   installHttpHook,
   installOtel,
   installPgHook,
+  installPostgresHook,
   installRedisHook,
   makeEmitDb,
   makeWrap,
@@ -122,6 +123,7 @@ export class Runtime {
     installConsoleHook(this);
     installFetchHook(this);
     installPgHook(this);
+    void installPostgresHook(this);
     installRedisHook(this);
     this.health.start();
     // Before the API modules start: they read the restored epochs and stats.

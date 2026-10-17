@@ -45,8 +45,8 @@ function callerFile(): string {
  * Drop-in logger for Drizzle so queries show up as `db` spans. Drizzle's
  * built-in logger only fires once per query (no duration), so the span is a
  * zero-length marker — but you get the SQL + bound params in the journey.
- * For real timing, let the underlying driver (`pg`, etc.) be instrumented —
- * Hoplens patches `pg` automatically.
+ * For real timing, let the underlying driver be instrumented instead (and drop this logger,
+ * or each query shows twice): Hoplens patches `pg` and `postgres` (postgres.js) automatically.
  *
  * ```ts
  * import { drizzle } from "drizzle-orm/node-postgres";

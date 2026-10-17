@@ -171,7 +171,8 @@ The grammar ships as the pure `@hoplens/core/query` subpath (`parseQuery`,
 
 Out of the box: Next's own OTel spans, your exported functions (via the
 loader), `globalThis.fetch` (with Next data-cache and CDN cache attribution),
-`pg` (node-postgres, `Pool` included), `ioredis` and `node-redis` v4+, Prisma
+`pg` (node-postgres, `Pool` included), `postgres` (postgres.js, resolvable from
+the app root), `ioredis` and `node-redis` v4+, Prisma
 with its OTel instrumentation, and any OTel span with `db.*` attributes. For
 code the loader can't reach:
 

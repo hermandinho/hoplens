@@ -8,11 +8,15 @@
 // the core-free shim goes in first and the transform's ESM hook and CommonJS layer wrap the exported
 // functions of the app's own modules as they load (autotrace.ts).
 //
+// Request path (HOPLENS_PATH=1): V8 block coverage starts first, before the shim and the hooks, so
+// every app module compiles with block counters. Only @hoplens/core/coverage loads for it (one small
+// file, node:inspector inside); without the flag nothing of it is loaded.
+//
 // Main thread only: under `-r` Node also runs this preload inside the module hooks worker.
 
 import { isMainThread } from "node:worker_threads";
 import { installShim, readAutoTrace, startFunctionHops } from "./autotrace";
-import { shouldStart } from "./gate";
+import { pathRequested, shouldStart } from "./gate";
 import { earlyRoot, installRoutes } from "./routes";
 import { install } from "./start";
 
@@ -27,6 +31,11 @@ function step(fn: () => void): void {
 
 try {
   if (isMainThread && shouldStart()) {
+    if (pathRequested()) {
+      step(() => {
+        (require("@hoplens/core/coverage") as typeof import("@hoplens/core/coverage")).startCoverage();
+      });
+    }
     const auto = readAutoTrace();
     if (auto.on) {
       step(() => {

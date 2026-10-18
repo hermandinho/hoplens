@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { doctor } from "../src/commands/doctor";
+import { doctorPath } from "../src/express/commands";
 import { type SeedOptions, captureConsole, installFake, seedExpress } from "./express-fixture";
 import { makeFixture, withCwd } from "./fixture";
 
@@ -225,5 +226,41 @@ describe("hoplens doctor (express)", () => {
     fx.write("src/server.cts", "const express = require('express');\nexports.health = function () {};\n");
     await run();
     expect(out.text()).not.toContain("CommonJS entry");
+  });
+
+  test("request path: an info line when HOPLENS_PATH=1 is in the dev script, a warning with NODE_V8_COVERAGE", async () => {
+    healthy();
+    await run();
+    expect(out.text()).not.toContain("request path");
+
+    out.restore();
+    out = captureConsole();
+    healthy({ scripts: { dev: `HOPLENS_PATH=1 node --watch ${F} src/server.js` } });
+    await run();
+    expect(out.text()).toContain("• request path is on (HOPLENS_PATH=1 in scripts.dev)");
+    expect(out.text()).not.toContain("NODE_V8_COVERAGE");
+    expect(process.exitCode).toBe(0);
+
+    out.restore();
+    out = captureConsole();
+    healthy({ scripts: { dev: `NODE_V8_COVERAGE=cov HOPLENS_PATH=1 node --watch ${F} src/server.js` } });
+    await run();
+    expect(out.text()).toContain("! HOPLENS_PATH=1 is set with NODE_V8_COVERAGE (c8)");
+    expect(process.exitCode).toBe(0);
+  });
+
+  test("request path: HOPLENS_PATH=1 in the environment", () => {
+    const warnings: string[] = [];
+    doctorPath(null, { HOPLENS_PATH: "1" }, { nope: (s) => warnings.push(s) });
+    expect(out.text()).toContain("request path is on (HOPLENS_PATH=1 in the environment)");
+    expect(warnings).toEqual([]);
+    doctorPath(
+      { key: "dev", cmd: "c8 node src/server.js" },
+      { HOPLENS_PATH: "true" },
+      { nope: (s) => warnings.push(s) },
+    );
+    expect(warnings).toHaveLength(1);
+    doctorPath({ key: "dev", cmd: "node src/server.js" }, { NODE_V8_COVERAGE: "x" }, { nope: (s) => warnings.push(s) });
+    expect(warnings).toHaveLength(1);
   });
 });

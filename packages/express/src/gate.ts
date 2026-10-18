@@ -13,3 +13,13 @@ export function shouldStart(env: Env = process.env): boolean {
   if ((mode === "production" || mode === "test") && env.HOPLENS_FORCE !== "1") return false;
   return true;
 }
+
+/**
+ * HOPLENS_PATH=1 (or true): the request path's block coverage starts in the register hook, before
+ * any app module loads. Same rule as @hoplens/core/coverage pathFlag(), read here so a process
+ * without the flag never loads that module.
+ */
+export function pathRequested(env: Env = process.env): boolean {
+  const v = env.HOPLENS_PATH;
+  return v === "1" || v?.toLowerCase() === "true";
+}

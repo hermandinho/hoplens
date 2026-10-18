@@ -5,6 +5,8 @@ import * as compareApi from "./api/compare";
 import * as epochsApi from "./api/epochs";
 import * as healthApi from "./api/health";
 import type { ApiModule } from "./api/module";
+import * as pathApi from "./api/path";
+import { pathMeta } from "./path/capture";
 import type { QueryKind } from "./queries";
 import { type QueryTarget, inSinceScope, matchQuery, parseQuery, parseSinceParam } from "./query";
 import {
@@ -14,6 +16,7 @@ import {
   parseFlag,
   parseRepeat,
   prepareRun,
+  resendHeaders,
   runBatch,
   runOnce,
 } from "./replay";
@@ -156,6 +159,7 @@ addRoute("GET", "/api/meta", ({ rt, res }) => {
     otel: rt.otel,
     configured: rt.options.configured,
     autoTrace: rt.options.autoTrace ?? true,
+    path: pathMeta(),
     profiles: Object.fromEntries(
       Object.entries(rt.options.profiles ?? {}).map(([k, v]) => [
         k,
@@ -228,19 +232,7 @@ addRoute("GET", "/api/traces/:id/request", ({ rt, params, res }) => {
   const t = rt.store.get(params.id!);
   if (!t) return json(res, 404, { error: "Trace not found" });
   const internal = rt.store.internal(t);
-  const headers = { ...(internal?.rawHeaders ?? t.request.headers) };
-  for (const h of [
-    "host",
-    "connection",
-    "content-length",
-    "accept-encoding",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-port",
-    "x-forwarded-proto",
-  ]) {
-    delete headers[h];
-  }
+  const headers = resendHeaders(rt, t);
   const body =
     internal?.rawBody ??
     (t.request.body?.json !== undefined ? JSON.stringify(t.request.body.json, null, 2) : t.request.body?.text);
@@ -315,7 +307,7 @@ addRoute("POST", "/api/run", async ({ rt, req, res, url }) => {
  * package adds exactly one import above and one entry here; nothing else in this file changes.
  * Mounted after the built-in routes, so a module can't shadow an existing endpoint.
  */
-const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi];
+const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi, pathApi];
 
 /** Mount a per-endpoint module. Exported for tests; production modules go in API_MODULES. */
 export function mountApi(mod: ApiModule): void {

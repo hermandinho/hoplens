@@ -239,8 +239,25 @@ runtime starts right before your app's first `listen()`; a script that never lis
 | `HOPLENS_OPTIONS` | JSON `HoplensOptions`, applied before code options |
 | `HOPLENS_IGNORE` | Comma-separated path prefixes never traced, e.g. `/health,/metrics` |
 | `HOPLENS_AUTOTRACE` | `0` turns function hops off (read when the register hook loads) |
+| `HOPLENS_PATH` | `1` starts V8 block coverage at boot for Trace path (read by the register hook only; restart to change it; refused under `NODE_V8_COVERAGE`) |
 
 `persist` is on by default here and writes route stats to `node_modules/.cache/hoplens`.
+
+## Trace path (request path)
+
+With `HOPLENS_PATH=1` the register hook starts V8 block coverage before your app loads, and the
+banner says `request path: on`. `POST /__hoplens/api/traces/:id/path` then replays that trace once,
+alone, as a **new** trace, and reports which handler and function code it ran, block by block.
+Unset, nothing of it loads.
+
+- GET and HEAD only: replaying anything else would run its side effects again (400 `method`).
+- It waits for the app to be idle first. A request still in flight after 3s gives 409 `not-quiet`
+  and nothing is sent; one capture runs at a time (409 `busy`).
+- Other work inside the capture window (another request, a timer calling the same code) makes it
+  retry once, then the capture is kept as `contaminated` with every decision unknown.
+- Coverage makes CPU-heavy code slower; under `NODE_V8_COVERAGE` (c8) it stays off
+  (`disabled-c8`), and if another inspector session (DevTools' Coverage panel) stops precise
+  coverage, Trace path turns off until you restart.
 
 ## Changes across restarts
 

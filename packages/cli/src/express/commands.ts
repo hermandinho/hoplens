@@ -227,6 +227,35 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
       `${file} sets NODE_OPTIONS with the Hoplens register hook — every node process that reads it loads Hoplens; put ${FLAG} in scripts.dev instead`,
       false,
     );
+
+  doctorPath(dev ? { key: dev.key, cmd: devCmd ?? "" } : null, process.env, { nope });
+}
+
+const PATH_FLAG_RE = /\bHOPLENS_PATH=["']?(?:1|true)\b/i;
+const V8_COVERAGE_RE = /\bNODE_V8_COVERAGE=|(?:^|[\s;&|])c8(?=$|\s)/;
+
+/**
+ * The request path: an info line when HOPLENS_PATH=1 is set in the dev script or the environment,
+ * and a warning when NODE_V8_COVERAGE (c8) is set too, which keeps it disabled. Exported for tests.
+ */
+export function doctorPath(
+  dev: { key: string; cmd: string } | null,
+  env: Record<string, string | undefined>,
+  { nope }: Pick<Report, "nope">,
+): void {
+  const inScript = !!dev && PATH_FLAG_RE.test(dev.cmd);
+  const inEnv = env.HOPLENS_PATH === "1" || env.HOPLENS_PATH?.toLowerCase() === "true";
+  if (!inScript && !inEnv) return;
+  const where = inScript ? `scripts.${dev!.key}` : "the environment";
+  skip(
+    `request path is on (HOPLENS_PATH=1 in ${where}): V8 block coverage runs from boot, so CPU-heavy code runs slower; Trace path replays a GET once to show which branches ran`,
+  );
+  const c8 = (!!dev && V8_COVERAGE_RE.test(dev.cmd)) || !!env.NODE_V8_COVERAGE;
+  if (c8)
+    nope(
+      `HOPLENS_PATH=1 is set with NODE_V8_COVERAGE (c8) — the request path stays disabled so c8's coverage is not reset; drop one of them`,
+      false,
+    );
 }
 
 /**

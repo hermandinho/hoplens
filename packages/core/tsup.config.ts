@@ -6,6 +6,9 @@ export default defineConfig({
     trace: "src/trace.ts",
     // Pure, dependency-free search grammar the UI can bundle.
     query: "src/query.ts",
+    // Request path: block coverage started by the Express register hook before any app module loads.
+    // Its own tiny entry so the hook loads nothing else of core that early (HOPLENS_PATH=1 only).
+    coverage: "src/path/coverage.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

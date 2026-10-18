@@ -41,6 +41,9 @@ function print(): void {
     if (!s.express) notes.push(`Could not resolve express from ${b.rt.root}; is it installed there?`);
     if (b.rt.options.persist === false) notes.push(PERSIST_OFF_NOTE);
     const info: string[] = [];
+    const path = pathBanner();
+    if (path?.info) info.push(path.info);
+    if (path?.note) notes.push(path.note);
     if (s.autoTrace) {
       const hops = functionHopsLine(s.autoTrace);
       if (hops) info.push(hops);
@@ -51,6 +54,26 @@ function print(): void {
   } catch {
     /* a closed stdout never breaks the app */
   }
+}
+
+/** The request path's coverage handle (@hoplens/core/coverage), read off its global: no import. */
+const COVERAGE = Symbol.for("hoplens.coverage");
+
+export const PATH_ON_LINE = "request path: on (block coverage; CPU-heavy code runs slower)";
+
+/** Banner lines for the request path, or undefined when HOPLENS_PATH was not set. Exported for tests. */
+export function pathBanner(
+  cov: { state?: string; reason?: string } | undefined = (globalThis as any)[COVERAGE],
+): { info?: string; note?: string } | undefined {
+  if (!cov) return undefined;
+  if (cov.state === "on") return { info: PATH_ON_LINE };
+  if (cov.state === "disabled-c8")
+    return { note: "request path disabled: NODE_V8_COVERAGE is set (c8 owns V8 coverage); unset it to use Trace path" };
+  if (cov.state === "error")
+    return {
+      note: `request path failed to start: ${cov.reason ?? "coverage did not start"}; the app runs without it (unset HOPLENS_PATH to silence this)`,
+    };
+  return { note: `request path off: ${cov.reason ?? cov.state ?? "coverage did not start"}` };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

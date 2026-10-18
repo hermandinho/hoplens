@@ -55,6 +55,12 @@ export class TraceStore extends EventEmitter {
    */
   private readonly pins = new Set<string>();
   private readonly manualPins = new Set<string>();
+  /**
+   * Requests currently running: added in add(), removed in finish(), whether or not the trace is
+   * still retained (a request evicted or cleared while in flight is still running). The request
+   * path's quiet gate reads it (path/capture.ts).
+   */
+  private readonly running = new Set<TraceRecord>();
 
   constructor(
     private readonly max: number,
@@ -78,6 +84,7 @@ export class TraceStore extends EventEmitter {
   }
 
   add(t: TraceRecord, internal: Internal): void {
+    if (!t.done) this.running.add(t);
     this.traces.set(t.id, t);
     this.internals.set(t, internal);
     while (this.traces.size - this.pins.size - this.manualPins.size > this.max) {
@@ -91,6 +98,7 @@ export class TraceStore extends EventEmitter {
 
   finish(t: TraceRecord): void {
     t.done = true;
+    this.running.delete(t);
     // Cleared or evicted while in flight: announcing it would re-add a row the UI can't open.
     if (this.traces.get(t.id) !== t) return;
     this.emit("done", t);
@@ -177,6 +185,16 @@ export class TraceStore extends EventEmitter {
     }
   }
 
+  /** How many requests are running right now (started, not finished). */
+  inflight(): number {
+    return this.running.size;
+  }
+
+  /** The running requests, oldest first (for a "2 requests in flight" message). */
+  inflightTraces(): TraceRecord[] {
+    return Array.from(this.running);
+  }
+
   get(id: string): TraceRecord | undefined {
     return this.traces.get(id);
   }
@@ -235,5 +253,6 @@ export function summarize(t: TraceRecord): TraceSummary {
       if (f.estSavedMs !== undefined) out.estSavedMs = f.estSavedMs;
       return out;
     }),
+    ...(t.pathTrace ? { pathTrace: t.pathTrace } : {}),
   };
 }

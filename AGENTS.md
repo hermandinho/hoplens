@@ -122,6 +122,7 @@ Everything below `capture.ts` runs **after the response finished** (from `finali
 | `regressions.ts` | Per-route verdict per epoch on warm p50 over the URL variants both sides share |
 | `compare.ts` | Span / shape / bucket / body diff of two traces |
 | `replay.ts` | `POST /api/run?repeat=N` batches |
+| `path/coverage.ts` · `path/capture.ts` · `api/path.ts` | Request path (opt-in `HOPLENS_PATH=1`, read at boot): V8 block coverage started by the Express register hook before any app module loads (`@hoplens/core/coverage`, its own entry; never stopped, refused under `NODE_V8_COVERAGE`), and the capture window behind `POST /api/traces/:id/path` (quiet gate, reset take, one replay, settle, take, hop vs coverage cross-check plus a per-block plausibility check, foreign start/update taint, one retry, a no-replay control window before blaming a local binding; error bodies `{ code, error }`) |
 | `health.ts` | Event-loop delay, memory, GC, process errors |
 | `persist.ts` | Opt-in NDJSON persistence of facts and summaries (`persist: true`) |
 | `server.ts` · `api/*` | UI server and the loopback JSON API |

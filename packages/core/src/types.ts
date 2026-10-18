@@ -98,6 +98,23 @@ export interface TraceRecord {
   /** Computed in finalize() once the trace is done. Absent while in flight or if analysis failed. */
   facts?: TraceFacts;
   findings?: Finding[];
+  /**
+   * Set on a trace the request path captured ("Trace path", path/capture.ts): it is a replay of
+   * `replayOf`, and its path payload (GET /api/traces/:id/path) has this quality.
+   */
+  pathTrace?: PathTraceStamp;
+}
+
+/**
+ * A request-path replay. `supersededBy`: an attempt discarded for the automatic retry (its path is
+ * on that trace). `failed`: the capture failed after this replay ran (a PathErrorCode). Neither has
+ * a payload of its own.
+ */
+export interface PathTraceStamp {
+  quality: "exact" | "partial" | "contaminated";
+  replayOf: string;
+  supersededBy?: string;
+  failed?: string;
 }
 
 /* ---------------------------------------------------------- facts + findings */
@@ -184,6 +201,8 @@ export interface TraceSummary {
   hops: number;
   facts?: TraceFacts;
   findings?: FindingSummary[];
+  /** A request-path replay (TraceRecord.pathTrace). */
+  pathTrace?: PathTraceStamp;
 }
 
 /* ------------------------------------------------------------- discovery */

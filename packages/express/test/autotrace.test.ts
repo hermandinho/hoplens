@@ -374,6 +374,26 @@ describe("banner lines", () => {
     expect(note.includes("\n")).toBe(false);
     const large = refusedNote({ files: 0, fns: 0, refused: { large: 1 }, errors: 0 })!;
     expect(large).toBe("function hops skipped for 1 file over 1 MB (generated code?), not parsed");
+    const one = refusedNote({
+      files: 0,
+      fns: 0,
+      refused: { unmapped: 1 },
+      firstRefused: { unmapped: { file: "src/a.ts", detail: "f: not a local export of the compiled source" } },
+      errors: 0,
+    })!;
+    expect(one).toBe(
+      "function hops skipped for 1 TypeScript file whose compiled output (tsx?) Hoplens could not map back to the source (src/a.ts: f: not a local export of the compiled source); to wrap it, load Hoplens first: node --import hoplens/express/register --import tsx <entry>",
+    );
+    const two = refusedNote({
+      files: 0,
+      fns: 0,
+      refused: { unmapped: 2 },
+      firstRefused: { unmapped: { file: "src/a.ts" } },
+      errors: 0,
+    })!;
+    expect(two).toContain(
+      "2 TypeScript files whose compiled output (tsx?) Hoplens could not map back to the source (src/a.ts, ...); to wrap them,",
+    );
     const text = bannerText(4983, 3001, [note], ["function hops: 1 fn in 1 file"]);
     expect(text).toContain(
       "(also http://127.0.0.1:4983)\n   function hops: 1 fn in 1 file\n   ! function hops skipped",

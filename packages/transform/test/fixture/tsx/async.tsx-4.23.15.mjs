@@ -1,0 +1,3 @@
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});async function load(id){await new Promise(r=>setTimeout(r,1));return id}__name(load,"load");const save=__name(async v=>{return v},"save");function*gen(){yield 1}__name(gen,"gen");export{gen,load,save};
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6ImtIQUFBLGVBQXNCLEtBQUssR0FBNkIsQ0FDdEQsTUFBTSxJQUFJLFFBQVMsR0FBTSxXQUFXLEVBQUcsQ0FBQyxDQUFDLEVBQ3pDLE9BQU8sRUFDVCxDQUhzQixvQkFLZixNQUFNLEtBQU8sYUFBTyxHQUErQixDQUN4RCxPQUFPLENBQ1QsRUFGb0IsUUFJYixTQUFVLEtBQXlCLENBQ3hDLEtBQU0sRUFDUixDQUZpQiIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiYXN5bmMudHMiXSwic291cmNlc0NvbnRlbnQiOltudWxsXX0=

@@ -1,0 +1,3 @@
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});function main(){return 1}__name(main,"main");class Box{static{__name(this,"Box")}v=1}function real(){return new Box}__name(real,"real");export{Box,main as default,real};
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6ImtIQUFlLFNBQVIsTUFBZ0MsQ0FDckMsTUFBTyxFQUNULENBRndCLG9CQUlqQixNQUFNLEdBQUksQ0FKakIsTUFJaUIsb0JBQ2YsRUFBSSxDQUNOLENBRU8sU0FBUyxNQUFZLENBQzFCLE9BQU8sSUFBSSxHQUNiLENBRmdCIiwibmFtZXMiOltdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJkZWZhdWx0LWNsYXNzLnRzIl0sInNvdXJjZXNDb250ZW50IjpbbnVsbF19

@@ -105,11 +105,23 @@ the handler hop (and under the function that called it). The banner counts them:
   are not wrapped: they keep only their route's handler hop. A helper you call as `f(req, res)` is
   skipped too; wrap it with `traced()` from `hoplens/trace` if you want it.
 - Lines and columns never move, so stack traces and breakpoints land where they did.
-- Works with `node` / `node --watch` (`.js`, `.mjs`, and `.ts` that Node strips itself), `-r` or
-  `--import`, and with tsx when Hoplens loads first: `node --import hoplens/express/register --import
-  tsx src/server.ts`. When another loader compiles a file before Hoplens sees it (`tsx watch --import
-  hoplens/express/register`), that file loads untouched and the banner says so in one line.
-  CommonJS modules load untouched for now.
+- Runners (ES modules; CommonJS modules load untouched for now):
+
+  | Command | Function hops |
+  |---|---|
+  | `node [--watch] --import hoplens/express/register src/server.js` (`.js`, `.mjs`) | yes |
+  | the same with `.ts` that Node strips itself (Node 22.18+, or 22.6+ with `--experimental-strip-types`) | yes |
+  | `node -r hoplens/express/register ...` | yes |
+  | `node --import hoplens/express/register --import tsx src/server.ts` | yes: Hoplens sees the raw `.ts` |
+  | `tsx [watch] --import hoplens/express/register src/server.ts` (what `hoplens init` writes) | yes: tsx's compiled output is mapped back to the `.ts` file |
+  | `node --import tsx --import hoplens/express/register src/server.ts` | yes, as above |
+
+  When tsx compiles a file first, Hoplens finds each exported function in tsx's output by its export
+  name and only appends code after it, so tsx's source map, stack traces and breakpoints are
+  unchanged and hops carry the line in your `.ts` file. The same check applies whichever loader
+  compiled the file: a file whose compiled output does not map back to the `.ts` file with certainty
+  (a top-level `using`, lowered `async`, another loader's rewrites) loads untouched, and the banner
+  names it in one line; loading Hoplens before the loader wraps it.
 - Off with `HOPLENS_AUTOTRACE=0` or `HOPLENS_OPTIONS='{"autoTrace":false}'`: nothing is wrapped and
   no TypeScript is loaded. `autoTrace` given to `hoplens(app, opts)` comes after your modules loaded,
   so it only stops function hops from binding (and says so).

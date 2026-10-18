@@ -125,6 +125,70 @@ describe("ESM hook", () => {
     expect(out.reports).toContainEqual({ type: "refused", file: "src/a.js", reason: "compiled" });
   });
 
+  test("COMPILED mode: a .ts file another loader compiled first is mapped to its raw lines, or refused", () => {
+    // Stands in for tsx: hands over esbuild-style output (one line, inline source map) for .ts files.
+    const MAP = "//# sourceMappingURL=data:application/json;base64,e30=";
+    write("src/ok.ts", "type N = number;\n\nexport function ok(a: N): N {\n  return a;\n}\n");
+    write("src/odd.ts", "export function odd(a: number): number {\n  return a;\n}\n");
+    write(
+      "compiler.mjs",
+      `const OUT = {
+  "ok.ts": ${JSON.stringify(`function ok(a){return a}export{ok};\n\n${MAP}`)},
+  "odd.ts": ${JSON.stringify(`var odd;odd=function(a){return a};export{odd};\n\n${MAP}`)},
+};
+export async function load(url, ctx, next) {
+  const name = Object.keys(OUT).find((n) => new URL(url).pathname.endsWith("/" + n));
+  if (url.startsWith("file:") && name) return { format: "module", source: OUT[name], shortCircuit: true };
+  return next(url, ctx);
+}
+`,
+    );
+    write(
+      "compiler.cjs",
+      `require("node:module").register(require("node:url").pathToFileURL(${JSON.stringify(path.join(root, "compiler.mjs"))}).href);`,
+    );
+    write(
+      "src/ts-main.js",
+      `import { ok } from "./ok.ts";
+import { ok as again } from "./ok.ts?v=2";
+import { odd } from "./odd.ts";
+import { d } from "data:text/javascript,export function d() { return 'd'; }";
+setTimeout(() => console.log(JSON.stringify({
+  values: [ok(1), again(2), odd(3), d()],
+  marked: [Boolean(ok.__hoplens), Boolean(again.__hoplens), Boolean(odd.__hoplens), Boolean(d.__hoplens)],
+  wrapped: globalThis.__wrapped,
+  reports: globalThis.__reports,
+})), 200);
+`,
+    );
+    const r = node([
+      "--import",
+      pathToFileURL(path.join(root, "compiler.cjs")).href,
+      "--import",
+      pathToFileURL(path.join(root, "preload.cjs")).href,
+      "src/ts-main.js",
+    ]);
+    expect(r.stderr).toBe("");
+    const out = parse(r.stdout);
+    expect(out.values).toEqual([1, 2, 3, "d"]);
+    // A query string is the same file on disk; a data: URL has none and is left alone.
+    expect(out.marked).toEqual([true, true, false, false]);
+    expect(out.wrapped).toEqual([
+      { name: "ok", file: "src/ok.ts", line: 3 },
+      { name: "ok", file: "src/ok.ts", line: 3 },
+    ]);
+    expect(out.reports).toEqual([
+      { type: "wrapped", file: "src/ok.ts", fns: 1 },
+      { type: "wrapped", file: "src/ok.ts", fns: 1 },
+      {
+        type: "refused",
+        file: "src/odd.ts",
+        reason: "unmapped",
+        detail: "odd: not one top-level function binding in the compiled source",
+      },
+    ]);
+  });
+
   test("a file over the size limit is refused before it is parsed, and loads untouched", () => {
     const fns = Array.from({ length: 30000 }, (_, i) => `export function f${i}() { return ${i}; }`).join("\n");
     write("src/huge.js", `${fns}\n`);

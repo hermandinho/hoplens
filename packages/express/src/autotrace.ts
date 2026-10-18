@@ -265,6 +265,8 @@ export function startFunctionHops(setting: AutoTraceSetting, root: string | unde
           stats.fns += r.fns;
         } else if (r.type === "refused") {
           stats.refused[r.reason] = (stats.refused[r.reason] ?? 0) + 1;
+          const first = (stats.firstRefused ??= {});
+          first[r.reason] ??= { file: r.file, detail: r.reason === "unmapped" ? r.detail : undefined };
         } else if (stats.errors++ === 0) {
           process.stderr.write(
             `! hoplens:express function hops: could not rewrite ${r.file} (${r.message}); it loaded unchanged\n`,

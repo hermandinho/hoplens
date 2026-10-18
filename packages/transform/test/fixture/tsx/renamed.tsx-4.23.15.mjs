@@ -1,0 +1,3 @@
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});function inner(x){return x*2}__name(inner,"inner");const local=__name(s=>s.toUpperCase(),"local");export{inner as doubled,local as shout};
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6ImtIQUFBLFNBQVMsTUFBTSxFQUFtQixDQUNoQyxPQUFPLEVBQUksQ0FDYixDQUZTLHNCQUlULE1BQU0sTUFBUSxPQUFDLEdBQXNCLEVBQUUsWUFBWSxFQUFyQyIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsicmVuYW1lZC50cyJdLCJzb3VyY2VzQ29udGVudCI6W251bGxdfQ==

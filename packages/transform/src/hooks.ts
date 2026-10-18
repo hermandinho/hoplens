@@ -3,9 +3,12 @@
 // rewritten by transformSource, which only appends a trailer and swaps `const` for `let  `, so every
 // line and column stays where it was.
 //
-// RAW mode only: the source must be byte-identical to the file on disk. When another loader (tsx,
-// ts-node/esm) runs before this hook and hands it compiled output, the file is refused: it loads
-// untouched and the main thread is told why. Any failure loads the original source.
+// RAW mode: the source is byte-identical to the file on disk, and transformSource rewrites it.
+// COMPILED mode: another loader (tsx) ran before this hook and hands it the compiled output of a
+// .ts/.mts file. transformCompiled maps the raw file's exported functions onto that output and only
+// appends a trailer (plus same-length `const` -> `let  ` swaps), so the loader's inline source map
+// stays valid. Output it cannot map with certainty, and compiled output of any other file, is
+// refused: it loads untouched and the main thread is told why. Any failure loads the original source.
 
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -36,6 +39,9 @@ type Opts = Omit<HookData, "port"> & { preset: "node" | "next" };
  * worker would hold up its import for seconds, and a file that big is generated code, not the app's own.
  */
 export const MAX_SOURCE_BYTES = 1024 * 1024;
+
+/** Files COMPILED mode handles: ES-module TypeScript (`.cts` is CommonJS; `.tsx` is not in scope). */
+const COMPILED_EXT = /\.m?ts$/;
 
 let opts: Opts | undefined;
 /**
@@ -144,8 +150,21 @@ function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): stri
     return undefined;
   }
   if (!disk.equals(bytes)) {
-    report({ type: "refused", file: relOf(file), reason: "compiled" });
-    return undefined;
+    if (!COMPILED_EXT.test(file)) {
+      report({ type: "refused", file: relOf(file), reason: "compiled" });
+      return undefined;
+    }
+    // COMPILED mode. The raw file decides what is in scope ('use client' and the like) and what to wrap.
+    const raw = disk.toString("utf8");
+    if (!t.shouldTrace(file, raw, o)) return undefined;
+    const c = t.transformCompiled(src, raw, file, o);
+    if (c.kind === "none") return undefined;
+    if (c.kind === "refused") {
+      report({ type: "refused", file: relOf(file), reason: "unmapped", detail: c.reason });
+      return undefined;
+    }
+    report({ type: "wrapped", file: relOf(file), fns: c.fns });
+    return c.code;
   }
   const out = t.transformSource(src, file, o);
   if (out == null) return undefined;

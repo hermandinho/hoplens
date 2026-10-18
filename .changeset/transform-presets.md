@@ -16,8 +16,16 @@ Groundwork for function hops outside Next.js. The Next.js output is unchanged.
   `mayHaveTargets()` is a regex prescan that rules a file out before TypeScript is loaded.
 - `@hoplens/transform/register` now registers a Node ESM load hook (`module.register()`, main thread
   only, once per process) that rewrites in-scope ES modules (`preset: "node"` by default) when the
-  source it gets is byte-identical to the file on disk. A source another loader already changed is
-  refused and loads untouched; CommonJS is not handled yet. Each file is reported to an `onReport`
+  source it gets is byte-identical to the file on disk. CommonJS is not handled yet.
+- COMPILED mode, for a `.ts` / `.mts` ES module another loader compiled before the hook saw it (tsx
+  first: `tsx [watch] --import ...`, `node --import tsx --import ...`): new `transformCompiled(compiled,
+  raw, file, opts)` parses the raw file from disk for what to wrap and its lines, finds each function
+  in the compiled output by its exported name (esbuild's `export { a as b }` clause or an exported
+  declaration) as one top-level `function` or `const` / `let` / `var` binding of the same kind and
+  async-ness (`__name(...)` keep-names calls allowed), and appends the trailer. Nothing before EOF
+  moves (only same-length `const` -> `let  ` swaps), so the loader's inline source map and stack
+  line:col stay valid. Any mismatch refuses the whole file (`reason: "unmapped"`, with a `detail`); any
+  other changed source is refused as before (`reason: "compiled"`) and loads untouched. Each file is reported to an `onReport`
   callback (wrapped, refused, failed), and the returned disposer turns the hook into a pass-through.
 - Under `preset: "node"`, a file with a syntax error is left alone, so it fails exactly as it would
   without Hoplens.

@@ -71,6 +71,16 @@ export function refusedNote(st: AutoTraceStats): string | undefined {
       `${plural(compiled, "file")} compiled by another loader (tsx?) before Hoplens saw ${compiled === 1 ? "it" : "them"}; load Hoplens first: node --import hoplens/express/register --import tsx <entry>`,
     );
   }
+  const unmapped = st.refused.unmapped ?? 0;
+  if (unmapped) {
+    const first = st.firstRefused?.unmapped;
+    const where = first
+      ? ` (${first.file}${first.detail ? `: ${first.detail}` : ""}${unmapped > 1 ? ", ..." : ""})`
+      : "";
+    parts.push(
+      `${plural(unmapped, "TypeScript file")} whose compiled output (tsx?) Hoplens could not map back to the source${where}; to wrap ${unmapped === 1 ? "it" : "them"}, load Hoplens first: node --import hoplens/express/register --import tsx <entry>`,
+    );
+  }
   if (cjs) parts.push(`${plural(cjs, "CommonJS file")} (not supported yet)`);
   const large = st.refused.large ?? 0;
   if (large) parts.push(`${plural(large, "file")} over 1 MB (generated code?), not parsed`);

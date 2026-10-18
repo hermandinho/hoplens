@@ -18,13 +18,16 @@ export interface RegisterOptions extends TransformOptions {
 
 /**
  * What the hook reports per in-scope file. `refused` and `error` mean the file loaded untouched:
- * - `compiled`: another loader (tsx, ts-node/esm) changed the source before Hoplens saw it;
+ * - `compiled`: another loader (tsx, ts-node/esm) changed a non-TypeScript source before Hoplens saw it;
+ * - `unmapped`: a .ts/.mts file another loader compiled first, whose output COMPILED mode could not map
+ *   back to the file on disk with certainty (`detail` says what did not match);
  * - `commonjs`: a CommonJS module reached through the ESM loader, not wrapped yet;
  * - `large`: a source over 1 MB (generated code), not parsed.
  */
 export type HookReport =
   | { type: "wrapped"; file: string; fns: number }
   | { type: "refused"; file: string; reason: "compiled" | "commonjs" | "large" }
+  | { type: "refused"; file: string; reason: "unmapped"; detail: string }
   | { type: "error"; file: string; message: string };
 
 /** Data handed to the hook's `initialize()`. */

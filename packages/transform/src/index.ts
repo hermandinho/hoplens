@@ -125,13 +125,24 @@ export interface CollectedTargets {
  * preset, so the Next path keeps its exact output.
  */
 export function collectTargets(source: string, file: string, opts: TransformOptions): CollectedTargets | null {
+  const found = collect(source, file, opts);
+  return found && { targets: found.targets, constStarts: found.constStarts };
+}
+
+/** collectTargets, plus the parse (COMPILED mode reads the raw declarations' shapes from it). */
+function collect(
+  source: string,
+  file: string,
+  opts: TransformOptions,
+): (CollectedTargets & { ts: any; sf: any }) | null {
   const ts = loadTypeScript(opts.root);
   if (!ts) return null;
   const kind = /\.(c|m)?js$/.test(file) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, kind);
+  const done = (targets: Target[], constStarts: number[]) => ({ targets, constStarts, ts, sf });
   // Unbundled code runs as it is: a file that does not parse must fail exactly as without Hoplens,
   // and a trailer appended after an unclosed block would change (or even hide) its error.
-  if (opts.preset === "node" && (sf as any).parseDiagnostics?.length) return { targets: [], constStarts: [] };
+  if (opts.preset === "node" && (sf as any).parseDiagnostics?.length) return done([], []);
   const targets: Target[] = [];
   const constStarts: number[] = [];
   /** Local name -> the offset of its `const` keyword, for targets declared with const. */
@@ -179,16 +190,19 @@ export function collectTargets(source: string, file: string, opts: TransformOpti
       }
     }
   }
-  if (opts.preset !== "node") return { targets, constStarts };
+  if (opts.preset !== "node") return done(targets, constStarts);
   addExportClauses(ts, sf, source, targets, constStarts, constOf, { isDefault, lineOf, isFnDecl });
   // The trailer rebinds each target after the module body ran: anything that took the function as a
   // value (bus.on(x, f), a handler map, `export default f`, `new f()`) would keep the original while
   // importers get the wrapper, and identity checks between the two would fail. Skip those.
   const handedOut = valueUses(ts, sf, new Set(targets.map((t) => t.name)));
   const kept = targets.filter((t) => !handedOut.has(t.name));
-  if (kept.length === targets.length) return { targets, constStarts };
+  if (kept.length === targets.length) return done(targets, constStarts);
   const starts = new Set(kept.map((t) => constOf.get(t.name)).filter((n): n is number => n !== undefined));
-  return { targets: kept, constStarts: constStarts.filter((s) => starts.has(s)) };
+  return done(
+    kept,
+    constStarts.filter((s) => starts.has(s)),
+  );
 }
 
 /**
@@ -412,12 +426,223 @@ export function transformSource(source: string, file: string, opts: TransformOpt
     out = `${out.slice(0, start)}let  ${out.slice(start + 5)}`;
   }
 
+  return (
+    out +
+    trailer(
+      targets.map((t) => ({ ...t, binding: t.name })),
+      file,
+      opts,
+    )
+  );
+}
+
+/**
+ * The code appended at EOF: rebinds each `binding` to its wrapper, once, when the module evaluates.
+ * The metadata (name, file, line) is the user's source, whatever the binding is called in the code.
+ */
+function trailer(targets: (Target & { binding: string })[], file: string, opts: TransformOptions): string {
   const rel = path.relative(opts.root, file).split(path.sep).join("/");
   const calls = targets
-    .map((t) => `${t.name} = __tpw(${t.name}, ${JSON.stringify({ name: t.name, file: rel, line: t.line })});`)
+    .map((t) => `${t.binding} = __tpw(${t.binding}, ${JSON.stringify({ name: t.name, file: rel, line: t.line })});`)
     .join(" ");
-  out += `\n;(function () { var __tpw = globalThis["__hoplens"] && globalThis["__hoplens"].wrap; if (typeof __tpw !== "function") return; ${calls} })();\n`;
-  return out;
+  return `\n;(function () { var __tpw = globalThis["__hoplens"] && globalThis["__hoplens"].wrap; if (typeof __tpw !== "function") return; ${calls} })();\n`;
+}
+
+/**
+ * What transformCompiled made of a module another loader compiled before Hoplens saw it.
+ * - `wrapped`: `code` is the compiled source with the trailer appended; before EOF only `const` ->
+ *   `let  ` swaps (same length) changed. `fns` functions are rebound;
+ * - `none`: the raw source has nothing to wrap (or TypeScript is missing): load the compiled source;
+ * - `refused`: the compiled output does not map back to the raw source with certainty: load the
+ *   compiled source untouched. `reason` says what did not match.
+ */
+export type CompiledResult =
+  | { kind: "wrapped"; code: string; fns: number }
+  | { kind: "none" }
+  | { kind: "refused"; reason: string };
+
+interface Shape {
+  /** `function f` (true) or a `const|let|var f = <function>` binding (false). */
+  decl: boolean;
+  async: boolean;
+}
+
+const hasModifier = (n: any, kind: number): boolean => Boolean(n?.modifiers?.some((m: any) => m.kind === kind));
+
+function unwrapExpr(ts: any, e: any): any {
+  while (
+    e &&
+    (ts.isParenthesizedExpression(e) ||
+      ts.isAsExpression(e) ||
+      ts.isSatisfiesExpression?.(e) ||
+      ts.isTypeAssertionExpression?.(e) ||
+      ts.isNonNullExpression(e))
+  ) {
+    e = e.expression;
+  }
+  return e;
+}
+
+/** The shape of `name`'s top-level function binding in the raw parse. */
+function rawShape(ts: any, sf: any, name: string): Shape | undefined {
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.body && st.name?.text === name) {
+      return { decl: true, async: hasModifier(st, ts.SyntaxKind.AsyncKeyword) };
+    }
+    if (!ts.isVariableStatement(st)) continue;
+    for (const d of st.declarationList.declarations) {
+      if (!ts.isIdentifier(d.name) || d.name.text !== name) continue;
+      const fn = unwrapExpr(ts, d.initializer);
+      return fn ? { decl: false, async: hasModifier(fn, ts.SyntaxKind.AsyncKeyword) } : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * COMPILED mode: rewrites the output of a loader that ran before Hoplens (tsx's esbuild, under
+ * `tsx --import hoplens/express/register` or `node --import tsx --import ...`), with the raw source
+ * from disk deciding what to wrap and where it is.
+ *
+ * The raw parse (collectTargets with the `node` rules, value uses, `this` and recursion included) picks
+ * the functions and their lines. Each one is then found in the compiled source by its exported name,
+ * through an `export { local as name }` clause or an exported declaration, as exactly one top-level
+ * `function local` or `const|let|var local = <function>` binding (esbuild's `__name(<function>, "…")`
+ * keep-names call allowed) of the same kind and async-ness as in the raw source. Only those bindings
+ * are rebound; any other shape refuses the whole file.
+ *
+ * Nothing before EOF moves (`const` -> `let  ` keeps every offset), so the loader's inline source map
+ * and every stack line:col stay what they were.
+ */
+export function transformCompiled(compiled: string, raw: string, file: string, opts: TransformOptions): CompiledResult {
+  const none: CompiledResult = { kind: "none" };
+  const refuse = (reason: string): CompiledResult => ({ kind: "refused", reason });
+  if (!mayHaveTargets(raw)) return none;
+  const o: TransformOptions = { ...opts, preset: "node" };
+  const found = collect(raw, file, o);
+  if (!found?.targets.length) return none;
+  const { ts, sf: rawSf } = found;
+  const K = ts.SyntaxKind;
+
+  const sf = ts.createSourceFile(`${file}.mjs`, compiled, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  if ((sf as any).parseDiagnostics?.length) return refuse("the compiled source does not parse");
+
+  /** Exported name -> its compiled local binding; null for a re-export or two different locals. */
+  const exportsOf = new Map<string, string | null>();
+  const exportAs = (exported: string, local: string | null) => {
+    const had = exportsOf.get(exported);
+    exportsOf.set(exported, had === undefined || had === local ? local : null);
+  };
+  interface Decl {
+    shape?: Shape;
+    constStart?: number;
+  }
+  const decls = new Map<string, Decl[]>();
+  const add = (name: string, d: Decl) => {
+    const list = decls.get(name);
+    if (list) list.push(d);
+    else decls.set(name, [d]);
+  };
+  const blocked: Decl = {};
+  const bindingNames = (n: any, out: string[]): string[] => {
+    if (ts.isIdentifier(n)) out.push(n.text);
+    else if (n?.elements) for (const e of n.elements) if (!ts.isOmittedExpression(e)) bindingNames(e.name, out);
+    return out;
+  };
+  /** An arrow or a non-generator function expression, bare or inside esbuild's `__name(fn, "name")`. */
+  const fnInit = (init: any): any => {
+    let e = unwrapExpr(ts, init);
+    if (
+      e &&
+      ts.isCallExpression(e) &&
+      ts.isIdentifier(e.expression) &&
+      e.expression.text === "__name" &&
+      e.arguments.length === 2 &&
+      ts.isStringLiteral(e.arguments[1])
+    ) {
+      e = unwrapExpr(ts, e.arguments[0]);
+    }
+    return e && (ts.isArrowFunction(e) || (ts.isFunctionExpression(e) && !e.asteriskToken)) ? e : undefined;
+  };
+
+  for (const st of sf.statements) {
+    const exported = hasModifier(st, K.ExportKeyword);
+    const isDefault = hasModifier(st, K.DefaultKeyword);
+    if (ts.isExportDeclaration(st)) {
+      if (st.isTypeOnly || !st.exportClause || !ts.isNamedExports(st.exportClause)) continue;
+      for (const el of st.exportClause.elements) {
+        // `export { s as "str-name" }`: a string-literal export name counts, as on the raw side.
+        if (!ts.isIdentifier(el.name) && !ts.isStringLiteral(el.name)) continue;
+        const local = el.propertyName ?? el.name;
+        if (st.moduleSpecifier) exportAs(el.name.text, null);
+        else if (ts.isIdentifier(local)) exportAs(el.name.text, local.text);
+      }
+    } else if (ts.isFunctionDeclaration(st)) {
+      if (!st.name || !st.body) continue;
+      const ok = !st.asteriskToken && !isDefault;
+      add(st.name.text, ok ? { shape: { decl: true, async: hasModifier(st, K.AsyncKeyword) } } : blocked);
+      if (exported && !isDefault) exportAs(st.name.text, st.name.text);
+    } else if (ts.isVariableStatement(st)) {
+      const list = st.declarationList;
+      const using = (list.flags & ts.NodeFlags.Using) !== 0;
+      const isConst = !using && (list.flags & ts.NodeFlags.Const) !== 0;
+      const start = list.getStart(sf);
+      const constOk = !isConst || compiled.slice(start, start + 5) === "const";
+      for (const d of list.declarations) {
+        if (!ts.isIdentifier(d.name)) {
+          for (const n of bindingNames(d.name, [])) add(n, blocked);
+          continue;
+        }
+        const fn = !using && constOk ? fnInit(d.initializer) : undefined;
+        const shape = fn && { decl: false, async: hasModifier(fn, K.AsyncKeyword) };
+        add(d.name.text, shape ? { shape, constStart: isConst ? start : undefined } : blocked);
+        if (exported) exportAs(d.name.text, d.name.text);
+      }
+    } else if (ts.isClassDeclaration(st) || ts.isEnumDeclaration(st) || ts.isModuleDeclaration(st)) {
+      if (st.name && ts.isIdentifier(st.name)) add(st.name.text, blocked);
+    } else if (ts.isImportEqualsDeclaration(st)) {
+      add(st.name.text, blocked);
+    } else if (ts.isImportDeclaration(st)) {
+      const c = st.importClause;
+      if (c?.name) add(c.name.text, blocked);
+      const nb = c?.namedBindings;
+      if (nb && ts.isNamespaceImport(nb)) add(nb.name.text, blocked);
+      else if (nb) for (const e of nb.elements) add(e.name.text, blocked);
+    }
+  }
+  // A `var` inside a top-level block is a module binding as well, assigned wherever that code runs
+  // (esbuild's lowering of a top-level `using` moves the module's declarations into a try block).
+  const nestedVars = (n: any): void => {
+    if (ts.isFunctionLike(n) || ts.isClassLike(n)) return;
+    const topLevel = ts.isVariableStatement(n.parent) && n.parent.parent === sf;
+    if (ts.isVariableDeclarationList(n) && !topLevel && !(n.flags & (ts.NodeFlags.Let | ts.NodeFlags.Const))) {
+      for (const d of n.declarations) for (const name of bindingNames(d.name, [])) add(name, blocked);
+    }
+    ts.forEachChild(n, nestedVars);
+  };
+  ts.forEachChild(sf, nestedVars);
+
+  const rebinds: (Target & { binding: string })[] = [];
+  const constStarts = new Set<number>();
+  for (const t of found.targets) {
+    const local = exportsOf.get(t.exported);
+    if (local == null) return refuse(`${t.exported}: not a local export of the compiled source`);
+    const list = decls.get(local);
+    const d = list?.length === 1 ? list[0] : undefined;
+    if (!d?.shape) return refuse(`${t.exported}: not one top-level function binding in the compiled source`);
+    const want = rawShape(ts, rawSf, t.name);
+    if (!want || want.decl !== d.shape.decl || want.async !== d.shape.async) {
+      return refuse(`${t.exported}: a different kind of function in the compiled source`);
+    }
+    if (d.constStart !== undefined) constStarts.add(d.constStart);
+    rebinds.push({ ...t, binding: local });
+  }
+
+  let out = compiled;
+  for (const start of [...constStarts].sort((a, b) => b - a)) {
+    out = `${out.slice(0, start)}let  ${out.slice(start + 5)}`;
+  }
+  return { kind: "wrapped", code: out + trailer(rebinds, file, o), fns: rebinds.length };
 }
 
 export { loadTypeScript } from "./ts";

@@ -45,6 +45,8 @@ export interface AutoTraceStats {
   fns: number;
   /** Files loaded untouched, by reason (see @hoplens/transform/register HookReport). */
   refused: Record<string, number>;
+  /** The first file refused for each reason, with what did not match when the hook says (`unmapped`). */
+  firstRefused?: Record<string, { file: string; detail?: string }>;
   /** Files whose transform failed (loaded untouched); the first one is logged. */
   errors: number;
 }

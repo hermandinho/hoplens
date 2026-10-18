@@ -89,7 +89,7 @@ Hoplens is split so that **everything downstream of the HTTP tap is framework-ne
 | `@hoplens/ui` | Preact + signals, built by Vite to one inlined HTML file | — |
 | `@hoplens/next` | `withHoplens()` config wrapper, Next route+proxy scanner (first `DiscoverySource` impl) | `@hoplens/core`, `@hoplens/schema`, `@hoplens/transform` |
 | `@hoplens/express` | Express 4/5 adapter: register hook (`-r`/`--import`) and `hoplens(app)`; CJS build plus a hand-written ESM wrapper (`esm/index.mjs` + `.d.mts`); Zod schemas linked from each route's registration call (`src/schemas.ts`, schema/transform required lazily on scan) | `@hoplens/core`, `@hoplens/schema`, `@hoplens/transform` |
-| `@hoplens/cli` | bin `hoplens`: `init`, `doctor`, `remove` (also deletes `<distDir>/cache/hoplens`) | `@hoplens/transform` (for TS loader) |
+| `@hoplens/cli` | bin `hoplens`: `init`, `doctor`, `remove` (also deletes `<distDir>/cache/hoplens`). Framework from package.json (`--framework` when both); Express edits only `scripts.dev`, in place (`src/json-edit.ts` keeps every other byte; `src/express/script.ts` inserts / removes one run of text so init -> remove is byte-exact) | `@hoplens/transform` (for TS loader) |
 | `hoplens` (meta) | Unscoped meta — pulls in `@hoplens/cli` + `@hoplens/next` + `@hoplens/express` so `npm i -D hoplens` works (`hoplens/express`, `hoplens/express/register` re-export the adapter, kept external) | — |
 
 ### Composition seams

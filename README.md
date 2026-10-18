@@ -24,6 +24,10 @@ npm run dev
 
 Requires Next.js 15.3+ and Node 20.9+. Next 16 is the primary target.
 
+Express 4 or 5? The same `npx hoplens init` adds `--import hoplens/express/register` to your
+`dev` script (see [`@hoplens/express`](./packages/express/README.md)); then run it and open
+`http://localhost:<your port>/__hoplens`.
+
 ## What you get
 
 - **The whole journey.** Every request becomes a tree of hops: proxy,
@@ -207,12 +211,17 @@ Everything the UI shows comes from a loopback JSON API under
 ## Commands
 
 ```text
-hoplens init     wire Hoplens into next.config and instrumentation
+hoplens init     wire Hoplens into next.config and instrumentation (or the Express dev script)
 hoplens doctor   check that everything is wired correctly
 hoplens remove   unwire Hoplens from this project (reverse of init)
 ```
 
-All three support `--dry-run`. Run `npx hoplens <cmd> --help` for details.
+`init` and `remove` support `--dry-run` (`doctor` never writes). All three work on Next.js and
+Express projects: the framework is detected from `package.json` (pass `--framework next|express`
+when a project depends on both). For Express,
+`init` edits only `scripts.dev` (adding `--import hoplens/express/register` after `node`, `tsx` or
+`nodemon`), `doctor` checks the install and wiring, and `remove` puts the script back byte for byte.
+Run `npx hoplens <cmd> --help` for details.
 
 ## Monorepo layout
 

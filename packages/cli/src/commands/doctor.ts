@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
+import { doctorExpress } from "../express/commands";
+import { detectFramework, frameworkFlag } from "../framework";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
@@ -27,7 +29,7 @@ const MIN_NODE_MINOR = 9;
  * npx hoplens doctor
  * ```
  */
-export async function doctor(_args: string[]) {
+export async function doctor(args: string[]) {
   const root = process.cwd();
   console.log(`\n${c.magenta("◆ Hoplens")} doctor\n`);
 
@@ -62,6 +64,26 @@ export async function doctor(_args: string[]) {
   loadTypeScript(root)
     ? good("TypeScript available (Zod pre-fill and function tracing on)")
     : skip("TypeScript not found — Zod pre-fill and tracing fall back to runtime-only");
+
+  // A project with neither next nor express gets no framework checks: init can't wire it either.
+  const flag = frameworkFlag(args);
+  const fw = typeof flag === "object" ? flag : detectFramework(pkg, flag);
+  if ("error" in fw) {
+    nope(
+      "neither" in fw && fw.neither
+        ? `${fw.error} Hoplens supports Next.js (next) and Express (express); install one, or pass --framework next|express to check one anyway.`
+        : fw.error,
+      true,
+    );
+    printSummary(state);
+    return;
+  }
+  if ("framework" in fw && fw.framework === "express") {
+    doctorExpress(root, pkg, { good, nope });
+    integrations(pkg);
+    printSummary(state);
+    return;
+  }
 
   // ── Install ─────────────────────────────────────────────────────────────
   console.log(`\n${c.dim("  Install")}`);
@@ -118,24 +140,29 @@ export async function doctor(_args: string[]) {
     }
   }
 
+  integrations(pkg);
+
+  printSummary(state);
+}
+
+/** The Integrations section, shared by the Next and Express checks. */
+function integrations(pkg: any) {
   // ── Integrations ────────────────────────────────────────────────────────
   console.log(`\n${c.dim("  Integrations")}`);
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const otelPkgs = Object.keys(deps).filter((d) => d.startsWith("@opentelemetry/"));
   otelPkgs.length
-    ? good(
+    ? ok(
         `OpenTelemetry detected (${otelPkgs.length} package${otelPkgs.length === 1 ? "" : "s"}) — Hoplens will attach as a reader`,
       )
     : skip("OpenTelemetry not detected — Hoplens runs standalone");
 
   deps.zod
-    ? good(`Zod ${deps.zod} — RequestBuilder will pre-fill from your schemas`)
+    ? ok(`Zod ${deps.zod} — RequestBuilder will pre-fill from your schemas`)
     : skip("Zod not detected — RequestBuilder won't pre-fill schema examples");
 
   const portEnv = process.env.HOPLENS_PORT;
   skip(portEnv ? `HOPLENS_PORT=${portEnv}` : "HOPLENS_PORT not set — Hoplens picks a free port automatically");
-
-  printSummary(state);
 }
 
 function printSummary(state: { criticals: number; warnings: number }) {

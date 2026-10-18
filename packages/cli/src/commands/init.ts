@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
+import { initExpress } from "../express/commands";
+import { detectFramework, frameworkFlag } from "../framework";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
@@ -12,8 +14,9 @@ const BLOCK = [
 ].join("\n");
 
 /**
- * Wire Hoplens into the current project. Patches `next.config.*` with `withHoplens()` and adds
- * the dynamic import to `instrumentation.*`. Idempotent and safe to re-run.
+ * Wire Hoplens into the current project. Next.js: patches `next.config.*` with `withHoplens()` and
+ * adds the dynamic import to `instrumentation.*`. Express: adds the register hook to the dev script.
+ * Idempotent and safe to re-run.
  */
 export async function init(args: string[]) {
   const dryRun = args.includes("--dry-run");
@@ -21,8 +24,14 @@ export async function init(args: string[]) {
 
   console.log(`\n${c.magenta("◆ Hoplens")} init\n`);
 
+  const flag = frameworkFlag(args);
+  if (typeof flag === "object") return fail(flag.error);
   const pkg = readJson(path.join(root, "package.json"));
-  if (!pkg) return fail("No package.json here. Run this from your Next.js project root.");
+  if (!pkg) return fail("No package.json here. Run this from your Next.js or Express project root.");
+  const fw = detectFramework(pkg, flag);
+  if ("error" in fw)
+    return fail(fw.neither ? `${fw.error} Hoplens supports Next.js (next) and Express (express).` : fw.error);
+  if (fw.framework === "express") return initExpress(root, pkg, dryRun);
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   if (!deps.next) return fail("This project doesn't depend on next.");
   const major = Number(

@@ -1,7 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
+import { removeExpress } from "../express/commands";
+import { detectFramework, frameworkFlag } from "../framework";
 import { c, fail, ok, skip, warn } from "../style";
+import { readJson } from "../util";
 
 /**
  * The exact snippet that `init` inserts into `register()`. We match it verbatim on
@@ -48,6 +51,16 @@ export async function remove(args: string[]) {
   const root = process.cwd();
 
   console.log(`\n${c.magenta("◆ Hoplens")} remove\n`);
+
+  // Express projects get their own undo; no package.json, or neither framework, keeps the Next path.
+  const flag = frameworkFlag(args);
+  if (typeof flag === "object") return fail(flag.error);
+  const pkg = readJson(path.join(root, "package.json"));
+  if (pkg) {
+    const fw = detectFramework(pkg, flag);
+    if ("error" in fw && !fw.neither) return fail(fw.error);
+    if ("framework" in fw && fw.framework === "express") return removeExpress(root, pkg, dryRun);
+  }
 
   const ts = loadTypeScript(root);
   const edits: Edit[] = [];

@@ -17,7 +17,21 @@ npm i -D hoplens
 
 ## Usage
 
-Preload the register hook. It works with both flags, for CommonJS and ESM apps:
+The quickest setup is the CLI, which adds the register hook to your `dev` script and nothing else:
+
+```bash
+npx hoplens init        # "dev": "node --watch src/server.js" -> "node --watch --import hoplens/express/register src/server.js"
+npx hoplens doctor      # checks the install and wiring
+npx hoplens remove      # puts the script back as it was and deletes node_modules/.cache/hoplens
+```
+
+`init` edits `scripts.dev` (or `start:dev`, or `watch`), never `start` and never your code. It
+handles `node [--watch]`, `tsx [watch]` and `nodemon` (as `nodemon --exec "node --import
+hoplens/express/register"`), with env prefixes such as `cross-env NODE_ENV=development` and `&&`
+chains kept as written. For other runners (`ts-node-dev`, `pm2`, `docker`, ...) it prints the line to
+use instead. `--dry-run` shows the change first.
+
+Or preload the register hook yourself. It works with both flags, for CommonJS and ESM apps:
 
 ```bash
 node -r hoplens/express/register server.js

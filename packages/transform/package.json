@@ -25,6 +25,7 @@
       "types": "./dist/register.d.ts",
       "default": "./dist/register.js"
     },
+    "./hooks": "./dist/hooks.mjs",
     "./ts": {
       "types": "./dist/ts.d.ts",
       "default": "./dist/ts.js"
@@ -35,7 +36,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "tsup --silent && vitest run"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

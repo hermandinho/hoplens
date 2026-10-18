@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
-import util from "node:util";
+import util, { types } from "node:util";
 import zlib from "node:zlib";
 import { type Context, type Span, context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
@@ -1280,6 +1280,47 @@ interface WrapMeta {
   line: number;
 }
 
+/**
+ * Function spans one trace may open. Past it a wrapped function runs unwrapped (a hot helper called
+ * in a loop costs a span, an args preview and a record per call otherwise) and is counted in the
+ * trace's facts.droppedSpans.
+ */
+export const MAX_FN_SPANS_PER_TRACE = 1000;
+const fnSpansOpened = new WeakMap<TraceRecord, number>();
+
+/** Function spans the trace skipped past MAX_FN_SPANS_PER_TRACE. */
+export function droppedFunctionSpans(t: TraceRecord): number {
+  return Math.max(0, (fnSpansOpened.get(t) ?? 0) - MAX_FN_SPANS_PER_TRACE);
+}
+
+/** One more function span for this trace, or false when it is over budget (counted either way). */
+function takeFnSpan(t: TraceRecord): boolean {
+  const n = fnSpansOpened.get(t) ?? 0;
+  fnSpansOpened.set(t, n + 1);
+  return n < MAX_FN_SPANS_PER_TRACE;
+}
+
+function argsJson(args: unknown[], rt: Runtime): string {
+  try {
+    return JSON.stringify(preview(args, rt.redactor));
+  } catch {
+    return '"[unreadable]"';
+  }
+}
+
+/**
+ * A native promise with nothing of the app's on it: chaining it hands back an equivalent promise.
+ * Symbol keys are not counted: Node's async_hooks put their own (async_id_symbol, kResourceStore) on
+ * every promise made while an AsyncLocalStorage is active.
+ */
+function isPlainPromise(p: Promise<unknown>): boolean {
+  try {
+    return Object.getPrototypeOf(p) === Promise.prototype && Object.getOwnPropertyNames(p).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function makeWrap(rt: Runtime) {
   const tracer = trace.getTracer("hoplens");
   return function wrap<F extends (...args: any[]) => any>(fn: F, meta: WrapMeta): F {
@@ -1287,7 +1328,9 @@ export function makeWrap(rt: Runtime) {
     const location = resolveMeta(meta, rt);
     const wrapped = function hoplensWrapped(this: any, ...args: any[]) {
       const ctx = als.getStore();
-      if (!ctx) return new.target ? Reflect.construct(fn, args, new.target) : fn.apply(this, args);
+      if (!ctx || !takeFnSpan(ctx.trace)) {
+        return new.target ? Reflect.construct(fn, args, new.target) : fn.apply(this, args);
+      }
       // The caller's frames (the loop line of an N+1), captured unformatted on the first repeat under
       // one parent only; see callsite.ts.
       const site = shouldCapture(trace.getActiveSpan() ?? ctx.trace, hoplensWrapped)
@@ -1300,15 +1343,21 @@ export function makeWrap(rt: Runtime) {
             "hoplens.kind": "function",
             "hoplens.file": location.file,
             "hoplens.line": location.line,
-            "hoplens.args": JSON.stringify(preview(args, rt.redactor)),
+            "hoplens.args": argsJson(args, rt),
           },
         },
         (span) => {
           noteSpanCallSite(span, site);
           const fail = (err: unknown) => {
-            if (err instanceof Error) span.recordException(err);
-            else span.recordException({ name: "Thrown", message: String(err) });
-            span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+            try {
+              const isErr = types.isNativeError(err) || (!types.isProxy(err) && err instanceof Error);
+              const message = isErr ? String((err as Error).message) : String(err);
+              if (isErr) span.recordException(err as Error);
+              else span.recordException({ name: "Thrown", message });
+              span.setStatus({ code: 2, message });
+            } catch {
+              span.setStatus({ code: 2, message: "[unreadable]" });
+            }
             span.end();
           };
           let out: any;
@@ -1318,18 +1367,29 @@ export function makeWrap(rt: Runtime) {
             fail(err);
             throw err;
           }
-          if (out instanceof Promise) {
-            return out.then(
-              (v) => {
-                setResult(span, v, rt);
-                span.end();
-                return v;
-              },
-              (err) => {
-                fail(err);
-                throw err;
-              },
-            );
+          if (types.isPromise(out)) {
+            const done = (v: unknown) => {
+              setResult(span, v, rt);
+              span.end();
+            };
+            if (isPlainPromise(out)) {
+              // A plain promise: the chained one is equivalent, and an un-awaited rejection still
+              // surfaces as unhandled, exactly as it would without Hoplens.
+              return out.then(
+                (v: unknown) => {
+                  done(v);
+                  return v;
+                },
+                (err: unknown) => {
+                  fail(err);
+                  throw err;
+                },
+              );
+            }
+            // A promise the app decorated (p.cancel = ..., a subclass): hand back that very object and
+            // close the span on a side chain that never rejects.
+            out.then(done, fail);
+            return out;
           }
           setResult(span, out, rt);
           span.end();
@@ -1547,7 +1607,7 @@ function explain(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
   try {
     const opts = rt.options?.insights;
     const th = resolveThresholds(opts);
-    const facts = computeFacts(t, input);
+    const facts = computeFacts(t, { ...input, droppedSpans: droppedFunctionSpans(t) });
     applyCold(rt.epochs, `${t.method} ${t.route ?? normalizeUrl(t.path)}`, facts, th.coldCompileMs);
     t.facts = facts;
     t.findings = analyze(t, facts, opts);

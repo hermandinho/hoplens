@@ -22,6 +22,10 @@ export interface AdapterState {
   routesFailed?: boolean;
   /** Options from hoplens(app, opts), applied when the deferred boot runs. */
   pendingOpts?: HoplensOptions;
+  /** Function hops (autotrace.ts + the transform's ESM hook): what the register hook set up and saw. */
+  autoTrace?: AutoTraceStats;
+  /** The code-level autoTrace hint was printed. */
+  autoTraceHinted?: boolean;
   /** hoplens() with no app listen ahead of it: boot anyway after a while. */
   lateTimer?: NodeJS.Timeout;
   banner: {
@@ -33,6 +37,16 @@ export interface AdapterState {
     rt?: Runtime;
     timer?: NodeJS.Timeout;
   };
+}
+
+export interface AutoTraceStats {
+  /** Files the hook rewrote, and the functions it wrapped in them. */
+  files: number;
+  fns: number;
+  /** Files loaded untouched, by reason (see @hoplens/transform/register HookReport). */
+  refused: Record<string, number>;
+  /** Files whose transform failed (loaded untouched); the first one is logged. */
+  errors: number;
 }
 
 const KEY = Symbol.for("hoplens.express.state");

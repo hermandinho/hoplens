@@ -4,6 +4,7 @@
 import http from "node:http";
 import https from "node:https";
 import type { HoplensOptions, Runtime } from "@hoplens/core";
+import { bindFnShim } from "./autotrace";
 import { appListening, uiReady } from "./banner";
 import { ExpressDiscoverySource } from "./discovery";
 import { resolveOptions } from "./options";
@@ -194,6 +195,15 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
     });
     rt.start();
     G.__hoplens_runtime = rt;
+    // Function hops wrapped before boot bind to core's wrap now (a no-op without the register hook's
+    // shim). autoTrace: false from code can only stop this: the modules are already loaded.
+    if (options.autoTrace !== false) {
+      try {
+        bindFnShim();
+      } catch {
+        /* function hops only */
+      }
+    }
     return rt;
   } catch (err) {
     // A half-started Runtime: stop its timers, watchers and UI server. Core's http hook cannot be

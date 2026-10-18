@@ -47,7 +47,11 @@ beforeAll(() => {
       s.on("error", (e) => console.log(JSON.stringify({ result: { error: e.code } })));
       s.listen(want, "127.0.0.1", () => {
         const rt = globalThis.__hoplens_runtime;
-        setTimeout(() => {
+        // The UI binds asynchronously, and waits ~1s (samePortRetryMs) when its next port is busy
+        // too: poll for it rather than reading it after a fixed delay.
+        const t0 = Date.now();
+        const check = () => {
+          if (rt && rt.uiPort === undefined && Date.now() - t0 < 4000) return setTimeout(check, 50);
           http.get({ host: "127.0.0.1", port: want, path: "/" }, (res) => {
             let body = "";
             res.on("data", (c) => (body += c));
@@ -56,7 +60,8 @@ beforeAll(() => {
               s.close();
             });
           });
-        }, 300);
+        };
+        setTimeout(check, 50);
       });
     `,
     // hoplens() from code, no register hook, then the app takes the UI's port.

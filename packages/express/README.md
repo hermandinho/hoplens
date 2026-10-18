@@ -80,6 +80,42 @@ under it. The hop ends when the response finishes or the route hands on with `ne
 `next('route')`, `next('router')`, `next(err)`, sync throws and Express 5 rejected promises behave
 exactly as without Hoplens. A request no route matched (a 404) has no route and no handler hop.
 
+## Function hops
+
+The register hook also wraps the exported functions of your own ES modules as they load, so each
+call made while a request runs is a hop named after the function, at its file and line, nested under
+the handler hop (and under the function that called it). The banner counts them:
+`function hops: 11 fns in 6 files`.
+
+- Scope: everything under `src/`, or without `src/` the usual dirs (`routes/`, `controllers/`,
+  `services/`, `lib/`, ...). `node_modules`, `dist/`, `build/`, `out/`, `*.d.ts`, tests and
+  `*.config.*` files are left out. `HOPLENS_OPTIONS='{"autoTrace":{"include":["lib/**"]}}'` replaces
+  the scope, `exclude` narrows it.
+- Wrapped: `export function f`, `export const f = () => ...` / `function () {}`, and `export { f }` /
+  `export { f as g }` of a top-level function. Default exports, classes and generators are not.
+- Left unwrapped so the app behaves exactly as without Hoplens: a function the module itself uses as
+  a value (`bus.on('x', f)`, `{ f }`, `export default f`, `new f()`), a function that uses `this`
+  (constructor style), and a function that calls itself (recursion would go through the wrapper at
+  every level). Files over 1 MB load untouched, as generated code. A wrapped function still returns
+  the very promise it made when the app put something on it (`p.cancel = ...`).
+- In a request at most 1000 function hops are recorded; later calls run unwrapped and count as
+  dropped spans. While function hops are on, Node's default `Error.stackTraceLimit` of 10 is raised
+  to 40 so the wrapper frames do not push your callers out of a stack trace.
+- Calls shaped like Express middleware or handlers, `(req, res[, next])` or `(err, req, res, next)`,
+  are not wrapped: they keep only their route's handler hop. A helper you call as `f(req, res)` is
+  skipped too; wrap it with `traced()` from `hoplens/trace` if you want it.
+- Lines and columns never move, so stack traces and breakpoints land where they did.
+- Works with `node` / `node --watch` (`.js`, `.mjs`, and `.ts` that Node strips itself), `-r` or
+  `--import`, and with tsx when Hoplens loads first: `node --import hoplens/express/register --import
+  tsx src/server.ts`. When another loader compiles a file before Hoplens sees it (`tsx watch --import
+  hoplens/express/register`), that file loads untouched and the banner says so in one line.
+  CommonJS modules load untouched for now.
+- Off with `HOPLENS_AUTOTRACE=0` or `HOPLENS_OPTIONS='{"autoTrace":false}'`: nothing is wrapped and
+  no TypeScript is loaded. `autoTrace` given to `hoplens(app, opts)` comes after your modules loaded,
+  so it only stops function hops from binding (and says so).
+- Findings an exported function owns (an N+1 in a service, a duplicate query) are located at that
+  function and fingerprinted under its name, so they differ from a run without function hops.
+
 ## Route list
 
 The UI's route list (and the request builder's route picker) comes from your app's router, with no
@@ -164,6 +200,7 @@ runtime starts right before your app's first `listen()`; a script that never lis
 | `HOPLENS_PORT` | Standalone UI port (default 4983) |
 | `HOPLENS_OPTIONS` | JSON `HoplensOptions`, applied before code options |
 | `HOPLENS_IGNORE` | Comma-separated path prefixes never traced, e.g. `/health,/metrics` |
+| `HOPLENS_AUTOTRACE` | `0` turns function hops off (read when the register hook loads) |
 
 `persist` is on by default here and writes route stats to `node_modules/.cache/hoplens`.
 

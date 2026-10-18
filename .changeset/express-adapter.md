@@ -56,3 +56,14 @@ static assets, route templates, handler hops and the route list; middleware hops
   no edit. Needs `persist` (the default); with `persist: false` every start is one epoch and the
   banner says so. The standalone UI waits up to a second for its port after a restart instead of
   moving to the next one.
+- Function hops: the register hook wraps the exported functions of the app's own ES modules (under
+  `src/`, or the usual dirs without it) as they load, so each call made during a request is a hop at
+  its file and line, nested under the handler hop. Plain `.js` / `.mjs`, `.ts` that Node strips
+  itself, `-r` or `--import`, and tsx loaded after Hoplens (`node --import hoplens/express/register
+  --import tsx`). Lines and columns never move, so stack traces are unchanged. Calls shaped like
+  middleware or handlers (`(req, res[, next])`, `(err, req, res, next)`) are not wrapped. The banner
+  counts the wrapped functions; files another loader compiled first (`tsx watch --import ...`) and
+  CommonJS files load untouched, said in one banner line. Off with `HOPLENS_AUTOTRACE=0` or
+  `HOPLENS_OPTIONS='{"autoTrace":false}'` (no TypeScript is loaded then); `autoTrace` passed to
+  `hoplens(app, opts)` only stops the hops from binding and prints a hint. Findings owned by a
+  wrapped function (an N+1 in a service) are located and fingerprinted under that function.

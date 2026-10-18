@@ -15,6 +15,7 @@ export default defineConfig([
     clean: ["!hooks.mjs", "!hooks.mjs.map"],
     shims: true,
     target: "node20",
+    // cjs.ts requires dist/index.js by a computed path at runtime (never bundled into register.js).
     external: ["typescript"],
   },
   {

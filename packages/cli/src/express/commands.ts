@@ -194,6 +194,11 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
     }
     if (/\bNODE_ENV=["']?production\b/.test(devCmd!))
       nope(`scripts.${dev.key} sets NODE_ENV=production — the dev gate is off, so Hoplens won't start`, false);
+    const cjsEntry = commonJSEntryUnderImport(root, devCmd!, pkg);
+    if (cjsEntry)
+      skip(
+        `${cjsEntry} is a CommonJS entry with exports: under --import Node loads it through its ESM loader, so its own functions get no function hops (the modules it requires do) — preload with -r ${REGISTER} to cover it too`,
+      );
   } else if (inCode.length) {
     skip(`hoplens(app) is called in ${inCode.join(", ")} — wired from code, no register hook needed`);
   } else if (dev) {
@@ -222,4 +227,31 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
       `${file} sets NODE_OPTIONS with the Hoplens register hook — every node process that reads it loads Hoplens; put ${FLAG} in scripts.dev instead`,
       false,
     );
+}
+
+/**
+ * The dev script's entry when Hoplens is loaded with `--import` and the entry is a CommonJS file that
+ * assigns functions to its exports: Node runs such an entry through its ESM loader, which reads the
+ * source itself, so the CommonJS layer cannot rewrite that one file. Null otherwise, and null under tsx
+ * (`tsx [watch] --import ...`, `--import tsx`): tsx loads the entry so that it is wrapped.
+ */
+export function commonJSEntryUnderImport(root: string, devCmd: string, pkg: any): string | null {
+  if (!/--import[=\s]+["']?(?:@hoplens\/express|hoplens\/express)\/register\b/.test(devCmd)) return null;
+  if (/(?:^|[\s;&|=/"'])tsx(?:\/esm)?(?=$|[\s"';&|])/.test(devCmd)) return null;
+  const entry = entryFiles(devCmd)[0];
+  // TypeScript Node strips itself (.ts, .cts) reaches the ESM hook with its source, and is wrapped there.
+  if (!entry || /\.(m(j|t)s|c?ts)$/.test(entry)) return null;
+  if (!/\.cjs$/.test(entry) && pkg?.type === "module") return null;
+  let src: string;
+  try {
+    src = fs.readFileSync(path.join(root, entry), "utf8");
+  } catch {
+    return null;
+  }
+  if (/^\s*(?:import\s*[\w{*"']|export\s)/m.test(src)) return null;
+  // A function (or an object of them), or a local name (`exports.f = f`, tsc's output) assigned to
+  // exports, or Object.defineProperty(exports, ...): the shapes the CommonJS layer wraps.
+  const exportsFn =
+    /\b(?:module\.)?exports\s*(?:\.\s*[\w$]+)?\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[\w$]+\s*=>|\{)|\b(?:module\.)?exports\s*\.\s*[\w$]+\s*=\s*(?!void\b|null\b|undefined\b|true\b|false\b|\d)[\w$]+\s*(?:;|$)|\bdefineProperty\(\s*(?:module\.)?exports\s*,\s*["'](?!__esModule["'])/m;
+  return exportsFn.test(src) ? entry : null;
 }

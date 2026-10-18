@@ -88,11 +88,12 @@ describe("ESM hook", () => {
       { name: "b", file: "src/a.js", line: 4 },
     ]);
     expect(out.aMarked).toBe(true);
-    // One hook instance: each file reported once, the CommonJS file refused, nothing else reported.
-    expect(out.reports).toEqual([
-      { type: "wrapped", file: "src/a.js", fns: 2 },
-      { type: "refused", file: "src/old.cjs", reason: "commonjs" },
-    ]);
+    // One hook instance: each file reported once, nothing else reported. The CommonJS file imported
+    // from ESM reaches the CommonJS layer with its source already read by Node's ESM loader (reported
+    // synchronously there, so in either order with the hook's report).
+    expect(out.reports).toHaveLength(2);
+    expect(out.reports).toContainEqual({ type: "wrapped", file: "src/a.js", fns: 2 });
+    expect(out.reports).toContainEqual({ type: "refused", file: "src/old.cjs", reason: "esm-loader" });
   });
 
   test("a source that differs from the file on disk is refused and loads untouched", () => {
@@ -252,5 +253,40 @@ w.on("message", (m) => console.log(JSON.stringify({ registeredInWorker: m })));
 `,
     );
     expect(parse(node(["worker-main.cjs"]).stdout)).toEqual({ registeredInWorker: false });
+  });
+});
+
+describe("ESM hook: CommonJS that Node reads itself", () => {
+  test("--import with CommonJS TypeScript Node strips (.cts): the pristine source is wrapped in the hook", () => {
+    const app = path.join(root, "ctsapp");
+    const w = (rel: string, s: string) => write(path.join("ctsapp", rel), s);
+    w("package.json", JSON.stringify({ name: "ctsapp", private: true }));
+    w(
+      "src/math.cts",
+      "function add(a: number, b: number): number {\n  return a + b;\n}\nexports.add = add;\nexports.twice = (n: number): number => n * 2;\n",
+    );
+    w(
+      "src/server.cts",
+      `const math = require("./math.cts");
+exports.handler = function handler(): number {
+  return math.add(1, 2);
+};
+setTimeout(() => {
+  console.log(JSON.stringify({ sum: exports.handler(), marked: [Boolean(math.add.__hoplens), Boolean(math.twice.__hoplens)], reports: globalThis.__reports }));
+}, 200);
+`,
+    );
+    const r = node(["--import", pathToFileURL(path.join(root, "preload.cjs")).href, "src/server.cts"], app);
+    expect(r.stderr).not.toMatch(/Error:/);
+    const out = parse(r.stdout);
+    expect(out.sum).toBe(3);
+    expect(out.marked).toEqual([true, true]);
+    expect(out.reports).toEqual(
+      expect.arrayContaining([
+        { type: "wrapped", file: "src/server.cts", fns: 1 },
+        { type: "wrapped", file: "src/math.cts", fns: 2 },
+      ]),
+    );
+    expect(out.reports.filter((x: any) => x.type !== "wrapped")).toEqual([]);
   });
 });

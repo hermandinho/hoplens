@@ -64,6 +64,22 @@ describe("presets", () => {
     expect(shouldTrace(at("src/services/a.ts"), src, { ...node, include: ["src/services/**"] })).toBe(true);
     expect(shouldTrace(at("src/services/a.ts"), src, { ...node, exclude: ["src/services/**"] })).toBe(false);
   });
+
+  test("node: build output is in scope only through an include glob naming its dir", () => {
+    const src = "exports.a = function () {};";
+    expect(shouldTrace(at("dist/a.js"), src, { ...node, include: ["dist/**"] })).toBe(true);
+    expect(shouldTrace(at("build/lib/a.js"), src, { ...node, include: ["src/**", "build/lib/**"] })).toBe(true);
+    // A broad glob never pulls compiled output in, nor does an include naming another dir.
+    expect(shouldTrace(at("dist/a.js"), src, { ...node, include: ["**"] })).toBe(false);
+    expect(shouldTrace(at("dist/a.js"), src, { ...node, include: ["build/**"] })).toBe(false);
+    // Everything else still applies inside it: tests, declarations, node_modules, the user's excludes.
+    for (const rel of ["dist/a.test.js", "dist/a.d.ts", "dist/node_modules/x.js"]) {
+      expect(shouldTrace(at(rel), src, { ...node, include: ["dist/**"] }), rel).toBe(false);
+    }
+    expect(shouldTrace(at("dist/a.js"), src, { ...node, include: ["dist/**"], exclude: ["dist/a.js"] })).toBe(false);
+    // The Next preset never had the output excludes.
+    expect(shouldTrace(at("dist/a.js"), src, { root, include: ["dist/**"] })).toBe(true);
+  });
 });
 
 describe("mayHaveTargets", () => {

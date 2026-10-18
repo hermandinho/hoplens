@@ -5,8 +5,8 @@
 // @hoplens/core is never loaded.
 //
 // Function hops: unless autoTrace is off in the environment (HOPLENS_OPTIONS / HOPLENS_AUTOTRACE),
-// the core-free shim goes in first and the transform's ESM hook wraps the exported functions of the
-// app's own modules as they load (autotrace.ts).
+// the core-free shim goes in first and the transform's ESM hook and CommonJS layer wrap the exported
+// functions of the app's own modules as they load (autotrace.ts).
 //
 // Main thread only: under `-r` Node also runs this preload inside the module hooks worker.
 

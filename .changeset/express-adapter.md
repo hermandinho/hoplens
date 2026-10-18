@@ -56,17 +56,23 @@ static assets, route templates, handler hops and the route list; middleware hops
   no edit. Needs `persist` (the default); with `persist: false` every start is one epoch and the
   banner says so. The standalone UI waits up to a second for its port after a restart instead of
   moving to the next one.
-- Function hops: the register hook wraps the exported functions of the app's own ES modules (under
-  `src/`, or the usual dirs without it) as they load, so each call made during a request is a hop at
+- Function hops: the register hook wraps the exported functions of the app's own modules, ES modules
+  and CommonJS (under `src/`, or the usual dirs without it) as they load, so each call made during a request is a hop at
   its file and line, nested under the handler hop. Plain `.js` / `.mjs`, `.ts` that Node strips
   itself, `-r` or `--import`, and tsx in either order: `node --import hoplens/express/register
   --import tsx`, `node --import tsx --import hoplens/express/register`, and the `tsx [watch]
   --import hoplens/express/register` command `hoplens init` writes (tsx's compiled output is mapped
-  back to the `.ts` file on disk). Lines and columns never move, so stack traces are unchanged. Calls
+  back to the `.ts` file on disk). CommonJS apps work under `-r` and `--import` (the entry under
+  `--import` aside: Node reads it through its ESM loader, the banner and `hoplens doctor` say so and
+  suggest `-r`; a `.cts` entry Node strips itself is wrapped), including TypeScript compiled to
+  CommonJS by tsx in any flag order, ts-node/register (type-checking included) in either `-r` order, and tsc output in
+  `dist/` once `autoTrace.include` names it. CommonJS exports are wrapped on the exports property
+  (`exports.f`, `module.exports = { f }`, tsc's `exports.f = f`); getter and frozen exports and
+  `module.exports = f` load as they are. Lines and columns never move, so stack traces are unchanged. Calls
   shaped like middleware or handlers (`(req, res[, next])`, `(err, req, res, next)`) are not wrapped.
   The banner counts the wrapped functions; a TypeScript file whose compiled output does not map back
-  with certainty, any other file another loader changed first, and CommonJS files load untouched,
-  said in one banner line (with the first such file and what did not match). Off with `HOPLENS_AUTOTRACE=0` or
+  with certainty, any other file another loader changed first, and a CommonJS file Node read through
+  its ESM loader load untouched, said in one banner line (with the first such file and what did not match). Off with `HOPLENS_AUTOTRACE=0` or
   `HOPLENS_OPTIONS='{"autoTrace":false}'` (no TypeScript is loaded then); `autoTrace` passed to
   `hoplens(app, opts)` only stops the hops from binding and prints a hint. Findings owned by a
   wrapped function (an N+1 in a service) are located and fingerprinted under that function.

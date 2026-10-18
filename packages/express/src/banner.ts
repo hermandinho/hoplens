@@ -81,7 +81,14 @@ export function refusedNote(st: AutoTraceStats): string | undefined {
       `${plural(unmapped, "TypeScript file")} whose compiled output (tsx?) Hoplens could not map back to the source${where}; to wrap ${unmapped === 1 ? "it" : "them"}, load Hoplens first: node --import hoplens/express/register --import tsx <entry>`,
     );
   }
-  if (cjs) parts.push(`${plural(cjs, "CommonJS file")} (not supported yet)`);
+  if (cjs) parts.push(`${plural(cjs, "CommonJS file")} another loader compiled for Node's ESM loader`);
+  const viaEsm = st.refused["esm-loader"] ?? 0;
+  if (viaEsm) {
+    const first = st.firstRefused?.["esm-loader"];
+    parts.push(
+      `${plural(viaEsm, "CommonJS file")} Node loaded through its ESM loader${first ? ` (${first.file}${viaEsm > 1 ? ", ..." : ""})` : ""}, as it does for the entry under --import and for a CommonJS file imported from ESM; for a CommonJS entry, preload with -r hoplens/express/register instead of --import`,
+    );
+  }
   const large = st.refused.large ?? 0;
   if (large) parts.push(`${plural(large, "file")} over 1 MB (generated code?), not parsed`);
   return parts.length ? `function hops skipped for ${parts.join("; ")}` : undefined;

@@ -16,7 +16,34 @@ Groundwork for function hops outside Next.js. The Next.js output is unchanged.
   `mayHaveTargets()` is a regex prescan that rules a file out before TypeScript is loaded.
 - `@hoplens/transform/register` now registers a Node ESM load hook (`module.register()`, main thread
   only, once per process) that rewrites in-scope ES modules (`preset: "node"` by default) when the
-  source it gets is byte-identical to the file on disk. CommonJS is not handled yet.
+  source it gets is byte-identical to the file on disk.
+- CommonJS: `register()` also installs a layer on `Module._extensions` (`.js`, `.cjs`, `.ts`, `.cts`,
+  whichever handlers exist) that stays outermost: it re-wraps a handler another loader (tsx,
+  ts-node) installs later, on the next `require`. For an in-scope file it hands the next handler the
+  source from disk plus the trailer, through an `fs.readFileSync` swap that answers for that one
+  resolved filename only, from the handler call until it calls `module._compile` (an own property of
+  that one module object; `Module.prototype._compile` is never touched), restored in `finally`.
+  The transform runs only when the handler reads the file. A CommonJS module whose source Node's ESM
+  loader already read (an `--import` entry, a file imported from ESM) loads untouched and is reported
+  as `reason: "esm-loader"`. A handler slot that wraps whatever is assigned to it (append-transform)
+  is healed once per handler another loader installs, and a patcher that wraps `fs.readFileSync`
+  during a swap keeps the layer's read under its own for good (no read loop). CommonJS that Node's
+  ESM loader reads itself (`.cts`, or `.ts` in a CommonJS package, under `--import`) is wrapped in the
+  ESM hook when its source is the file on disk. The disposer puts `Module._extensions` and
+  `Module._load` back.
+- New `transformCommonJS(source, file, opts)`: TypeScript with `export` syntax gets the module
+  trailer (the loader compiles the rebinding); JavaScript with `import` / `export` syntax is left to
+  the ESM path; CommonJS shapes (`exports.X = f`, `module.exports.X = f`, `module.exports = { a, b: f,
+  c() {} }`, `Object.defineProperty(exports, "X", { value })`, tsc's `exports.X = void 0` header) get a
+  trailer that rebinds the exports property only when it is still an own writable data property
+  holding a function, inside try/catch: getter, frozen and non-writable exports are skipped without
+  throwing, and `module.exports = f` is never wrapped. One function under several keys gets one
+  wrapper; a function calling itself through its own export (`exports.f(n - 1)`, tsc's
+  `(0, exports.f)(...)`, `this.f()` in a method) is skipped; tsc's `(0, exports.f)(...)` is a call, not
+  a value use. In a `.ts` / `.cts` file the appended line is preceded by `// @ts-ignore`, so
+  ts-node's type-check accepts it. `mayHaveCommonJSTargets()` is its regex prescan.
+- Under `"node"`, an `include` glob that starts with `dist/`, `build/` or `out/` brings that build
+  output back into scope (a broad `**` does not).
 - COMPILED mode, for a `.ts` / `.mts` ES module another loader compiled before the hook saw it (tsx
   first: `tsx [watch] --import ...`, `node --import tsx --import ...`): new `transformCompiled(compiled,
   raw, file, opts)` parses the raw file from disk for what to wrap and its lines, finds each function

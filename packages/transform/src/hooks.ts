@@ -131,8 +131,32 @@ function relOf(file: string): string {
 function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): string | undefined {
   const t = transform();
   if (r.format === "commonjs" || r.format === "commonjs-typescript") {
-    if (t.shouldTrace(file, "", o)) report({ type: "refused", file: relOf(file), reason: "commonjs" });
-    return undefined;
+    // No source: Node hands the file to the CommonJS loader, where register()'s CommonJS layer sees it
+    // (and reports it). With a source, Node compiles it here, out of that layer's reach: the bytes on
+    // disk (Node read it itself, as it does for CommonJS TypeScript it strips: a .cts, or a .ts in a
+    // CommonJS package) get the CommonJS trailer, appended at EOF; another loader's output is refused.
+    if (r.source == null || !t.shouldTrace(file, "", o)) return undefined;
+    const cbytes = bytesOf(r.source);
+    if (cbytes.length > MAX_SOURCE_BYTES) {
+      report({ type: "refused", file: relOf(file), reason: "large" });
+      return undefined;
+    }
+    let cdisk: Buffer | undefined;
+    try {
+      cdisk = fs.readFileSync(file);
+    } catch {
+      /* not on disk as such */
+    }
+    if (!cdisk?.equals(cbytes)) {
+      report({ type: "refused", file: relOf(file), reason: "commonjs" });
+      return undefined;
+    }
+    const csrc = cbytes.toString("utf8");
+    if (!t.shouldTrace(file, csrc, o)) return undefined;
+    const c = t.transformCommonJS(csrc, file, o);
+    if (!c) return undefined;
+    report({ type: "wrapped", file: relOf(file), fns: c.fns });
+    return c.code;
   }
   if ((r.format !== "module" && r.format !== "module-typescript") || r.source == null) return undefined;
   const bytes = bytesOf(r.source);

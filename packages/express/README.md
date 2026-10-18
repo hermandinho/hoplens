@@ -82,17 +82,25 @@ exactly as without Hoplens. A request no route matched (a 404) has no route and 
 
 ## Function hops
 
-The register hook also wraps the exported functions of your own ES modules as they load, so each
-call made while a request runs is a hop named after the function, at its file and line, nested under
+The register hook also wraps the exported functions of your own modules (ES modules and CommonJS)
+as they load, so each call made while a request runs is a hop named after the function, at its file and line, nested under
 the handler hop (and under the function that called it). The banner counts them:
 `function hops: 11 fns in 6 files`.
 
 - Scope: everything under `src/`, or without `src/` the usual dirs (`routes/`, `controllers/`,
   `services/`, `lib/`, ...). `node_modules`, `dist/`, `build/`, `out/`, `*.d.ts`, tests and
   `*.config.*` files are left out. `HOPLENS_OPTIONS='{"autoTrace":{"include":["lib/**"]}}'` replaces
-  the scope, `exclude` narrows it.
+  the scope, `exclude` narrows it. Build output comes in only through an include that names its dir
+  (`"include":["dist/**"]` for tsc output run with `node dist/server.js`).
 - Wrapped: `export function f`, `export const f = () => ...` / `function () {}`, and `export { f }` /
   `export { f as g }` of a top-level function. Default exports, classes and generators are not.
+- CommonJS: `exports.f = f`, `exports.f = function () {}` / `() => {}`, `module.exports.f = ...`,
+  `module.exports = { f, g: function () {}, h() {} }`, `Object.defineProperty(exports, "f", { value, writable: true })`
+  and tsc's output (`exports.f = void 0; ... exports.f = f`). The *exports property* is rebound once the
+  module ran, and only when it is still a writable data property holding a function: getter exports
+  (tsc re-exports, esbuild's `__export`), frozen and non-writable exports load as they are, and
+  `module.exports = f` itself is never wrapped. A call through the module's own local binding
+  (`f()` inside the file) stays unwrapped; `module.exports.f()` / `exports.f()` goes through the hop.
 - Left unwrapped so the app behaves exactly as without Hoplens: a function the module itself uses as
   a value (`bus.on('x', f)`, `{ f }`, `export default f`, `new f()`), a function that uses `this`
   (constructor style), and a function that calls itself (recursion would go through the wrapper at
@@ -105,16 +113,34 @@ the handler hop (and under the function that called it). The banner counts them:
   are not wrapped: they keep only their route's handler hop. A helper you call as `f(req, res)` is
   skipped too; wrap it with `traced()` from `hoplens/trace` if you want it.
 - Lines and columns never move, so stack traces and breakpoints land where they did.
-- Runners (ES modules; CommonJS modules load untouched for now):
+- Runners:
 
-  | Command | Function hops |
-  |---|---|
-  | `node [--watch] --import hoplens/express/register src/server.js` (`.js`, `.mjs`) | yes |
-  | the same with `.ts` that Node strips itself (Node 22.18+, or 22.6+ with `--experimental-strip-types`) | yes |
-  | `node -r hoplens/express/register ...` | yes |
-  | `node --import hoplens/express/register --import tsx src/server.ts` | yes: Hoplens sees the raw `.ts` |
-  | `tsx [watch] --import hoplens/express/register src/server.ts` (what `hoplens init` writes) | yes: tsx's compiled output is mapped back to the `.ts` file |
-  | `node --import tsx --import hoplens/express/register src/server.ts` | yes, as above |
+  | Command | ES modules | CommonJS |
+  |---|---|---|
+  | `node [--watch] --import hoplens/express/register src/server.js` (`.js`, `.mjs`, `.cjs`) | yes | yes, except the entry file itself (see below) |
+  | the same with `.ts` / `.cts` that Node strips itself (Node 22.18+, or 22.6+ with `--experimental-strip-types`) | yes | yes, entry included (Node hands the ESM hook the file as it is on disk) |
+  | `node -r hoplens/express/register ...` | yes | yes, entry included |
+  | `node --import hoplens/express/register --import tsx src/server.ts` | yes: Hoplens sees the raw `.ts` | yes |
+  | `tsx [watch] --import hoplens/express/register src/server.ts` (what `hoplens init` writes) | yes: tsx's compiled output is mapped back to the `.ts` file | yes |
+  | `node --import tsx --import hoplens/express/register src/server.ts`, `node -r hoplens/express/register --import tsx ...` | yes, as above | yes |
+  | `node -r ts-node/register -r hoplens/express/register src/server.ts` (either `-r` order) | - | yes (tested with ts-node 10.9.2), type-checking mode included (a `// @ts-ignore` line goes before the appended line) |
+  | `node dist/server.js` (tsc output) | with `autoTrace.include: ["dist/**"]` | with `autoTrace.include: ["dist/**"]` |
+
+  CommonJS files are rewritten before the loader compiles them (Node, tsx or ts-node): while
+  `require()` loads one of your files, Hoplens hands that loader the file's source plus a few lines
+  appended at the end, through `fs.readFileSync` for that one file only and only until the loader
+  compiles it; every other read sees the disk. Hoplens stays the outermost loader even when tsx or
+  ts-node register after it. Two cases load untouched, named in the banner: a CommonJS entry run
+  with `--import` (Node reads it through its ESM loader; the modules it requires are wrapped; use
+  `-r hoplens/express/register` to wrap the entry too, and `hoplens doctor` points it out), and a
+  CommonJS file imported from an ES module.
+
+  The wrapper replaces the `exports` property after the module ran, so a few things keep the
+  original function: calls through the module's own local name, a function that calls itself
+  through its own export (`exports.f(n - 1)`; skipped, so recursion depth stays the same), and a
+  module in a `require` cycle that read the export while its partner was still loading (everyone
+  who requires it afterwards gets the wrapper, so `on(a.f)` there and `off(a.f)` later do not
+  match). One function exported under several names gets one wrapper.
 
   When tsx compiles a file first, Hoplens finds each exported function in tsx's output by its export
   name and only appends code after it, so tsx's source map, stack traces and breakpoints are
@@ -122,8 +148,8 @@ the handler hop (and under the function that called it). The banner counts them:
   compiled the file: a file whose compiled output does not map back to the `.ts` file with certainty
   (a top-level `using`, lowered `async`, another loader's rewrites) loads untouched, and the banner
   names it in one line; loading Hoplens before the loader wraps it.
-- Off with `HOPLENS_AUTOTRACE=0` or `HOPLENS_OPTIONS='{"autoTrace":false}'`: nothing is wrapped and
-  no TypeScript is loaded. `autoTrace` given to `hoplens(app, opts)` comes after your modules loaded,
+- Off with `HOPLENS_AUTOTRACE=0` or `HOPLENS_OPTIONS='{"autoTrace":false}'`: nothing is wrapped, no
+  TypeScript is loaded, and `Module._extensions` and `fs.readFileSync` stay Node's own. `autoTrace` given to `hoplens(app, opts)` comes after your modules loaded,
   so it only stops function hops from binding (and says so).
 - Findings an exported function owns (an N+1 in a service, a duplicate query) are located at that
   function and fingerprinted under its name, so they differ from a run without function hops.

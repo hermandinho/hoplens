@@ -370,8 +370,18 @@ describe("banner lines", () => {
     const note = refusedNote({ files: 0, fns: 0, refused: { compiled: 2, commonjs: 1 }, errors: 0 })!;
     expect(note).toContain("2 files compiled by another loader");
     expect(note).toContain("node --import hoplens/express/register --import tsx");
-    expect(note).toContain("1 CommonJS file (not supported yet)");
+    expect(note).toContain("1 CommonJS file another loader compiled for Node's ESM loader");
     expect(note.includes("\n")).toBe(false);
+    const viaEsm = refusedNote({
+      files: 0,
+      fns: 0,
+      refused: { "esm-loader": 2 },
+      firstRefused: { "esm-loader": { file: "src/legacy.cjs" } },
+      errors: 0,
+    })!;
+    expect(viaEsm).toBe(
+      "function hops skipped for 2 CommonJS files Node loaded through its ESM loader (src/legacy.cjs, ...), as it does for the entry under --import and for a CommonJS file imported from ESM; for a CommonJS entry, preload with -r hoplens/express/register instead of --import",
+    );
     const large = refusedNote({ files: 0, fns: 0, refused: { large: 1 }, errors: 0 })!;
     expect(large).toBe("function hops skipped for 1 file over 1 MB (generated code?), not parsed");
     const one = refusedNote({

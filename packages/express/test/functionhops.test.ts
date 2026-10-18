@@ -208,7 +208,10 @@ describe("ESM JavaScript (--import)", () => {
     const out = await poll(async () => (s.stdout().includes("function hops:") ? s.stdout() : undefined));
     expect(out).toContain("function hops: 5 fns in 1 file");
     expect(out.split("function hops skipped").length - 1).toBe(1);
-    expect(out).toContain("function hops skipped for 1 CommonJS file (not supported yet)");
+    // legacy.cjs is imported from ESM: Node's ESM loader read it, so the CommonJS layer could not swap it.
+    expect(out).toContain(
+      "function hops skipped for 1 CommonJS file Node loaded through its ESM loader (src/legacy.cjs), as it does for the entry under --import and for a CommonJS file imported from ESM",
+    );
   });
 });
 
@@ -353,7 +356,8 @@ async function startTree(args: string[], env: Record<string, string | undefined>
   return s;
 }
 
-describe.skipIf(!TSX_CLI)("tsx CLI (COMPILED mode)", () => {
+// Each case starts the tsx CLI (which spawns the app as a child) twice: ~4.6s alone, more under load.
+describe.skipIf(!TSX_CLI)("tsx CLI (COMPILED mode)", { timeout: 30_000 }, () => {
   test.each([
     ["tsx --import hoplens", [] as string[]],
     ["tsx watch --import hoplens", ["watch"]],

@@ -174,4 +174,56 @@ describe("hoplens doctor (express)", () => {
     expect(text).not.toContain("instrumentation");
     expect(process.exitCode).toBe(1);
   });
+
+  test("a CommonJS entry with exports under --import — info with the -r fix, exit 0; -r or an ES module entry — no note", async () => {
+    const entry = "const express = require('express');\nexports.handler = function handler() {};\n";
+    healthy();
+    fx.write("src/server.js", entry);
+    await run();
+    expect(out.text()).toContain(
+      "src/server.js is a CommonJS entry with exports: under --import Node loads it through its ESM loader",
+    );
+    expect(out.text()).toContain("preload with -r hoplens/express/register to cover it too");
+    expect(process.exitCode).toBe(0);
+
+    out.restore();
+    out = captureConsole();
+    healthy({ scripts: { dev: "node --watch -r hoplens/express/register src/server.js" } });
+    await run();
+    expect(out.text()).not.toContain("CommonJS entry");
+
+    out.restore();
+    out = captureConsole();
+    healthy({ type: "module" });
+    fx.write("src/server.js", "import express from 'express';\nexport function handler() {}\n");
+    await run();
+    expect(out.text()).not.toContain("CommonJS entry");
+  });
+
+  test("the CommonJS-entry note: `exports.f = f` counts; under tsx (which wraps the entry) there is no note", async () => {
+    healthy({ scripts: { dev: "node --watch --import hoplens/express/register src/server.js" } });
+    fx.write("src/server.js", "const express = require('express');\nfunction health() {}\nexports.health = health;\n");
+    await run();
+    expect(out.text()).toContain("src/server.js is a CommonJS entry with exports");
+
+    for (const dev of [
+      "tsx watch --import hoplens/express/register src/server.js",
+      "tsx --import hoplens/express/register src/server.js",
+      "node --import tsx --import hoplens/express/register src/server.js",
+    ]) {
+      out.restore();
+      out = captureConsole();
+      healthy({ scripts: { dev } });
+      fx.write("src/server.js", "const express = require('express');\nexports.health = function () {};\n");
+      await run();
+      expect(out.text(), dev).not.toContain("CommonJS entry");
+    }
+    // A .cts entry Node strips itself reaches the ESM hook with its source and is wrapped there.
+    out.restore();
+    out = captureConsole();
+    healthy({ scripts: { dev: "node --watch --import hoplens/express/register src/server.cts" } });
+    fx.write("src/server.cts", "const express = require('express');\nexports.health = function () {};\n");
+    await run();
+    expect(out.text()).not.toContain("CommonJS entry");
+  });
 });

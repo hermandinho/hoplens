@@ -284,6 +284,27 @@ describe("samePortRetryMs", () => {
     expect(rt.uiPort).toBe(port);
   });
 
+  test("a reserved port (EACCES, Windows excluded ranges) moves up at once instead of giving up", async () => {
+    const { server, port } = await hold();
+    server.close();
+    const listen = http.Server.prototype.listen;
+    const spy = vi.spyOn(http.Server.prototype, "listen").mockImplementation(function (this: http.Server, ...a: any[]) {
+      if (a[0] !== port) return listen.apply(this, a as any);
+      const err = Object.assign(new Error(`listen EACCES: permission denied 127.0.0.1:${port}`), { code: "EACCES" });
+      process.nextTick(() => this.emit("error", err));
+      return this;
+    });
+    try {
+      const t0 = Date.now();
+      const rt = await ui(port, 1000);
+      expect(rt.uiPort).toBeGreaterThan(port);
+      // No same-port wait: a reserved port never frees up.
+      expect(Date.now() - t0).toBeLessThan(500);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("moves up once the wait is over, and at once without it", async () => {
     const a = await hold();
     try {

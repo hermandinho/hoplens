@@ -184,4 +184,17 @@ describe("adapter seams over the http tap", () => {
     expect(t.spans.find((s) => s.name === "nextNull")?.error).toBeUndefined();
     expect(t.error?.message).toBeDefined();
   });
+
+  test("a body over the capture limit written in one chunk keeps its first bytes (res.json of a big export)", async () => {
+    const body = JSON.stringify({ rows: Array.from({ length: 20000 }, (_, i) => ({ id: i, name: `row ${i}` })) });
+    expect(body.length).toBeGreaterThan(512 * 1024);
+    handler = (_req, res) => {
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      res.end(body);
+    };
+    const t = await hit("/api/report");
+    expect(t.response.body).toMatchObject({ truncated: true, size: Buffer.byteLength(body) });
+    // Cut JSON doesn't parse: it is shown as text, starting with the response's own first bytes.
+    expect(t.response.body?.text?.startsWith('{"rows":[{"id":0,"name":"row 0"}')).toBe(true);
+  });
 });

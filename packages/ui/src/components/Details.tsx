@@ -15,6 +15,7 @@ import { selectedTrace } from "../state/store";
 import { SpanDetail } from "./Inspector";
 import { JsonView } from "./JsonView";
 import { Sheet } from "./Mobile";
+import { fmtBytes } from "./TraceHeader";
 
 const TABS: readonly { id: DetailsTab; label: string }[] = [
   { id: "response", label: "Response" },
@@ -235,7 +236,12 @@ function BodyBlock({ body, empty }: { body?: BodyCapture; empty: string }) {
       <div class="section-title">
         Body
         {body.contentType && <span class="dim mono"> {body.contentType}</span>}
-        {body.truncated && <span class="pane-issue"> truncated</span>}
+        {body.truncated && (
+          <span class="pane-issue" title="Hoplens keeps the first 512KB of a body and shows up to 20,000 characters">
+            {" "}
+            truncated: first {fmtBytes(new TextEncoder().encode(body.text ?? "").length)} of {fmtBytes(body.size)} shown
+          </span>
+        )}
       </div>
       {asJson !== undefined ? <JsonView value={asJson} /> : <pre class="code-block mono">{body.text ?? ""}</pre>}
     </>

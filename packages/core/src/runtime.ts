@@ -320,8 +320,11 @@ export class Runtime {
     markOwnServer(server);
     server.once("error", (err: NodeJS.ErrnoException) => {
       if (this.stopped) return;
-      const busy = err?.code === "EADDRINUSE";
-      if (busy && attempt === 0 && this.samePortRetryMs > 0 && Date.now() - since < this.samePortRetryMs) {
+      const inUse = err?.code === "EADDRINUSE";
+      // EACCES: a port in a Windows excluded range (Hyper-V/WSL reserve blocks of them). It never frees
+      // up, so it skips the same-port wait, but the next port usually works.
+      const busy = inUse || err?.code === "EACCES";
+      if (inUse && attempt === 0 && this.samePortRetryMs > 0 && Date.now() - since < this.samePortRetryMs) {
         // The configured port only: the previous process of a watch restart may still be closing it.
         const t = setTimeout(() => this.listen(port, 0, since), SAME_PORT_RETRY_STEP_MS);
         t.unref?.();

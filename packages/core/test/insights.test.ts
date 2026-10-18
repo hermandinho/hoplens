@@ -1,4 +1,6 @@
+import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { setRecordCallSite } from "../src/callsite";
 import { computeFacts } from "../src/facts";
 import { DEFAULT_THRESHOLDS, analyze } from "../src/insights";
 import type { Finding, FindingRule, SpanRecord, TraceRecord } from "../src/types";
@@ -8,6 +10,7 @@ function run(t: TraceRecord, factsOverride: Partial<ReturnType<typeof computeFac
   const facts = { ...computeFacts(t), ...factsOverride };
   return analyze(t, facts);
 }
+const pkgRoot = path.resolve(__dirname, "..");
 const rules = (fs: Finding[]) => fs.map((f) => f.rule);
 const only = (fs: Finding[], rule: FindingRule) => fs.filter((f) => f.rule === rule);
 
@@ -120,6 +123,35 @@ describe("duplicate", () => {
     const a = db(fn.id, 10, 20, "q", { attrs: { "db.statement": "q", "hoplens.db.params": "[1]" } });
     const b = db(fn.id, 30, 45, "q", { attrs: { "db.statement": "q", "hoplens.db.params": "[2]" } });
     expect(rules(run(makeTrace([root, handler, fn, a, b])))).not.toContain("duplicate");
+  });
+
+  test("through a traced function called twice: owned by the caller, located at the repeat call", () => {
+    const { root, handler, fn } = skeleton(200);
+    const q = { "db.statement": "SELECT * FROM products WHERE id = $1", "hoplens.db.params": "[7]" };
+    const spans: SpanRecord[] = [root, handler, fn];
+    const wrappers: SpanRecord[] = [];
+    for (let i = 0; i < 2; i++) {
+      const w = span({
+        kind: "function",
+        name: "findProduct",
+        parentId: fn.id,
+        start: 10 + i * 40,
+        end: 40 + i * 40,
+        location: { file: "src/services/products.js", line: 9 },
+      });
+      wrappers.push(w);
+      spans.push(w, db(w.id, w.start + 1, w.end - 1, q["db.statement"], { attrs: q }));
+    }
+    // Core captures the caller's frames on the 2nd call of a wrapped function under one parent.
+    const here = path.join(pkgRoot, "test/insights.test.ts");
+    setRecordCallSite(wrappers[1]!, { stack: `Error\n    at listProducts (${here}:5:3)` }, pkgRoot);
+    const out = only(run(makeTrace(spans, { duration: 200 })), "duplicate");
+    expect(out).toHaveLength(1);
+    const f = out[0]!;
+    expect(f.count).toBe(2);
+    expect(f.fn).toBe("listProducts");
+    expect(f.title).toContain("via findProduct()");
+    expect(f.location).toMatchObject({ file: "test/insights.test.ts", line: 5, via: "call-site" });
   });
 
   test("not reported again when n-plus-1 fires on the same group", () => {

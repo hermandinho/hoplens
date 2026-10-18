@@ -177,9 +177,15 @@ function captureResponse(rt: Runtime, ctx: Ctx, reqContentLength: number | undef
       : typeof chunk === "string"
         ? Buffer.from(chunk, typeof encoding === "string" ? (encoding as BufferEncoding) : "utf8")
         : Buffer.from(chunk.buffer ?? chunk, chunk.byteOffset ?? 0, chunk.byteLength ?? undefined);
+    const room = MAX_BODY - size;
     size += buf.length;
-    if (size <= MAX_BODY) chunks.push(buf);
-    else truncated = true;
+    if (buf.length <= room) chunks.push(buf);
+    else {
+      // Keep what fits: res.json() of a big export is one chunk, and dropping it whole left nothing to
+      // show. A copy, so the app's (possibly huge) buffer isn't held until the trace is final.
+      if (room > 0) chunks.push(Buffer.from(buf.subarray(0, room)));
+      truncated = true;
+    }
   };
   const write = res.write;
   const end = res.end;

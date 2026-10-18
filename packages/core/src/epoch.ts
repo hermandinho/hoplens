@@ -189,7 +189,12 @@ export type EpochVia =
   /** No source change seen; hints derived from the rebuilt chunk names. */
   | "candidates"
   /** A rebuild with nothing to attribute it to. */
-  | "unknown";
+  | "unknown"
+  /**
+   * The process restarted (node --watch, tsx watch, nodemon) and the source manifest says these files
+   * changed since the previous process (`RuntimeConfig.epochs.mode: "restart"`, manifest.ts).
+   */
+  | "restart";
 
 export interface EpochInfo {
   /** Epoch number (same as the `epoch` fact). */
@@ -323,11 +328,13 @@ export class EpochTracker {
   /**
    * WP10: continue after a persisted session. This session starts at epoch `base` and `prior` (earlier
    * sessions' epochs, each with `session` set) go before it in the ring. Only before the first bump.
+   * `current` replaces the start marker as this session's first epoch: a `"restart"` edit, or (mode
+   * "restart", nothing changed) the previous session's last epoch, continued.
    */
-  restore(base: number, prior: readonly EpochInfo[]): void {
-    if (this.epoch !== 0 || this.infos.length !== 1 || base <= 0) return;
+  restore(base: number, prior: readonly EpochInfo[], current?: Omit<EpochInfo, "id">): void {
+    if (this.epoch !== 0 || this.infos.length !== 1 || base < 0 || (base === 0 && !current)) return;
     this.epoch = base;
-    this.infos[0]!.id = base;
+    this.infos[0] = current ? { ...current, id: base } : { ...this.infos[0]!, id: base };
     const keep = prior.filter((i) => i.id < base).slice(-(this.maxInfos - 1));
     this.infos.unshift(...keep);
   }

@@ -76,15 +76,51 @@ export class ImportGraph {
   /**
    * Route files (project-relative, from discovery) whose import closure contains any of `changed`
    * (project-relative, `/` or `\` separators). A route file that is itself changed is affected.
+   * `ownImports`: the walk from one route file does not go on through another route file (Express's
+   * `app.js` requires every router it mounts; an edit behind a router is that router's, not the edit
+   * of every route `app.js` registers itself).
    */
-  affected(routeFiles: readonly string[], changed: readonly string[]): Set<string> {
+  affected(
+    routeFiles: readonly string[],
+    changed: readonly string[],
+    opts: { ownImports?: boolean } = {},
+  ): Set<string> {
     const want = new Set(changed.map((f) => this.abs(f)));
     const out = new Set<string>();
     if (!want.size) return out;
+    const stop = opts.ownImports ? new Set(routeFiles.map((f) => this.abs(f))) : undefined;
     for (const rf of routeFiles) {
-      if (this.reaches(this.abs(rf), want)) out.add(rf);
+      if (this.reaches(this.abs(rf), want, stop)) out.add(rf);
     }
     return out;
+  }
+
+  /**
+   * The route files among `routeFiles` that `start`'s import closure reaches (through other route
+   * files too): the routers a file like Express's `app.js` mounts. Project-relative in, as given out.
+   */
+  routeFilesUnder(start: string, routeFiles: readonly string[]): Set<string> {
+    const byAbs = new Map(routeFiles.map((f) => [this.abs(f), f] as const));
+    const from = this.abs(start);
+    const out = new Set<string>();
+    const seen = new Set<string>([from]);
+    const stack = [from];
+    while (stack.length && seen.size <= MAX_NODES) {
+      for (const d of this.deps(stack.pop()!)) {
+        if (seen.has(d)) continue;
+        seen.add(d);
+        stack.push(d);
+        const rel = byAbs.get(d);
+        if (rel !== undefined) out.add(rel);
+      }
+    }
+    return out;
+  }
+
+  /** Whether any of `files` imports `target` directly (project-relative paths). */
+  isImported(target: string, files: readonly string[]): boolean {
+    const want = this.abs(target);
+    return files.some((f) => this.deps(this.abs(f)).includes(want));
   }
 
   private abs(rel: string): string {
@@ -92,7 +128,7 @@ export class ImportGraph {
     return path.resolve(this.root, rel.replace(/\\/g, "/"));
   }
 
-  private reaches(start: string, want: Set<string>): boolean {
+  private reaches(start: string, want: Set<string>, stop?: Set<string>): boolean {
     const seen = new Set<string>([start]);
     const stack = [start];
     while (stack.length) {
@@ -100,6 +136,8 @@ export class ImportGraph {
       if (want.has(f)) return true;
       if (seen.size > MAX_NODES) return false;
       for (const d of this.deps(f)) {
+        // Another route file is its own routes' business: neither matched nor walked through.
+        if (stop?.has(d) && d !== start) continue;
         if (want.has(d)) return true;
         if (!seen.has(d)) {
           seen.add(d);

@@ -24,3 +24,7 @@ Framework-neutral copy, and request builder fixes for Express:
 - The builder drawer no longer doubles its chrome: there is one "New request" header and one close,
   and it stays in view. With only the builder open the drawer's head is pinned and carries it; over a
   request or a compare the pinned bar's close closes the builder first, as Esc does.
+- Edits found across restarts (`via: "restart"`) count as edits of the dev loop in Changes even
+  though each comes from a new process, are not greyed as earlier-session edits, and read "saved, app
+  restarted". Outside Next.js the empty Changes view says "Save a file: node --watch restarts the app
+  and the edit shows up here", and the epoch wording follows: a new epoch when a restart changed code.

@@ -5,7 +5,7 @@ import { RULE_LABELS } from "./stats";
  * Which framework the UI is looking at, and the copy that depends on it. Next.js keeps every
  * sentence it always had; another framework (Express today) gets wording without `next dev`,
  * dev compiles or Next's data cache: there, "cold" means the first request after the app started or
- * restarted (one dev epoch per process). Pure: the live form is `frameworkCopy` in state/store.
+ * restarted, and an edit is a restart whose sources changed (core epochs mode "restart"). Pure: the live form is `frameworkCopy` in state/store.
  * Tested by packages/ui/test/framework.test.ts.
  */
 
@@ -87,12 +87,14 @@ export interface FrameworkCopy {
   loopBlockedHint: string;
   /** The fetch cache a GET can ask for (Queries hosts, fetch-uncached sentence). */
   dataCache: string;
-  /** One dev epoch, for tooltips: "dev-rebuild epoch" / "dev epoch (one per app start)". */
+  /** One dev epoch, for tooltips: "dev-rebuild epoch" / "dev epoch (a new one when a restart changed code)". */
   epoch: string;
-  /** What the epoch rail ticks are: "Edits (dev rebuilds)" / "Edits and app restarts". */
+  /** What the epoch rail ticks are: "Edits (dev rebuilds)" / "Edits (app restarts that changed code)". */
   edits: string;
   /** The Changes tab's tooltip. */
   changesTitle: string;
+  /** Changes with no edit yet (Next keeps its own sentence, with markup, in ChangesView). */
+  changesEmpty: string;
   /** The generated vitest file: what has to be running for it. */
   runWith: string;
   /** The generated vitest file: which requests the time budget skips. */
@@ -128,6 +130,8 @@ export const NEXT_COPY: FrameworkCopy = {
   epoch: "dev-rebuild epoch",
   edits: "Edits (dev rebuilds)",
   changesTitle: "Your edits (dev rebuilds) and what each one changed",
+  changesEmpty:
+    "No edits yet. Save a source file while next dev runs and send a request: each rebuild shows up here with the files it changed and how each affected route moved.",
   runWith: "Run it with `next dev` (and Hoplens) up.",
   coldSkipped: "Cold (compiling) requests are skipped.",
   coldQueryHint: "first request after a rebuild",
@@ -160,9 +164,11 @@ export function otherCopy(label: string): FrameworkCopy {
     loopBlockedHint:
       "The event loop was blocked: requests handled meanwhile waited. Look for sync work (big JSON, sync fs, crypto).",
     dataCache: "a fetch cache",
-    epoch: "dev epoch (one per app start)",
-    edits: "Edits and app restarts",
-    changesTitle: "Your edits and app restarts, and what each one changed",
+    epoch: "dev epoch (a new one when a restart changed code)",
+    edits: "Edits (app restarts that changed code)",
+    changesTitle: "Your edits (each restart that changed code) and what each one changed",
+    changesEmpty:
+      "No edits yet. Save a file: node --watch restarts the app and the edit shows up here, with the files it changed and how each affected route moved.",
     runWith: "Run it with the app (and Hoplens) running.",
     coldSkipped: `Cold requests (the ${RESTART}) are skipped.`,
     coldQueryHint: RESTART,

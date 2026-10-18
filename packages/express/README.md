@@ -166,3 +166,28 @@ runtime starts right before your app's first `listen()`; a script that never lis
 | `HOPLENS_IGNORE` | Comma-separated path prefixes never traced, e.g. `/health,/metrics` |
 
 `persist` is on by default here and writes route stats to `node_modules/.cache/hoplens`.
+
+## Changes across restarts
+
+`node --watch`, `tsx watch` and nodemon restart your app on every save, so Hoplens finds the edit
+when the new process starts: it hashes your source files (top-level files plus `src/`, or without
+`src/` the usual dirs: `routes/`, `controllers/`, `middleware/`, `models/`, `services/`, `lib/`, ...;
+`node_modules`, dot dirs, tests and the simple names in `.gitignore` are left out) and compares them
+with the manifest the previous process left in `node_modules/.cache/hoplens/sources.manifest`. A restart
+that changed code is a new edit in the Changes view, named after the files it changed, with the
+routes whose registration files import them and, once both sides have traffic, each route's
+before / after verdict. The first request on each route after a restart is cold.
+
+Formatting is not an edit: whitespace, line breaks, comments, quote style, semicolons and trailing
+commas are ignored (JS, TS and JSON are compared token by token; a line break that changes what the
+code does, like `return` on its own line, still counts), so a format-on-save, a `touch` or a manual
+restart with no change keeps the current edit going. A `.json` file under your source dirs that no
+module imports (a store your app writes itself) is not an edit either. An edit to middleware that
+`app.js` mounts lists every route of the routers `app.js` mounts. Stats are written to disk every 250ms,
+since a watcher stops the old process without warning.
+
+The standalone UI keeps its port across restarts: when the previous process still holds it, the new
+one waits up to a second for it before trying the next port.
+
+This needs `persist`. With `persist: false` there is no manifest: every start is one epoch and the
+banner says so.

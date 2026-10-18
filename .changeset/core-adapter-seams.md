@@ -26,3 +26,21 @@ importing core's AsyncLocalStorage or `@opentelemetry/api`:
   (`Runtime.isStopped`), its http hook passes every request through untouched.
 - `@hoplens/next` marks its `next` peer optional, so installing `hoplens` for an Express app no
   longer pulls in Next.js and React.
+- `RuntimeConfig.epochs: { mode: "restart" }` for apps a watcher restarts on every save (node
+  --watch, tsx watch, nodemon). Like `"none"` it runs no build-output probe, chunk index or source
+  watcher; with `persist` each start hashes the project's source files and compares them with the
+  manifest the previous process wrote (`sources.manifest` in the persist dir, replaced atomically). A
+  restart that changed code opens an epoch with the new `via: "restart"`, naming the changed, added
+  and deleted files; `/api/epochs` maps them to routes through the import graph and regressions
+  compare the routes before and after it from the persisted stats. Whitespace, comments, quote style,
+  semicolons and trailing commas don't count (JS / TS / JSON are compared by TypeScript scanner
+  tokens; `epochs.typescript` supplies the TypeScript), so a formatter-only save or a restart with no
+  change continues the current epoch. Rows are flushed every 250ms in this mode. `"build"` stays the
+  default and `"none"` is unchanged.
+- `RuntimeConfig.samePortRetryMs`: when the UI port is busy at start, retry that same port for up to
+  this long before moving to the next one (default 0, unchanged).
+- The source watcher's fallback dirs (no `src/`) gain `routes`, `controllers`, `middleware` and
+  `models`.
+- `/api/epochs` lists every route registered in an affected file (it kept one per file, which only
+  fit Next's one-route files). For a restart edit the walk from one registration file does not go on
+  through another, so a router edit does not mark the routes `app.js` registers itself.

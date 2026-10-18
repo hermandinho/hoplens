@@ -69,10 +69,26 @@ export function epochLabel(e: EpochNaming): string {
 
 /**
  * An edit of this dev session: not a session start (e0, or the start marker a restart writes) and not
- * restored from an earlier session (`persist: true` tags those with `session`). Pure.
+ * restored from an earlier session (`persist: true` tags those with `session`). A `"restart"` edit
+ * counts even when restored: under node --watch every save is a new process, so the edits of one dev
+ * loop each come from a different session. Pure.
  */
 export function isSessionEdit(id: number, info?: Pick<EpochView, "via" | "session">): boolean {
-  return id > 0 && info?.via !== "start" && info?.session === undefined;
+  if (id <= 0 || info?.via === "start") return false;
+  return info?.via === "restart" || info?.session === undefined;
+}
+
+/** A restored edit of an earlier dev session (greyed in Changes); restart edits never are. Pure. */
+export function isEarlierEdit(id: number, info?: Pick<EpochView, "via" | "session">): boolean {
+  return id > 0 && info?.session !== undefined && info.via !== "start" && info.via !== "restart";
+}
+
+/**
+ * A row restored from an earlier dev session, greyed in Changes: every restored row (its session
+ * start and "dev server restarted" markers too) except restart edits, which are the dev loop. Pure.
+ */
+export function isPastRow(info?: Pick<EpochView, "via" | "session">): boolean {
+  return info?.session !== undefined && info.via !== "restart";
 }
 
 /**
@@ -102,6 +118,8 @@ export function viaLabel(e: Pick<EpochView, "via">): string {
   switch (e.via) {
     case "src-watch":
       return "saved";
+    case "restart":
+      return "saved, app restarted";
     case "chunk-diff":
       return "from rebuilt code";
     case "candidates":

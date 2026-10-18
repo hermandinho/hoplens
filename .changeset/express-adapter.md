@@ -50,3 +50,9 @@ static assets, route templates, handler hops and the route list; middleware hops
   picked by path and method; when the element can't be told apart, no schema.
 - A schema used as a member (`ns.OrderBody`, `S.OrderBody` of a `require`, `schemas.OrderBody` of an
   object literal) is located at its declaration, like a plain name.
+- Edits across restarts: under `node --watch`, `tsx watch` or nodemon, a restart whose source files
+  changed is an edit in Changes, naming the files and the routes that import them, with before /
+  after verdicts once both sides have traffic. Formatting-only saves and restarts with no change add
+  no edit. Needs `persist` (the default); with `persist: false` every start is one epoch and the
+  banner says so. The standalone UI waits up to a second for its port after a restart instead of
+  moving to the next one.

@@ -572,7 +572,8 @@ export interface BaselinesResponse {
 // stream GET /api/epochs/events (`event: epoch` = EpochView, `event: regression` = RouteRegression).
 // Mirrors core epoch.ts, regressions.ts and api/epochs.ts.
 
-export type EpochVia = "start" | "src-watch" | "chunk-diff" | "candidates" | "unknown";
+/** "restart": the app restarted under a watcher and its source manifest named the changed files (core manifest.ts). */
+export type EpochVia = "start" | "src-watch" | "chunk-diff" | "candidates" | "unknown" | "restart";
 export type EpochAffectedVia = "imports" | "chunks" | "candidates" | "none";
 
 export interface EpochView {

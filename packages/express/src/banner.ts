@@ -1,6 +1,9 @@
 import type { Runtime } from "@hoplens/core";
 import { adapterState } from "./state";
 
+/** Banner note with `persist: false`: no manifest, so a restart is never matched to the files it changed. */
+export const PERSIST_OFF_NOTE = "persist is off: edits across restarts are not tracked (each start is one epoch)";
+
 /** How long to wait for the app's own 'listening' once the UI server is up. */
 const APP_WAIT_MS = 1500;
 
@@ -36,6 +39,7 @@ function print(): void {
   try {
     const notes: string[] = [];
     if (!s.express) notes.push(`Could not resolve express from ${b.rt.root}; is it installed there?`);
+    if (b.rt.options.persist === false) notes.push(PERSIST_OFF_NOTE);
     process.stdout.write(bannerText(b.rt.uiPort, b.appPort, notes));
   } catch {
     /* a closed stdout never breaks the app */

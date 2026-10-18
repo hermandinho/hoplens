@@ -186,4 +186,12 @@ describe("copy outside the framework-neutral components", () => {
     expect(NEXT_COPY.changesTitle).toMatch(/dev rebuilds/);
     for (const s of [express.epoch, express.edits, express.changesTitle]) expect(s).not.toMatch(/rebuild|compile/);
   });
+
+  test("the Changes empty state: a save under node --watch outside Next, next dev on Next", () => {
+    expect(express.changesEmpty).toMatch(
+      /^No edits yet\. Save a file: node --watch restarts the app and the edit shows up here/,
+    );
+    expect(express.changesEmpty).not.toMatch(/rebuild|next dev/);
+    expect(NEXT_COPY.changesEmpty).toMatch(/next dev/);
+  });
 });

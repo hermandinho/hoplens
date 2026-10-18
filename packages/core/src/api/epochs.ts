@@ -144,8 +144,19 @@ class EpochsService {
   private computeAffected(info: EpochInfo): { routes: string[]; via: AffectedVia } {
     if (info.id === 0) return { routes: [], via: "none" };
     const routes = this.rt.discover().routes;
-    const byFile = new Map(routes.map((r) => [r.file.replace(/\\/g, "/"), r.nextRoute]));
+    // file -> every route template registered there (Express registers many routes per file).
+    const byFile = new Map<string, string[]>();
+    for (const r of routes) {
+      if (!r.file) continue;
+      const f = r.file.replace(/\\/g, "/");
+      const list = byFile.get(f);
+      if (list) list.push(r.nextRoute);
+      else byFile.set(f, [r.nextRoute]);
+    }
     const out = new Set<string>();
+    const addFile = (f: string) => {
+      for (const route of byFile.get(f) ?? []) out.add(route);
+    };
     if (info.chunkScope) {
       // The bundler's own answer for every compiled route; routes not compiled yet (never hit, or
       // disposed) can still import the change, so they go through the import graph.
@@ -153,27 +164,40 @@ class EpochsService {
       const compiled = new Set(info.chunkScope.compiled);
       for (const r of routes) if (hit.has(r.nextRoute)) out.add(r.nextRoute);
       if (info.files.length) {
-        const rest = [...byFile].filter(([, route]) => !compiled.has(route)).map(([f]) => f);
-        if (rest.length) for (const f of this.graph.affected(rest, info.files)) out.add(byFile.get(f)!);
+        const rest = [...byFile].filter(([, list]) => list.some((route) => !compiled.has(route))).map(([f]) => f);
+        if (rest.length)
+          for (const f of this.graph.affected(rest, info.files))
+            for (const route of byFile.get(f) ?? []) if (!compiled.has(route)) out.add(route);
       }
       return { routes: [...out].sort(), via: "chunks" };
     }
     if (!info.files.length && !info.candidates.length) return { routes: [], via: "none" };
     if (info.files.length) {
-      for (const f of this.graph.affected([...byFile.keys()], info.files)) out.add(byFile.get(f)!);
+      // A restart edit (Express): files register many routes and app.js requires every router.
+      const ownImports = info.via === "restart";
+      const routeFiles = [...byFile.keys()];
+      const changed = new Set(info.files.map((f) => f.replace(/\\/g, "/")));
+      for (const f of this.graph.affected(routeFiles, info.files, { ownImports })) {
+        addFile(f);
+        // Reached through one of its own imports (not edited itself): that import can be middleware
+        // `app.js` mounts with app.use before its routers, so it wraps every router app.js mounts too.
+        // Over-approximated (a helper app.js shares with a router counts the same): a route listed that
+        // did not move reads "unchanged", a missed one would hide a regression.
+        if (ownImports && !changed.has(f)) for (const r of this.graph.routeFilesUnder(f, routeFiles)) addFile(r);
+      }
       return { routes: [...out].sort(), via: "imports" };
     }
     // Candidates: route stems ("app/api/feed/route") match a route file with `src/` and the
     // extension dropped; module candidates ("src/lib/store.ts") go through the import graph.
     const stems = new Map<string, string>();
-    for (const [file, route] of byFile) stems.set(file.replace(/^src\//, "").replace(/\.[cm]?[jt]sx?$/, ""), route);
+    for (const [file] of byFile) stems.set(file.replace(/^src\//, "").replace(/\.[cm]?[jt]sx?$/, ""), file);
     const modules: string[] = [];
     for (const c of info.candidates) {
-      const route = stems.get(c);
-      if (route) out.add(route);
+      const file = stems.get(c);
+      if (file) addFile(file);
       else if (/\.[cm]?[jt]sx?$/.test(c)) modules.push(c);
     }
-    if (modules.length) for (const f of this.graph.affected([...byFile.keys()], modules)) out.add(byFile.get(f)!);
+    if (modules.length) for (const f of this.graph.affected([...byFile.keys()], modules)) addFile(f);
     return { routes: [...out].sort(), via: out.size ? "candidates" : "none" };
   }
 

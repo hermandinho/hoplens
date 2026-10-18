@@ -55,7 +55,11 @@ export interface SourceWatchOptions {
   retryMs?: number;
 }
 
-/** Directories watched when the project has no `src/`. Each is watched only if it exists. */
+/**
+ * Directories watched when the project has no `src/`. Each is watched only if it exists. The Express
+ * layout (`routes/`, `controllers/`, `middleware/`, `models/`, plus `lib/` and `services/`) is here
+ * too: those dirs also scope the source manifest that turns a restart into an edit (manifest.ts).
+ */
 export const FALLBACK_DIRS = [
   "app",
   "pages",
@@ -69,6 +73,10 @@ export const FALLBACK_DIRS = [
   "db",
   "prisma",
   "drizzle",
+  "routes",
+  "controllers",
+  "middleware",
+  "models",
 ];
 
 const SOURCE_EXT = new Set([
@@ -86,7 +94,13 @@ const SOURCE_EXT = new Set([
   ".gql",
   ".prisma",
 ]);
-const SKIP_SEGMENTS = new Set(["node_modules", "dist", "build", "out", "coverage"]);
+/** Directory names never walked (also skipped by the source manifest). */
+export const SKIP_SEGMENTS: ReadonlySet<string> = new Set(["node_modules", "dist", "build", "out", "coverage"]);
+
+/** The project-relative dirs holding its source: `src` when it exists, else the FALLBACK_DIRS present. */
+export function sourceDirs(root: string): string[] {
+  return isDir(path.join(root, "src")) ? ["src"] : FALLBACK_DIRS.filter((d) => isDir(path.join(root, d)));
+}
 
 /** True for a project-relative path whose change can affect server code. Exported for tests. */
 export function isSourceFile(rel: string): boolean {
@@ -132,8 +146,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
   const maxPending = Math.max(1, opts.maxPending ?? 200);
   const maxHashBytes = opts.maxHashBytes ?? 1024 * 1024;
   const retryMs = opts.retryMs ?? 2000;
-  const dirs =
-    opts.dirs ?? (isDir(path.join(root, "src")) ? ["src"] : FALLBACK_DIRS.filter((d) => isDir(path.join(root, d))));
+  const dirs = opts.dirs ?? sourceDirs(root);
 
   /** rel -> content hash as of the last accepted state. */
   const hashes = new Map<string, string | null>();

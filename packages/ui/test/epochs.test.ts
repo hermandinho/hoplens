@@ -480,6 +480,24 @@ describe("Changes after a restart with persist: true", () => {
     expect(isSessionEdit(3, { via: "src-watch", session: 1 })).toBe(false);
     expect(isSessionEdit(9, { via: "src-watch" })).toBe(true);
   });
+  test("restart edits (node --watch: each save is a new process) count, restored or not, and are never greyed", async () => {
+    const { isSessionEdit, isEarlierEdit, viaLabel } = await import("../src/state/epochs");
+    expect(isSessionEdit(4, { via: "restart", session: 3 })).toBe(true);
+    expect(isSessionEdit(5, { via: "restart" })).toBe(true);
+    expect(isEarlierEdit(4, { via: "restart", session: 3 })).toBe(false);
+    expect(isEarlierEdit(3, { via: "src-watch", session: 1 })).toBe(true);
+    expect(isEarlierEdit(8, { via: "start", session: 2 })).toBe(false);
+    expect(isEarlierEdit(9, { via: "src-watch" })).toBe(false);
+    expect(viaLabel({ via: "restart" })).toBe("saved, app restarted");
+  });
+  test("greyed rows: every restored row (session start and restart markers too) except restart edits", async () => {
+    const { isPastRow } = await import("../src/state/epochs");
+    expect(isPastRow({ via: "start", session: 2 })).toBe(true);
+    expect(isPastRow({ via: "src-watch", session: 1 })).toBe(true);
+    expect(isPastRow({ via: "restart", session: 3 })).toBe(false);
+    expect(isPastRow({ via: "src-watch" })).toBe(false);
+    expect(isPastRow(undefined)).toBe(false);
+  });
   test("restored edits count the server's requests, not only the retained ones", async () => {
     const { requestsByEpoch } = await import("../src/state/epochs");
     const m = requestsByEpoch(

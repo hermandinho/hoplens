@@ -222,6 +222,25 @@ describe("Persister", () => {
     }
   });
 
+  test("flush says whether the rows reached the disk and keeps them when they did not", () => {
+    const p = new Persister(dir, { flushMs: 0 });
+    p.begin(1);
+    p.push(traceRow(trace(), redactor));
+    const append = vi.spyOn(fs, "appendFileSync").mockImplementationOnce(() => {
+      throw Object.assign(new Error("locked"), { code: "EBUSY" });
+    });
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, PERSIST_FILE), "");
+      expect(p.flush()).toBe(false);
+      expect(p.flush()).toBe(true);
+    } finally {
+      append.mockRestore();
+      p.stop();
+    }
+    expect(foldRows(parseRows(fs.readFileSync(path.join(dir, PERSIST_FILE), "utf8"))).traces).toHaveLength(1);
+  });
+
   test("clear() starts a fresh file", () => {
     const p = new Persister(dir, { flushMs: 0 });
     p.begin(1);

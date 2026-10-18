@@ -145,6 +145,17 @@ export function bootDeferred(opts?: HoplensOptions): Runtime | undefined {
 
 /** The UI tries `port` and the next 9 on EADDRINUSE (core Runtime.listen). */
 const UI_PORT_TRIES = 10;
+/**
+ * The UI retries its own port this long before moving up: after a watch restart the previous process
+ * may hold it for a moment, and the UI should stay on 4983 across restarts.
+ */
+const SAME_PORT_RETRY_MS = 1000;
+
+/** The TypeScript that normalizes sources for restart edits (ours first, lesson 5); required only on a change. */
+function loadTs(root: string): unknown {
+  const { loadTypeScript } = require("@hoplens/transform/ts") as typeof import("@hoplens/transform/ts");
+  return loadTypeScript(root);
+}
 
 /**
  * Start the singleton Runtime, or return the running one. Never throws. `appPort` is the port the
@@ -174,7 +185,12 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
       httpTap: createTap(core.normalizeUrl, process.env, s.express?.version),
       banner: uiReady,
       framework: { name: "express", version: s.express?.version },
-      epochs: { mode: "none" },
+      // A watcher (node --watch, tsx watch, nodemon) restarts the app on each save: each start
+      // compares the sources with the last process's manifest in stateDir. That needs persist; with
+      // it off every process is one epoch, as before (the banner says so).
+      epochs:
+        options.persist === false ? { mode: "none" } : { mode: "restart", typescript: () => loadTs(options.root) },
+      samePortRetryMs: SAME_PORT_RETRY_MS,
     });
     rt.start();
     G.__hoplens_runtime = rt;

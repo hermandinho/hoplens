@@ -41,3 +41,12 @@ static assets, route templates, handler hops and the route list; middleware hops
   middleware in the arguments: a call with a single Zod schema (`validate(Schema)`,
   `validateBody(Schema)`), with a part name and a schema (`zValidator("json", Schema)`), or with
   `{ body, query, params }` schemas. Cached per file mtime; nothing is executed.
+- Handlers that only forward the request (`(req, res) => ctrl.create(req, res)`, `await`ed,
+  returned, or with `.catch(next)`) are followed into the function they call, two levels deep, with
+  class instances resolved as for a handler named directly.
+- Routes registered in a loop over a literal route table (`for (const r of routes)
+  router[r.method](r.path, ...r.middleware, r.handler)`, `routes.forEach(...)`,
+  `Object.entries(map)`), in the same file or imported, get the schemas of their own table element,
+  picked by path and method; when the element can't be told apart, no schema.
+- A schema used as a member (`ns.OrderBody`, `S.OrderBody` of a `require`, `schemas.OrderBody` of an
+  object literal) is located at its declaration, like a plain name.

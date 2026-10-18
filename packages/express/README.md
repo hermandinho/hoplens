@@ -93,8 +93,15 @@ registered the route (your code is never run for this), at most one per part, ha
 1. **Handlers.** `Schema.parse(req.body)` (or `safeParse`, `parseAsync`, `safeParseAsync`), also on
    `req.query` and `req.params`, in an inline handler or in one referenced by name: a function in
    the same file, an import (ESM `import` or CommonJS `require`, through re-exports and barrels), a
-   namespace or object member (`orders.create`, `ctrl.items.create`), or one wrapped in a call
-   (`asyncHandler(createOrder)`). The schema itself may live in another file.
+   namespace or object member (`orders.create`, `ctrl.items.create`), a class method
+   (`new OrderController()`'s `ctrl.create`, a static `OrderController.make`,
+   `ctrl.create.bind(ctrl)`), or one wrapped in a call (`asyncHandler(createOrder)`). A handler that
+   only forwards the request (`(req, res) => ctrl.create(req, res)`, `(req, res, next) =>
+   create(req, res, next)`, `async (req, res) => { await service.create(req, res); }`,
+   `function (req, res) { return create(req, res); }`, also with `.catch(next)`) is followed into
+   the function it calls, two levels deep. The schema itself may live in another file; a member
+   (`schemas.OrderBody`, `ns.OrderBody` of `import * as ns`, `S.OrderBody` of a `require`) is
+   located where it is declared.
 2. **Validation middleware** in the registration's arguments, by shape rather than by library: a
    call with a single Zod schema argument (`validate(OrderBody)`, `validateBody(OrderBody)`; a
    function name containing `query`, `param` or `form` targets that part, anything else the body);
@@ -102,9 +109,27 @@ registered the route (your code is never run for this), at most one per part, ha
    or a call with `{ body, query, params }` schemas (`validate({ body: OrderBody })`). A name bound
    to such a call (`const checkOrder = validate(OrderBody)`) works too.
 
+Routes registered in a loop share one call site. Hoplens reads the route table the loop walks and
+picks the element whose path (and, for `router[r.method]`, method) is the route's, then reads that
+element's handlers and middleware as above. Supported shapes:
+
+```js
+for (const r of routes) router[r.method](r.path, ...r.middleware, r.handler);
+for (const { path, handler } of routes) app.post(path, handler);
+routes.forEach((r) => app.get(r.path, r.handler));
+for (const [path, handler] of Object.entries(handlers)) app.post(path, handler);
+```
+
+The table must be an array or object literal (spreads of other literals are followed), in the same
+file or a `const` imported from another one, with each element's path a string (or regex) literal
+or a `const` naming one. A table built at runtime (`.map()`, a function's result), a path computed in
+the call (`"/v1" + r.path`), or two elements with the same path and method give no schema rather than
+another route's.
+
 Not read: schemas built at runtime or imported from a package, parse calls in functions the handler
-calls, class-based controllers, and non-Zod validators (`celebrate`/Joi, `express-validator`). The
-result is cached until the registration file or a file the lookup read changes.
+calls other than by forwarding the request, methods reached through `this`, and non-Zod validators
+(`celebrate`/Joi, `express-validator`). The result is cached until the registration file or a file
+the lookup read changes.
 
 ## When it runs
 

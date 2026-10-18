@@ -72,6 +72,61 @@ export class OrderController {
 export const orders = new OrderController();
 `;
 
+const SERVICE_MJS = `
+import { OrderBody } from "./schemas.mjs";
+import * as S from "./schemas.mjs";
+export const service = {
+  create(req, res) {
+    res.json(OrderBody.parse(req.body));
+  },
+};
+export function viaNs(req, res) {
+  res.json(S.ListQuery.parse(req.query));
+}
+export class Ctl {
+  create(req, res) {
+    return service.create(req, res);
+  }
+}
+export const ctl = new Ctl();
+export function loopA(req, res) {
+  return loopB(req, res);
+}
+export function loopB(req, res) {
+  return loopA(req, res);
+}
+`;
+
+const ROUTES_MJS = `
+import { ListQuery, OrderBody } from "./schemas.mjs";
+import { validate } from "./validate.mjs";
+import { createOrder, listOrders } from "./handlers.mjs";
+export const routes = [
+  { method: "post", path: "/t/orders", middleware: [validate(OrderBody)], handler: (req, res) => res.json({}) },
+  { method: "get", path: "/t/orders", middleware: [], handler: listOrders },
+  { method: "put", path: "/t/items", middleware: [], handler: createOrder },
+];
+export const byPath = {
+  "/m/orders": createOrder,
+  "/m/list": (req, res) => res.json(ListQuery.parse(req.query)),
+};
+`;
+
+/** Read by the linker only (never run): more route-table shapes. */
+const TABLES_MJS = `
+import express from "express";
+import { createOrder, listOrders } from "./handlers.mjs";
+import { routes } from "./routes.mjs";
+const app = express();
+const ITEMS = "/items";
+const more = [{ path: ITEMS, handler: createOrder }];
+const all = [...more, { path: /^\\/re$/, handler: listOrders }];
+for (const { path, handler: h } of all) app.post(path, h); // @destructure
+function mount(list) { for (const r of list) app.post(r.path, r.handler); } // @param
+for (const r of routes.map((x) => x)) app.post(r.path, r.handler); // @mapped
+for (const r of routes) app.post(r.path, (req, res) => r.handler(req, res)); // @inlineuse
+`;
+
 const APP_MJS = `
 import express from "express";
 import { z } from "zod";
@@ -80,6 +135,9 @@ import updateOrder, { createOrder, listOrders } from "./handlers.mjs";
 import { OrderBody, ListQuery, RenamedItem } from "./schemas.mjs";
 import { validate, validateQuery, zValidator } from "./validate.mjs";
 import { OrderController, orders } from "./classes.mjs";
+import { service, viaNs, ctl, loopA } from "./service.mjs";
+import { routes, byPath } from "./routes.mjs";
+import * as schemasNs from "./schemas.mjs";
 
 const app = express();
 const Local = z.object({ title: z.string().max(80), done: z.boolean().default(false) });
@@ -125,6 +183,34 @@ app.patch("/field", express.json(), orders.update); // @field
 app.post("/spread", ...[express.json(), createOrder]); // @spread
 app.post("/transform", express.json(), transformBody(OrderBody), (req, res) => res.json({})); // @transform
 app.post("/role", express.json(), requireRole(Role), (req, res) => res.json({})); // @role
+app.post("/d-arrow", express.json(), (req, res) => service.create(req, res)); // @darrow
+app.post("/d-next", express.json(), (req, res, next) => createOrder(req, res, next)); // @dnext
+app.post("/d-await", express.json(), async (req, res) => { await service.create(req, res); }); // @dawait
+app.post("/d-fn", express.json(), function (req, res) { return createOrder(req, res); }); // @dfn
+app.post("/d-class", express.json(), (req, res) => ctl.create(req, res)); // @dclass
+app.post("/d-cycle", express.json(), (req, res) => loopA(req, res)); // @dcycle
+app.post("/d-catch", express.json(), (req, res, next) => createOrder(req, res).catch(next)); // @dcatch
+app.get("/d-ns", (req, res) => viaNs(req, res)); // @dns
+app.post("/d-res", express.json(), (req, res) => res.json(req.body)); // @dres
+app.post("/ns-mw", express.json(), validate(schemasNs.OrderBody), (req, res) => res.json({})); // @nsmw
+const router = express.Router();
+for (const r of routes) {
+  router
+    [r.method](r.path, express.json(), ...r.middleware, r.handler); // @forof
+}
+app.use(router);
+const table = [
+  { path: "/fe/a", handler: createOrder },
+  { path: "/fe/b", handler: listOrders },
+];
+table.forEach((r) => app.post(r.path, express.json(), r.handler)); // @foreach
+for (const [path, h] of Object.entries(byPath)) app.post(path, express.json(), h); // @entries
+const dup = [
+  { path: "/dup", handler: createOrder },
+  { path: "/dup", handler: listOrders },
+];
+for (const { path, handler } of dup) app.post(path, handler); // @dup
+routes.forEach((r) => app.patch("/u" + r.path, r.handler)); // @tpl
 
 const server = app.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ ready: server.address().port })));
 `;
@@ -150,9 +236,11 @@ const CJS_APP = `
 const express = require("express");
 const handlers = require("./handlers.cjs");
 const { signup } = require("./handlers.cjs");
+const S2 = require("./schemas.cjs");
 const app = express();
 app.post("/signup", express.json(), signup); // @signup
 app.post("/ping", express.json(), handlers.ping); // @ping
+app.post("/s2", express.json(), (req, res) => res.json(S2.Signup.parse(req.body))); // @s2
 const server = app.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ ready: server.address().port })));
 `;
 
@@ -162,14 +250,20 @@ const FILES = {
   "controller.mjs": CONTROLLER_MJS,
   "validate.mjs": VALIDATE_MJS,
   "classes.mjs": CLASSES_MJS,
+  "service.mjs": SERVICE_MJS,
+  "routes.mjs": ROUTES_MJS,
+  "tables.mjs": TABLES_MJS,
   "app.mjs": APP_MJS,
   "schemas.cjs": CJS_SCHEMAS,
   "handlers.cjs": CJS_HANDLERS,
   "app.cjs": CJS_APP,
 };
 
-/** [marker, method, file, expected targets with schema names] for the fixture registrations. */
-const CASES: Array<[string, string, string, Array<[string, string | undefined]>]> = [
+/**
+ * [marker, method, file, expected targets with schema names, route path] for the fixture
+ * registrations; the route path picks one of the routes a loop registered from the marker's line.
+ */
+const CASES: Array<[string, string, string, Array<[string, string | undefined]>, string?]> = [
   ["inline", "POST", "app.mjs", [["body", "Local"]]],
   ["local", "POST", "app.mjs", [["body", "Local"]]],
   ["imported", "POST", "app.mjs", [["body", "OrderBody"]]],
@@ -210,8 +304,28 @@ const CASES: Array<[string, string, string, Array<[string, string | undefined]>]
   ["spread", "POST", "app.mjs", [["body", "OrderBody"]]],
   ["transform", "POST", "app.mjs", [["body", "OrderBody"]]],
   ["role", "POST", "app.mjs", []],
+  ["darrow", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dnext", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dawait", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dfn", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dclass", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dcycle", "POST", "app.mjs", []],
+  ["dcatch", "POST", "app.mjs", [["body", "OrderBody"]]],
+  ["dns", "GET", "app.mjs", [["query", "S.ListQuery"]]],
+  ["dres", "POST", "app.mjs", []],
+  ["nsmw", "POST", "app.mjs", [["body", "schemasNs.OrderBody"]]],
+  ["forof", "POST", "app.mjs", [["body", "OrderBody"]], "/t/orders"],
+  ["forof", "GET", "app.mjs", [["query", "ListQuery"]], "/t/orders"],
+  ["forof", "PUT", "app.mjs", [["body", "OrderBody"]], "/t/items"],
+  ["foreach", "POST", "app.mjs", [["body", "OrderBody"]], "/fe/a"],
+  ["foreach", "POST", "app.mjs", [["query", "ListQuery"]], "/fe/b"],
+  ["entries", "POST", "app.mjs", [["body", "OrderBody"]], "/m/orders"],
+  ["entries", "POST", "app.mjs", [["query", "ListQuery"]], "/m/list"],
+  ["dup", "POST", "app.mjs", [], "/dup"],
+  ["tpl", "PATCH", "app.mjs", [], "/u/t/items"],
   ["signup", "POST", "app.cjs", [["body", "Signup"]]],
   ["ping", "POST", "app.cjs", [["body", "schemas.Ping"]]],
+  ["s2", "POST", "app.cjs", [["body", "S2.Signup"]]],
 ];
 
 function summary(list: any[]): Array<[string, string | undefined]> {
@@ -225,10 +339,43 @@ describe("SchemaLinker", () => {
   });
   afterAll(() => fx?.cleanup());
 
-  test.each(CASES)("%s (%s in %s)", (marker, method, file, want) => {
+  test.each(CASES)("%s (%s in %s, %s)", (marker, method, file, want, routePath) => {
     const linker = new SchemaLinker(fx.root);
     const line = lineOf(FILES[file as keyof typeof FILES], marker);
-    expect(summary(linker.link(file, line, method))).toEqual(want);
+    expect(summary(linker.link(file, line, method, routePath))).toEqual(want);
+  });
+
+  test("a member-access schema is located at its declaration (namespace, require object)", () => {
+    const linker = new SchemaLinker(fx.root);
+    const at = (file: string, src: string, marker: string, method: string) =>
+      linker.link(file, lineOf(src, marker), method).map((s) => [s.name, s.file, s.line]);
+    expect(at("app.mjs", APP_MJS, "nsmw", "POST")).toEqual([["schemasNs.OrderBody", "schemas.mjs", 3]]);
+    expect(at("app.mjs", APP_MJS, "dns", "GET")).toEqual([["S.ListQuery", "schemas.mjs", 4]]);
+    expect(at("app.cjs", CJS_APP, "s2", "POST")).toEqual([["S2.Signup", "schemas.cjs", 3]]);
+    expect(at("app.cjs", CJS_APP, "ping", "POST")).toEqual([["schemas.Ping", "schemas.cjs", 5]]);
+  });
+
+  test("route tables: destructured elements, a const path, a spread table, a regex path", () => {
+    const linker = new SchemaLinker(fx.root);
+    const line = lineOf(TABLES_MJS, "destructure");
+    expect(summary(linker.link("tables.mjs", line, "POST", "/items"))).toEqual([["body", "OrderBody"]]);
+    expect(summary(linker.link("tables.mjs", line, "POST", /^\/re$/))).toEqual([["query", "ListQuery"]]);
+    expect(linker.link("tables.mjs", line, "POST", "/re")).toEqual([]);
+  });
+
+  test("a table that is a parameter or built at runtime, or a loop variable used in an inline handler, gives none", () => {
+    const linker = new SchemaLinker(fx.root);
+    for (const marker of ["param", "mapped", "inlineuse"])
+      expect(linker.link("tables.mjs", lineOf(TABLES_MJS, marker), "POST", "/t/items"), marker).toEqual([]);
+  });
+
+  test("a loop registration without the route's path, or with one no element has, gets no schema", () => {
+    const linker = new SchemaLinker(fx.root);
+    const line = lineOf(APP_MJS, "forof");
+    expect(linker.link("app.mjs", line, "POST")).toEqual([]);
+    expect(linker.link("app.mjs", line, "POST", "/nope")).toEqual([]);
+    // The method tells the two /t/orders routes apart: DELETE is neither.
+    expect(linker.link("app.mjs", line, "DELETE", "/t/orders")).toEqual([]);
   });
 
   test("a body schema carries the shape, an example the schema accepts, fields and its declaration", () => {
@@ -274,6 +421,141 @@ describe("SchemaLinker", () => {
     expect(next).not.toBe(first);
     expect(next[0]!.fields.map((f) => f.path)).toEqual(["customer", "qty", "note"]);
     fs.writeFileSync(file, SCHEMAS_MJS);
+  });
+});
+
+/* Registrations whose static read could name the wrong schema: each gets the runtime's, or none. */
+const PIT_S = `import { z } from "zod";
+export const A = z.object({ a: z.string() });
+export const B = z.object({ b: z.string() });
+`;
+const PIT_H = `import { A, B } from "./s.mjs";
+export function createA(req, res) { A.parse(req.body); }
+export function createB(req, res) { B.parse(req.body); }
+export function validateQuery(schema) { return (req, _res, next) => { schema.parse(req.query); next(); }; }
+`;
+const PIT_IMPORT = `import { createA, createB, validateQuery } from "./h.mjs";\nimport { A } from "./s.mjs";\n`;
+
+/** [case, source (after the imports; the `// @X` line registers), method, route path, expected]. */
+const PITFALLS: Array<[string, string, string, string, Array<[string, string | undefined]>]> = [
+  // A delegating handler forwards something other than its own request as the callee's request.
+  [
+    "deleg-other-req",
+    `app.post("/x", (req, res) => createA({ ...req, body: req.query.payload }, res, req)); // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  ["deleg-req-second", `app.post("/x", (req, res) => createA(res, req)); // @X`, "POST", "/x", []],
+  // A later spread or a duplicate key overrides an element's handler at runtime.
+  [
+    "spread-override",
+    `const extra = { handler: createB };\nconst routes = [{ path: "/x", handler: createA, ...extra }];\nfor (const r of routes) app.post(r.path, r.handler); // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  [
+    "dup-key",
+    `const routes = [{ path: "/x", handler: createA, handler: createB }];\nfor (const r of routes) app.post(r.path, r.handler); // @X`,
+    "POST",
+    "/x",
+    [["body", "B"]],
+  ],
+  // A parameter shadows the module const the loop's collection is a member of.
+  [
+    "shadow-member",
+    `const api = { routes: [{ path: "/x", handler: createA }] };\nexport function mount(app, api) {\n  for (const r of api.routes) app.post(r.path, r.handler); // @X\n}`,
+    "POST",
+    "/x",
+    [],
+  ],
+  // A destructuring default applies only when the key is truly absent.
+  [
+    "default-unreadable",
+    `const base = { handler: createB };\nconst routes = [{ path: "/x", ...base }];\nfor (const { path, handler = createA } of routes) app.post(path, handler); // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  [
+    "default-absent",
+    `const routes = [{ path: "/x" }];\nfor (const { path, handler = createA } of routes) app.post(path, handler); // @X`,
+    "POST",
+    "/x",
+    [["body", "A"]],
+  ],
+  // The loop variable or the table is changed before the registration reads it.
+  [
+    "let-reassign",
+    `const routes = [{ path: "/x", handler: createA }];\nfor (let r of routes) { r = { ...r, handler: createB }; app.post(r.path, r.handler); } // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  [
+    "mutated-table",
+    `const routes = [{ path: "/x", handler: createA }];\nroutes[0].handler = createB;\nfor (const r of routes) app.post(r.path, r.handler); // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  [
+    "pushed",
+    `const routes = [{ path: "/x", handler: createA }];\nroutes.push({ path: "/x", handler: createB });\nfor (const r of routes) app.post(r.path, r.handler); // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  // app.del is DELETE: it is the registration even with a dynamic call on its line.
+  [
+    "del-dynamic",
+    `const fns = { a: createA };\napp.del("/x", validate(A), (req, res) => fns[req.params.k](req, res)); // @X`,
+    "DELETE",
+    "/x",
+    [["body", "A"]],
+  ],
+  // A spread array literal that uses the loop variable is read element by element.
+  [
+    "spread-array",
+    `const routes = [{ path: "/x", handler: createB }];\nfor (const r of routes) app.post(r.path, ...[validateQuery(A), r.handler]); // @X`,
+    "POST",
+    "/x",
+    [
+      ["body", "B"],
+      ["query", "A"],
+    ],
+  ],
+  // A function-local name is never resolved to a same-named module binding.
+  [
+    "local-alias-loop",
+    `const handler = createA;\nconst routes = [{ path: "/x", handler: createB }, { path: "/y", handler: createB }];\nfor (const r of routes) { const { handler } = r; app.post(r.path, handler); } // @X`,
+    "POST",
+    "/x",
+    [],
+  ],
+  [
+    "local-const",
+    `const handler = createA;\nexport function mount(app) {\n  const handler = createB;\n  app.post("/x", handler); // @X\n}`,
+    "POST",
+    "/x",
+    [["body", "B"]],
+  ],
+];
+
+describe("SchemaLinker: the runtime's schema or none", () => {
+  let fx: Fixture;
+  const files: Record<string, string> = { "s.mjs": PIT_S, "h.mjs": PIT_H };
+  for (const [name, src] of PITFALLS) files[`${name}.mjs`] = `${PIT_IMPORT}${src}\n`;
+  beforeAll(() => {
+    fx = makeFixture(undefined, files);
+  });
+  afterAll(() => fx?.cleanup());
+
+  test.each(PITFALLS)("%s", (name, _src, method, routePath, want) => {
+    const linker = new SchemaLinker(fx.root);
+    const file = `${name}.mjs`;
+    expect(summary(linker.link(file, lineOf(files[file]!, "X"), method, routePath))).toEqual(want);
   });
 });
 
@@ -376,12 +658,14 @@ describe.each([
     for (const entry of ["app.mjs", "app.cjs"]) {
       routes[entry] = JSON.parse(await get(ports[entry]!, "/__hoplens/api/routes?fresh"));
     }
-    for (const [marker, method, file, want] of CASES) {
+    for (const [marker, method, file, want, routePath] of CASES) {
       const src = FILES[file as keyof typeof FILES];
       const line = lineOf(src, marker);
       const m = routes[file].routes
-        .flatMap((r: any) => r.methods.map((x: any) => ({ ...x, file: r.file })))
-        .find((x: any) => x.method === method && x.line === line);
+        .flatMap((r: any) => r.methods.map((x: any) => ({ ...x, file: r.file, template: r.nextRoute })))
+        .find(
+          (x: any) => x.method === method && x.line === line && (routePath === undefined || x.template === routePath),
+        );
       expect(m, `${marker}: ${method} at ${file}:${line}`).toBeDefined();
       expect(m.file).toBe(file);
       expect(summary(m.schemas), marker).toEqual(want);

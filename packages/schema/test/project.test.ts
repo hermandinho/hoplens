@@ -88,6 +88,28 @@ const S2 = require("./lib/spread.cjs");
 function viaBarrel(req) { return Signup.parse(req.body); }
 function viaSpread(req) { return S2.Ping.parse(req.body); }
 `,
+  "lib/objects.ts": `import { z } from "zod";
+import { Base } from "./a";
+export const schemas = {
+  Order: z.object({ sku: z.string() }),
+  Base,
+  nested: { Deep: z.object({ deep: z.boolean() }) },
+  make() { return z.object({}); },
+};
+`,
+  "members.ts": `import { z } from "zod";
+import * as ns from "./lib/a";
+import { schemas } from "./lib/objects";
+const local = { Note: z.object({ text: z.string() }) };
+export function viaNs(req: any) { return ns.Base.parse(req.body); }
+export function viaObject(req: any) { return schemas.Order.parse(req.body); }
+export function viaShorthand(req: any) { return schemas.Base.parse(req.body); }
+export function viaNested(req: any) { return schemas.nested.Deep.parse(req.body); }
+export function viaLocal(req: any) { return local.Note.parse(req.body); }
+export function viaMethod(req: any) { return schemas.make.parse(req.body); }
+export function viaMissing(req: any) { return schemas.Nope.parse(req.body); }
+export function viaExtend(req: any) { return schemas.Order.extend({ n: z.number() }).parse(req.body); }
+`,
 };
 
 let root: string;
@@ -122,7 +144,17 @@ describe("SchemaProject.findSchemas", () => {
     expect(found.map((f) => [f.target, f.name, f.file, f.line])).toEqual([
       ["body", "Renamed", "lib/a.ts", 2],
       ["query", "Star", "lib/b.ts", 2],
+      // Without `memberDeclarations` (Next) a member access keeps its call site as the location.
       ["params", "ns.Base", "route.ts", 8],
+    ]);
+    const located = new SchemaProject(root, { memberDeclarations: true });
+    const sf2 = located.sourceFile(ts, path.join(root, "route.ts"))!;
+    expect(
+      located.findSchemas(ts, fn(sf2, "POST"), sf2, new Set()).map((f) => [f.target, f.name, f.file, f.line]),
+    ).toEqual([
+      ["body", "Renamed", "lib/a.ts", 2],
+      ["query", "Star", "lib/b.ts", 2],
+      ["params", "ns.Base", "lib/a.ts", 2],
     ]);
     const body = found[0]!;
     expect(body.fields).toEqual([
@@ -187,6 +219,41 @@ describe("SchemaProject.findSchemas", () => {
   });
 });
 
+describe("SchemaProject memberDeclarations", () => {
+  const find = (name: string, memberDeclarations = true) => {
+    const project = new SchemaProject(root, { memberDeclarations });
+    const sf = project.sourceFile(ts, path.join(root, "members.ts"))!;
+    return project
+      .findSchemas(ts, fn(sf, name), sf, new Set())
+      .map((f) => [f.name, f.file, f.line, f.fields.map((x) => x.path)]);
+  };
+
+  test("a namespace member is located at its declaration", () => {
+    expect(find("viaNs")).toEqual([["ns.Base", "lib/a.ts", 2, ["email", "age"]]]);
+  });
+
+  test("an imported object literal's member: its value, a shorthand's declaration, a nested object", () => {
+    expect(find("viaObject")).toEqual([["schemas.Order", "lib/objects.ts", 4, ["sku"]]]);
+    expect(find("viaShorthand")).toEqual([["schemas.Base", "lib/a.ts", 2, ["email", "age"]]]);
+    expect(find("viaNested")).toEqual([["schemas.nested.Deep", "lib/objects.ts", 6, ["deep"]]]);
+    expect(find("viaExtend")).toEqual([[undefined, "members.ts", 12, ["sku", "n"]]]);
+  });
+
+  test("a same-file object literal's member", () => {
+    expect(find("viaLocal")).toEqual([["local.Note", "members.ts", 4, ["text"]]]);
+  });
+
+  test("a method or a missing member is no schema", () => {
+    expect(find("viaMethod")).toEqual([]);
+    expect(find("viaMissing")).toEqual([]);
+  });
+
+  test("off: a namespace member at the call site, and object-literal members are not read", () => {
+    expect(find("viaNs", false)).toEqual([["ns.Base", "members.ts", 5, ["email", "age"]]]);
+    expect(find("viaObject", false)).toEqual([]);
+  });
+});
+
 describe("SchemaProject scopes", () => {
   const find = (name: string) => {
     const project = new SchemaProject(root);
@@ -242,8 +309,13 @@ describe("SchemaProject.resolver options", () => {
     const one = (name: string) =>
       project.findSchemas(ts, fn(sf, name), sf, new Set()).map((f) => [f.target, f.name, f.file, f.example]);
     expect(one("viaBarrel")).toEqual([["body", "Signup", "lib/schemas.cjs", { name: expect.any(String) }]]);
-    // A member expression keeps its call site as the location (as `ns.Base` does above).
+    // Without `memberDeclarations` a member expression keeps its call site as the location.
     expect(one("viaSpread")).toEqual([["body", "S2.Ping", "barrels.cjs", { at: expect.any(String) }]]);
+    const located = new SchemaProject(root, { commonjs: true, memberDeclarations: true });
+    const sf2 = located.sourceFile(ts, path.join(root, "barrels.cjs"))!;
+    expect(located.findSchemas(ts, fn(sf2, "viaSpread"), sf2, new Set()).map((f) => [f.name, f.file, f.line])).toEqual([
+      ["S2.Ping", "lib/schemas.cjs", 4],
+    ]);
   });
 
   test("a default import reaches `export default function` only with `defaultDeclarations`", () => {
@@ -315,6 +387,10 @@ describe("helpers", () => {
     expect(ts.isIdentifier(objectMember(ts, obj, "b"))).toBe(true);
     expect(ts.isMethodDeclaration(objectMember(ts, obj, "c"))).toBe(true);
     expect(objectMember(ts, obj, "d")).toBeNull();
+    // A duplicate key: the last one is the value at runtime.
+    const dup = ts.createSourceFile("y.ts", "const o = { a: 1, a: 2 };", ts.ScriptTarget.Latest, true);
+    const dupObj = (dup.statements[0] as ts.VariableStatement).declarationList.declarations[0]!.initializer!;
+    expect(objectMember(ts, dupObj, "a").getText(dup)).toBe("2");
     expect(scriptKind(ts, "a.tsx")).toBe(ts.ScriptKind.TSX);
     expect(scriptKind(ts, "a.cjs")).toBe(ts.ScriptKind.JS);
     expect(scriptKind(ts, "a.mts")).toBe(ts.ScriptKind.TS);

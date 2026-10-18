@@ -20,6 +20,13 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* The builder alone (no subject bar above it): its head carries the only close, so it stays in view. */
+.builder-drawer-head.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
+
 .builder-drawer-title {
   font: 500 var(--fs-label) var(--font-ui);
   color: var(--muted);

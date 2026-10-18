@@ -732,6 +732,7 @@ export {
   PARSE_METHODS,
   SchemaProject,
   fieldsOf,
+  localBinding,
   objectMember,
   scriptKind,
 } from "./project";

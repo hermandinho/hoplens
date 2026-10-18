@@ -17,7 +17,15 @@ import {
   statusClass,
   warmDurations,
 } from "../state/stats";
-import { frameworkCopy, includeCold, metaState, openBuilder, selectedTrace, tracesState } from "../state/store";
+import {
+  builderOpen,
+  frameworkCopy,
+  includeCold,
+  metaState,
+  openBuilder,
+  selectedTrace,
+  tracesState,
+} from "../state/store";
 import { type SpanSelf, selfTimes, toCurl, toFetch, topSpansByBucket } from "../state/traceview";
 import { type Baseline, preHandlerWait, traceBaselines } from "../state/verdict";
 import { toVitest } from "../state/vitest";
@@ -113,14 +121,17 @@ export function TraceHeader() {
         <span class="rh-actions">
           <ReplayActions trace={trace} />
           <CopyMenu trace={trace} />
-          <button
-            type="button"
-            class="sbtn"
-            onClick={() => openBuilder(trace)}
-            title="Open the request builder for this route"
-          >
-            New request
-          </button>
+          {/* The open builder's drawer already shows "New request" (subjectChrome). */}
+          {!builderOpen.value && (
+            <button
+              type="button"
+              class="sbtn"
+              onClick={() => openBuilder(trace)}
+              title="Open the request builder for this route"
+            >
+              New request
+            </button>
+          )}
         </span>
       </div>
       <Baselines trace={trace} />

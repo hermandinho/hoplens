@@ -21,3 +21,6 @@ Framework-neutral copy, and request builder fixes for Express:
 - The vitest export, query suggestions and Changes copy name the framework's own dev loop.
 - A reconnect resync keeps requests that arrived live while it was fetching instead of counting them
   as lost.
+- The builder drawer no longer doubles its chrome: there is one "New request" header and one close,
+  and it stays in view. With only the builder open the drawer's head is pinned and carries it; over a
+  request or a compare the pinned bar's close closes the builder first, as Esc does.

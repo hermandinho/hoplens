@@ -36,7 +36,7 @@ export class ExpressDiscoverySource implements DiscoverySource {
         routes = discoverRoutes(
           routeEntries(st),
           (route, method) => locationOf(st, route, method, this.root),
-          (file, line, method) => this.linker.link(file, line, method),
+          (file, line, method, routePath) => this.linker.link(file, line, method, routePath),
         );
     } catch {
       routes = [];
@@ -46,8 +46,11 @@ export class ExpressDiscoverySource implements DiscoverySource {
 }
 
 type Locate = (route: any, method: string) => { file: string; line: number } | undefined;
-/** The schemas of the `method` registration at a project-relative `file:line`. */
-type Link = (file: string, line: number, method: string) => SchemaInfo[];
+/**
+ * The schemas of the `method` registration at a project-relative `file:line`; `routePath` is the
+ * route's own path (`route.path`), which tells apart the routes a loop registered from one line.
+ */
+type Link = (file: string, line: number, method: string, routePath: unknown) => SchemaInfo[];
 
 interface Group {
   info: RouteInfo;
@@ -83,7 +86,7 @@ export function discoverRoutes(entries: RouteEntry[], locate: Locate, link?: Lin
         g.info.methods.push({
           method,
           line: loc?.line ?? 0,
-          schemas: loc && link ? safeLink(link, loc.file, loc.line, method) : [],
+          schemas: loc && link ? safeLink(link, loc.file, loc.line, method, route?.path) : [],
           readsBody: BODY_METHODS.has(method),
         } satisfies MethodInfo);
       }
@@ -100,9 +103,9 @@ function safeLocate(locate: Locate, route: any, method: string) {
   }
 }
 
-function safeLink(link: Link, file: string, line: number, method: string): SchemaInfo[] {
+function safeLink(link: Link, file: string, line: number, method: string, routePath: unknown): SchemaInfo[] {
   try {
-    return link(file, line, method);
+    return link(file, line, method, routePath);
   } catch {
     return [];
   }

@@ -32,6 +32,13 @@ export interface SchemaProjectOptions {
    * (Express passes `/\.body\b/` so `r.body` counts whatever the request is named). Off for Next.
    */
   bodyPattern?: RegExp;
+  /**
+   * Locate a member-access schema (`ns.Body` of `import * as ns`, `S.Body` of a required module or
+   * of an object literal, local or imported, `a.b.Body`) at its declaration, as an identifier is,
+   * and read an object literal's member for its shape. Off for Next, which keeps the call site as
+   * the location of a member access.
+   */
+  memberDeclarations?: boolean;
 }
 
 /** A resolved declaration: the initializer (or declaration) node, its source file and the name. */
@@ -163,14 +170,22 @@ export class SchemaProject {
     if (local === "opaque") return null;
     if (local && head !== schemaExpr) return null;
     const scoped = local ? scopedResolver(ts, resolver, schemaExpr, sf) : resolver;
-    let shape = local ? interpretSchema(local, sf, scoped) : interpretSchema(schemaExpr, sf, scoped);
+    const member =
+      !local && this.options.memberDeclarations && ts.isPropertyAccessExpression(schemaExpr)
+        ? memberHit(ts, schemaExpr, sf, resolver)
+        : null;
+    let shape = local
+      ? interpretSchema(local, sf, scoped)
+      : member
+        ? { ...interpretSchema(member.node, member.sf, resolver), ref: schemaExpr.name.text }
+        : interpretSchema(schemaExpr, sf, scoped);
     if (local) shape = { ...shape, ref: schemaExpr.text };
     if (lenient ? shape.t === "any" && !shape.ref : shape.t === "any") return null;
     const hit = local
       ? { node: local, sf }
       : ts.isIdentifier(schemaExpr)
         ? resolver.resolve(schemaExpr.text, sf)
-        : null;
+        : member;
     const name = ts.isIdentifier(schemaExpr)
       ? schemaExpr.text
       : ts.isPropertyAccessExpression(schemaExpr)
@@ -359,6 +374,11 @@ export class SchemaProject {
             }
           }
         }
+        if (this.options.memberDeclarations) {
+          // const schemas = { Body: z.object(...) } (or imported): schemas.Body
+          const obj = findInFile(ns, sf, 0);
+          if (obj) return literalMember(ts, obj, member, (name, file) => findInFile(name, file, 1));
+        }
         return null;
       },
     };
@@ -417,6 +437,37 @@ export class SchemaProject {
     this.sfCache.set(file, { mtimeMs: stat.mtimeMs, sf });
     return sf;
   }
+}
+
+/**
+ * The declaration a member access names (`ns.Body`, `S.Body`, `a.b.Body`): a namespace import's or
+ * required module's export, else an object literal's member (local or imported), at most 4 deep.
+ */
+function memberHit(ts: any, expr: any, sf: any, r: ProjectResolver, depth = 0): Hit | null {
+  while (expr && (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isNonNullExpression(expr)))
+    expr = expr.expression;
+  if (!expr || depth > 4) return null;
+  if (ts.isIdentifier(expr)) return r.resolve(expr.text, sf);
+  if (!ts.isPropertyAccessExpression(expr)) return null;
+  const member = expr.name.text;
+  if (ts.isIdentifier(expr.expression)) return r.resolveMember(expr.expression.text, member, sf);
+  const obj = memberHit(ts, expr.expression, sf, r, depth + 1);
+  return obj ? literalMember(ts, obj, member, r.resolve) : null;
+}
+
+/**
+ * `member` of the object literal `obj.node`: its value, or the declaration a shorthand or identifier
+ * value names (resolved in the object's file). Null for a method, a missing member or a non-object.
+ */
+function literalMember(ts: any, obj: Hit, member: string, resolve: (name: string, sf: any) => Hit | null): Hit | null {
+  let node = obj.node;
+  while (node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression?.(node)))
+    node = node.expression;
+  if (!node || !ts.isObjectLiteralExpression(node)) return null;
+  const v = objectMember(ts, node, member);
+  if (!v || ts.isMethodDeclaration(v)) return null;
+  if (ts.isIdentifier(v)) return resolve(v.text, obj.sf);
+  return { node: v, sf: obj.sf, name: member };
 }
 
 /** `a` of `a`, `a.b.c`; null for anything else (`z.object(...)`, `this.x`). */
@@ -488,9 +539,14 @@ function scopedResolver(ts: any, base: ProjectResolver, at: any, sf: any): Proje
   };
 }
 
-/** The value node of `key` in an object literal: a property, a shorthand (its identifier) or a method. */
+/**
+ * The value node of `key` in an object literal: a property, a shorthand (its identifier) or a method.
+ * The last one of a duplicated key, as at runtime. (A spread after it may still override it: a
+ * caller that must not be wrong checks for one.)
+ */
 export function objectMember(ts: any, obj: any, key: string): any | null {
-  for (const p of obj.properties) {
+  for (let i = obj.properties.length - 1; i >= 0; i--) {
+    const p = obj.properties[i];
     if (ts.isPropertyAssignment(p) && propText(p.name) === key) return p.initializer;
     if (ts.isShorthandPropertyAssignment(p) && p.name.text === key) return p.name;
     if (ts.isMethodDeclaration(p) && propText(p.name) === key) return p;

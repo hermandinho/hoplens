@@ -10,4 +10,8 @@ source-file cache), plus `fieldsOf`, `scriptKind`, `objectMember`, `PARSE_METHOD
 import to `export default function`, and add a body-input pattern; the Express adapter uses them.
 `@hoplens/next` now calls it, with no change in what it finds. A schema name shadowed by a function
 parameter or local binding is no longer resolved to the top-level declaration, and CommonJS
-re-export barrels (`module.exports = require("./x")`) are followed.
+re-export barrels (`module.exports = require("./x")`) are followed. A new opt-in
+`memberDeclarations` option (used by Express, off for Next) locates a member-access schema
+(`ns.Body`, a required module's `S.Body`, an object literal's `schemas.Body` or `a.b.Body`) at its
+declaration instead of the call site, and reads object-literal members for their shape;
+`localBinding` is exported for adapters.

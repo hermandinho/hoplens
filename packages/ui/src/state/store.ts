@@ -2,6 +2,8 @@ import { batch, computed, effect, signal } from "@preact/signals";
 import { HoplensApiError, type LiveConnection, api, openLive } from "../api/client";
 import type { Discovery, Meta, RouteInfo, TraceRecord, TraceSummary } from "../api/types";
 import { noteActivity } from "./activity";
+import { type FrameworkCopy, frameworkCopyOf, isNextApp } from "./framework";
+import { isRegexRoute } from "./routePick";
 import { type Route, go, initRouter, route } from "./router";
 import { mergeFindingGroups, serverKpis, serverRouteBadges, serverRouteStats, serverStats } from "./serverStats";
 import {
@@ -24,6 +26,8 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 export type MainView = "overview" | "requests" | "queries" | "changes";
 
 export const metaState = signal<Meta | null>(null);
+/** Framework-dependent copy (Next.js wording, or the neutral one for Express and others). */
+export const frameworkCopy = computed<FrameworkCopy>(() => frameworkCopyOf(metaState.value));
 export const routesState = signal<Discovery | null>(null);
 export const tracesState = signal<TraceSummary[]>([]);
 export const selectedTraceId = signal<string | null>(null);
@@ -35,6 +39,11 @@ export const loadError = signal<string | null>(null);
 /** A failed user action (Clear, opening a trace). Transient: cleared by the next success. */
 export const actionError = signal<string | null>(null);
 export const loadStatus = signal<LoadState>("idle");
+/**
+ * An expected event worth a line but not an error: the app restarted under a watcher (node --watch)
+ * and its old requests went with it. Dismissible; cleared by the next reconnect that lost nothing.
+ */
+export const infoNote = signal<string | null>(null);
 
 /** "routeId::METHOD" — identifies which route+method pair the request builder is editing. */
 export const selectedRouteKey = signal<string | null>(null);
@@ -144,7 +153,8 @@ export function selectRoute(r: RouteInfo, method: string): void {
  * once per registration file) that answers its method, else one that answers ANY.
  */
 export function routeKeyFor(routes: RouteInfo[], method: string, tpl: string): string | undefined {
-  const same = routes.filter((r) => r.nextRoute === tpl || r.path === tpl);
+  // A regex route is listed but not sendable (the picker disables it): never preselect one.
+  const same = routes.filter((r) => (r.nextRoute === tpl || r.path === tpl) && !isRegexRoute(r));
   for (const want of [method, "ANY"]) {
     const r = same.find((x) => x.methods.some((m) => m.method === want));
     if (r) return `${r.id}::${want}`;
@@ -434,29 +444,54 @@ let liveConn: LiveConnection | null = null;
 let helloSeen = false;
 
 /**
- * Replace the local list with the server's after a reconnect. Rows the server no longer has are
- * dropped; if the open request is one of them, close it and say why instead of 404ing on it.
+ * Replace the local list with the server's after a reconnect, and re-read meta and routes (the app
+ * may have restarted with other routes, or another version). Rows the server no longer has are
+ * dropped; if the open request is one of them, close it and say why instead of 404ing on it. Under
+ * Next a lost list is unexpected (an error line); under another framework a restart is routine
+ * (node --watch on every save), so it is an info note.
  */
 export async function resyncTraces(): Promise<void> {
-  let server: TraceSummary[];
-  try {
-    server = await api.traces();
-  } catch {
-    return; // still unreachable: the next hello retries
-  }
+  // Rows from before the resync are the ones the server may have lost; live `start` / `done` events
+  // keep landing while the fetches below are in flight, and those rows are newer than the snapshot.
+  const before = new Set(tracesState.peek().map((t) => t.id));
+  // Meta and routes are best-effort: an older list beats none.
+  const [traces, meta, routes] = await Promise.all([
+    api.traces().catch(() => null),
+    api.meta().catch(() => null),
+    api.routes().catch(() => null),
+  ]);
+  if (!traces) return; // still unreachable: the next hello retries
+  const current = tracesState.peek();
+  const local = new Map(current.map((t) => [t.id, t]));
+  const fresh = current.filter((t) => !before.has(t.id));
+  const freshIds = new Set(fresh.map((t) => t.id));
+  // A row the snapshot caught in flight that finished meanwhile keeps its finished summary.
+  const server = capTraces([
+    ...fresh,
+    ...traces
+      .filter((t) => !freshIds.has(t.id))
+      .map((t) => {
+        const l = local.get(t.id);
+        return l?.done && !t.done ? l : t;
+      }),
+  ]);
   const ids = new Set(server.map((t) => t.id));
-  const lost = tracesState.peek().filter((t) => !ids.has(t.id)).length;
+  const lost = current.filter((t) => before.has(t.id) && !ids.has(t.id)).length;
   const sel = selectedTraceId.peek();
   const selectedGone = sel !== null && !ids.has(sel);
   if (selectedGone) pendingFollow = null;
   batch(() => {
+    if (meta) metaState.value = meta;
+    if (routes) routesState.value = routes;
     tracesState.value = server;
     if (selectedGone) {
       selectedTraceId.value = null;
       selectedTrace.value = null;
     }
-    if (lost > 0)
-      actionError.value = `Hoplens restarted: ${lost} older request${lost === 1 ? " is" : "s are"} no longer available.`;
+    const older = `${lost} older request${lost === 1 ? " is" : "s are"} no longer available.`;
+    if (lost > 0 && isNextApp(metaState.peek())) actionError.value = `Hoplens restarted: ${older}`;
+    else if (lost > 0) infoNote.value = `App restarted: ${older}`;
+    else infoNote.value = null;
   });
   noteActivity("bootstrap");
   const v = route.value.view;
@@ -471,7 +506,8 @@ export function startLive(): void {
       if (ev.type === "hello") {
         // The first hello is the initial connect (bootstrap already loaded the list). A later one is
         // a reconnect, and the server may have restarted meanwhile (next dev restarts its server
-        // process), so the local list can name traces that no longer exist: resync from the server.
+        // process; node --watch restarts an Express app on every save), so the local list can name
+        // traces that no longer exist, and routes or meta may differ: resync all three.
         if (helloSeen) void resyncTraces();
         helloSeen = true;
       } else if (ev.type === "clear") {

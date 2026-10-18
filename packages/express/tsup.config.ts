@@ -10,5 +10,5 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: "node20",
-  external: ["@hoplens/core", "express"],
+  external: ["@hoplens/core", "@hoplens/schema", "@hoplens/transform", "express"],
 });

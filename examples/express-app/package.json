@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node --watch --import hoplens/express/register src/server.js",
     "start": "node src/server.js",
-    "traffic": "node scripts/traffic.mjs"
+    "traffic": "node scripts/traffic.mjs",
+    "check:schemas": "node scripts/check-schemas.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",

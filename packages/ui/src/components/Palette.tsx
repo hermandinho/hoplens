@@ -26,6 +26,7 @@ import { go, route, setSince } from "../state/router";
 import {
   type MainView,
   bootstrap,
+  frameworkCopy,
   loadTrace,
   overviewFindings,
   routeStats,
@@ -183,6 +184,7 @@ export function Palette() {
   const serverEdits = epochList.value;
   // Resolved N+1 call lines (culpritLoc reads them): a trigger to rebuild the finding rows.
   const sites = callSites.value;
+  const fw = frameworkCopy.value;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `sites` is a trigger, see above
   const items = useMemo(
     () =>
@@ -205,11 +207,12 @@ export function Palette() {
               search: hits && hits.q === query.trim() ? hits : undefined,
               extra,
               locOf: culpritLoc,
+              fw,
             },
             ACTS,
           )
         : [],
-    [open, findings, routes, traces, shapes, serverEdits, hits, query, extra, sites],
+    [open, findings, routes, traces, shapes, serverEdits, hits, query, extra, sites, fw],
   );
   const sections = useMemo(() => rankItems(items, query, { recents }), [items, query, recents]);
   const rows = flatRows(sections);

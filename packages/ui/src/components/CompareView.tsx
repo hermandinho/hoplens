@@ -29,11 +29,12 @@ import {
   valueMode,
   visibleRows,
 } from "../state/compare";
+import { ruleLabel } from "../state/framework";
 import { formatKey } from "../state/keymap";
 import { go } from "../state/router";
 import { openSourceAt } from "../state/source";
-import { RULE_LABELS, fmtMs } from "../state/stats";
-import { loadTrace } from "../state/store";
+import { fmtMs } from "../state/stats";
+import { frameworkCopy, loadTrace } from "../state/store";
 import { Skeleton } from "./Skeleton";
 import "../styles/compare.css";
 
@@ -358,7 +359,7 @@ function Findings({ d }: { d: CompareResult }) {
             <span class="cmp-flabel">new in B</span>
             <span class={`cmp-sev cmp-sev-${f.severity}`} aria-hidden="true" />
             <span class="cmp-ftitle">
-              {RULE_LABELS[f.rule] ?? f.rule}: {findingLine(f)}
+              {ruleLabel(f.rule, frameworkCopy.value)}: {findingLine(f)}
             </span>
             {f.location && (
               <button
@@ -379,7 +380,7 @@ function Findings({ d }: { d: CompareResult }) {
             <span class="cmp-flabel">resolved</span>
             <span class={`cmp-sev cmp-sev-${f.severity}`} aria-hidden="true" />
             <span class="cmp-ftitle">
-              {RULE_LABELS[f.rule] ?? f.rule}: {findingLine(f)}
+              {ruleLabel(f.rule, frameworkCopy.value)}: {findingLine(f)}
             </span>
           </li>
         ))}
@@ -391,7 +392,7 @@ function Findings({ d }: { d: CompareResult }) {
             <span class="cmp-flabel">changed</span>
             <span />
             <span class="cmp-ftitle">
-              {RULE_LABELS[f.rule] ?? f.rule}: {f.title}{" "}
+              {ruleLabel(f.rule, frameworkCopy.value)}: {f.title}{" "}
               <span class={`mono ${(f.b ?? 0) > (f.a ?? 0) ? "cmp-worse" : "cmp-better"}`}>
                 x{f.a ?? 0} → x{f.b ?? 0}
               </span>

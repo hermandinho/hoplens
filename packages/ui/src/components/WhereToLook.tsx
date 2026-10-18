@@ -1,8 +1,10 @@
 import { useMemo, useState } from "preact/hooks";
 import type { TraceRecord } from "../api/types";
 import { clearHighlight, highlight, setHighlight } from "../state/canvas";
+import { ruleLabel } from "../state/framework";
 import { selectHop } from "../state/journey";
-import { BUCKET_LABELS, RULE_LABELS, fmtMs } from "../state/stats";
+import { BUCKET_LABELS, fmtMs } from "../state/stats";
+import { frameworkCopy } from "../state/store";
 import { type LookGroup, fullLoc, lookGroups, shortLoc } from "../state/verdict";
 import { InlineSource } from "./SourcePeek";
 import "../styles/verdict.css";
@@ -79,7 +81,7 @@ function LookRow({
             {shortLoc(r.location)}
           </span>
         )}
-        {r.rule && <span class="look-rule">{RULE_LABELS[r.rule] ?? r.rule}</span>}
+        {r.rule && <span class="look-rule">{ruleLabel(r.rule, frameworkCopy.value)}</span>}
       </button>
       <span class="look-actions">
         {r.location && (

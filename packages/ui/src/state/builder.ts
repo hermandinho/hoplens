@@ -1,7 +1,8 @@
 import { computed, effect, signal } from "@preact/signals";
 import { api } from "../api/client";
-import type { MethodInfo, RouteInfo, RunResult, SchemaInfo } from "../api/types";
+import type { MethodInfo, RouteInfo, RunResult } from "../api/types";
 import { REPLAY_N, type ReplayRequest, startReplay } from "./replay";
+import { REGEX_REASON, isRegexRoute, missingParams, resolvePath, seedParams } from "./routePick";
 import { type Route, route } from "./router";
 import { builderOpen, loadTrace, metaState, routesState, selectedRouteKey } from "./store";
 
@@ -41,6 +42,12 @@ export const activeRoute = computed((): { route: RouteInfo; method: MethodInfo }
   return { route, method: m };
 });
 
+/** Why the picked route can't be sent at all (a regex route has no template to fill), else null. */
+export const unsendableReason = computed(() => {
+  const r = activeRoute.value;
+  return r && isRegexRoute(r.route) ? REGEX_REASON : null;
+});
+
 export const activeSchemas = computed(() => activeRoute.value?.method.schemas ?? []);
 export const activeBodySchema = computed(() => activeSchemas.value.find((s) => s.target === "body") ?? null);
 export const activeQuerySchema = computed(() => activeSchemas.value.find((s) => s.target === "query") ?? null);
@@ -52,21 +59,10 @@ function kvFromObject(obj: Record<string, unknown> | undefined): KV[] {
   return Object.entries(obj).map(([key, value]) => ({ key, value: String(value), enabled: true }));
 }
 
-function paramsFromExample(schema: SchemaInfo | undefined): Record<string, string> {
-  if (!schema || typeof schema.example !== "object" || schema.example === null) return {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(schema.example as Record<string, unknown>)) out[k] = String(v);
-  return out;
-}
-
-function initialBuilder(route: RouteInfo, method: MethodInfo): BuilderState {
-  const paramSchema = method.schemas.find((s) => s.target === "params");
-  const paramSeed = paramsFromExample(paramSchema);
-  // Fill any path-param with the example or a placeholder.
-  const params: Record<string, string> = {};
-  for (const p of route.params) {
-    params[p.name] = paramSeed[p.name] ?? (p.name === "id" ? "123" : p.name);
-  }
+/** A route's first builder state: params from the schema example (else empty), body, query. Exported for tests. */
+export function initialBuilder(route: RouteInfo, method: MethodInfo): BuilderState {
+  // The schema example, `123` for an id, else empty: the chip shows the name as a placeholder.
+  const params = seedParams(route, method);
 
   const bodySchema = method.schemas.find((s) => s.target === "body");
   const body =
@@ -97,11 +93,18 @@ function readStored(key: string): BuilderState | null {
     const raw = localStorage.getItem(storageKey(key));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.routeKey === key) return parsed as BuilderState;
+    if (parsed && typeof parsed === "object" && parsed.routeKey === key) return unseedNames(parsed as BuilderState);
   } catch {
     /* ignore corruption */
   }
   return null;
+}
+
+/** Builders saved before params seeded empty carry each param's own name as its value: clear those. */
+function unseedNames(s: BuilderState): BuilderState {
+  const params = s.params && typeof s.params === "object" ? s.params : {};
+  if (!Object.entries(params).some(([k, v]) => v === k)) return s;
+  return { ...s, params: Object.fromEntries(Object.entries(params).map(([k, v]) => [k, v === k ? "" : v])) };
 }
 
 function writeStored(state: BuilderState): void {
@@ -213,15 +216,6 @@ function buildQuery(rows: KV[]): string {
   return parts.join("&");
 }
 
-function resolvePath(template: string, params: Record<string, string>): string {
-  return template.replace(/:([a-zA-Z_][\w]*)(\+|\*)?/g, (_m, name: string, suffix?: string) => {
-    const v = params[name];
-    if (!v) return suffix ? "" : `:${name}`;
-    // catch-all segments remain as path segments
-    return v;
-  });
-}
-
 /** The builder's fields as a run input (path params filled, enabled query/header rows only). */
 export function builderRequest(s: BuilderState): ReplayRequest {
   const resolved = resolvePath(s.path, s.params);
@@ -243,13 +237,23 @@ export function builderRequest(s: BuilderState): ReplayRequest {
 /** Replay xN of the builder's request (`R` while the builder is open); non-GET asks first. */
 export function replayBuilder(n = REPLAY_N): void {
   const s = builderState.value;
-  if (!s || !metaState.value || sending.value) return;
+  if (!s || !metaState.value || sending.value || unsendableReason.value || missingParams(s.path, s.params).length)
+    return;
   startReplay({ kind: "builder", routeKey: s.routeKey }, builderRequest(s), { n });
 }
 
 export async function sendRequest(): Promise<void> {
   const s = builderState.value;
   if (!s || !metaState.value) return;
+  if (unsendableReason.value) {
+    sendError.value = unsendableReason.value;
+    return;
+  }
+  const missing = missingParams(s.path, s.params);
+  if (missing.length) {
+    sendError.value = `Fill the path parameter${missing.length === 1 ? "" : "s"} ${missing.map((n) => `:${n}`).join(", ")} first.`;
+    return;
+  }
   sending.value = true;
   sendError.value = null;
   try {

@@ -21,7 +21,7 @@ import { register } from "../state/keymap";
 import { type Route, go, route, setSince } from "../state/router";
 import { serverStats } from "../state/serverStats";
 import { sinceEpoch } from "../state/sinceScope";
-import { tracesState } from "../state/store";
+import { frameworkCopy, tracesState } from "../state/store";
 import { SinceChip } from "./SinceChip";
 import { VerdictRow } from "./SinceStrip";
 import "../styles/changes.css";
@@ -152,12 +152,18 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
           to each other, to see what changed.
         </p>
       )}
-      {edits === 0 && (
-        <p class="chg-empty muted">
-          No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up
-          here with the files it changed and how each affected route moved.
-        </p>
-      )}
+      {edits === 0 &&
+        (frameworkCopy.value.isNext ? (
+          <p class="chg-empty muted">
+            No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up
+            here with the files it changed and how each affected route moved.
+          </p>
+        ) : (
+          <p class="chg-empty muted">
+            No edits yet. {frameworkCopy.value.label} has no rebuild for Hoplens to watch: each run of the app is one
+            epoch, and a restart (<code>node --watch</code> on a save) starts the next one.
+          </p>
+        ))}
       {all.length > 0 && (
         <>
           <ChangesTrack selected={selected} />

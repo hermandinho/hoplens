@@ -2,6 +2,7 @@ import { useComputed, useSignalEffect } from "@preact/signals";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { FindingSeverity, FindingSummary, TraceSummary } from "../api/types";
 import { pinnedIds } from "../state/compare";
+import { ruleLabel } from "../state/framework";
 import { QUERY_KEYS, type SuggestResult, applySuggestion, findingQuery, suggest } from "../state/querySuggest";
 import {
   hasTextTerms,
@@ -18,7 +19,6 @@ import {
 } from "../state/requestLog";
 import {
   type Percentiles,
-  RULE_LABELS,
   approx,
   fmtMs,
   ioCount,
@@ -27,7 +27,16 @@ import {
   statusClass,
   worseSeverity,
 } from "../state/stats";
-import { followLive, loadStatus, loadTrace, mainView, routesState, selectedTraceId, tracesState } from "../state/store";
+import {
+  followLive,
+  frameworkCopy,
+  loadStatus,
+  loadTrace,
+  mainView,
+  routesState,
+  selectedTraceId,
+  tracesState,
+} from "../state/store";
 import { Skeleton } from "./Skeleton";
 
 /*
@@ -61,7 +70,8 @@ export function QueryBar({ id, variant }: { id: string; variant: LogVariant }) {
     return out;
   }).value;
 
-  const res: SuggestResult = useMemo(() => suggest(q, caret, routes), [q, caret, routes]);
+  const fw = frameworkCopy.value;
+  const res: SuggestResult = useMemo(() => suggest(q, caret, routes, fw), [q, caret, routes, fw]);
   const showList = open && res.items.length > 0;
   const activeIdx = showList ? Math.min(active, res.items.length - 1) : -1;
 
@@ -513,7 +523,11 @@ function LogRow({
   const cold = f?.cold ? (
     <span
       class="cold-badge"
-      title={f.compileMs > 0 ? `Cold: ${Math.round(f.compileMs)}ms compiling` : "Cold: first request after a rebuild"}
+      title={
+        frameworkCopy.value.isNext && f.compileMs > 0
+          ? `Cold: ${Math.round(f.compileMs)}ms compiling`
+          : frameworkCopy.value.coldPlain
+      }
     >
       cold
     </span>
@@ -616,8 +630,8 @@ function LogRow({
           type="button"
           class={`sev-badge sev-${sev} rlog-find`}
           tabIndex={-1}
-          title={`${nFindings} finding${nFindings === 1 ? "" : "s"}; worst: ${RULE_LABELS[worst.rule] ?? worst.rule}: ${worst.title}. Click to list every request with it on this route.`}
-          aria-label={`Filter requests with ${RULE_LABELS[worst.rule] ?? worst.rule} on ${routeKeyOf(t)}`}
+          title={`${nFindings} finding${nFindings === 1 ? "" : "s"}; worst: ${ruleLabel(worst.rule, frameworkCopy.value)}: ${worst.title}. Click to list every request with it on this route.`}
+          aria-label={`Filter requests with ${ruleLabel(worst.rule, frameworkCopy.value)} on ${routeKeyOf(t)}`}
           onClick={() => (logQuery.value = findingQuery(worst.rule, [routeKeyOf(t)]))}
         >
           <span class="sev-dot" aria-hidden="true" />

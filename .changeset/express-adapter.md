@@ -34,3 +34,10 @@ static assets, route templates, handler hops and the route list; middleware hops
   that registered it, sub-app and parameterised-mount routes included. Routes registered later show
   on the next scan; a route under a mount Hoplens could not see is listed once a request reached it.
   Its template is the one the route's requests are grouped under.
+- The request builder pre-fills a route's body from its Zod schema. Schemas are read statically
+  from the route's registration call: `Schema.parse(req.body)` (also `safeParse`, `parseAsync`, and
+  `req.query` / `req.params`) in an inline handler or in one referenced by name (same file, ESM or
+  CommonJS import, `ns.member` / `obj.member`, or wrapped like `asyncHandler(fn)`), then validation
+  middleware in the arguments: a call with a single Zod schema (`validate(Schema)`,
+  `validateBody(Schema)`), with a part name and a schema (`zValidator("json", Schema)`), or with
+  `{ body, query, params }` schemas. Cached per file mtime; nothing is executed.

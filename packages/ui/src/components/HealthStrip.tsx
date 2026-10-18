@@ -19,7 +19,7 @@ import {
   unseenProcessErrors,
 } from "../state/health";
 import { register } from "../state/keymap";
-import { liveStatus, tracesState } from "../state/store";
+import { frameworkCopy, liveStatus, tracesState } from "../state/store";
 import "../styles/health.css";
 
 /*
@@ -85,7 +85,7 @@ function LoopValue({
   const shown = view?.ms ?? p99;
   const hint =
     level === "err"
-      ? "The event loop was blocked: requests handled meanwhile waited. Look for sync work (big JSON, sync fs, crypto) or a dev compile."
+      ? frameworkCopy.value.loopBlockedHint
       : level === "warn"
         ? metric === "max"
           ? `One event-loop stall of ${fmtLoop(shown)} in the last ${LOOP_HOLD_SAMPLES * secs}s: requests handled meanwhile waited.`

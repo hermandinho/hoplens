@@ -1,11 +1,13 @@
 // Route discovery: the route list behind /__hoplens/api/routes. Built from the same walk and the same
 // templates routes.ts gives traces (so RouteInfo.nextRoute === TraceRecord.route), plus the routes
 // a traced dispatch reached that the walk could not. Core calls scan() throttled; it never throws.
+// Each method's Zod schemas come from its registration call site (schemas.ts, static, cached per mtime).
 
 import fs from "node:fs";
 import path from "node:path";
-import type { Discovery, DiscoverySource, MethodInfo, RouteInfo } from "@hoplens/core";
+import type { Discovery, DiscoverySource, MethodInfo, RouteInfo, SchemaInfo } from "@hoplens/core";
 import { type RouteEntry, locationOf, routeEntries, routesState } from "./routes";
+import { SchemaLinker } from "./schemas";
 
 /** Methods whose requests the builder seeds with a body. */
 const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
@@ -13,7 +15,11 @@ const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
 const MAX_ROUTES = 2000;
 
 export class ExpressDiscoverySource implements DiscoverySource {
-  constructor(private readonly root: string) {}
+  private readonly linker: SchemaLinker;
+
+  constructor(private readonly root: string) {
+    this.linker = new SchemaLinker(root);
+  }
 
   scan(): Discovery {
     const scannedAt = Date.now();
@@ -26,7 +32,12 @@ export class ExpressDiscoverySource implements DiscoverySource {
     let routes: RouteInfo[] = [];
     try {
       const st = routesState();
-      if (st) routes = discoverRoutes(routeEntries(st), (route, method) => locationOf(st, route, method, this.root));
+      if (st)
+        routes = discoverRoutes(
+          routeEntries(st),
+          (route, method) => locationOf(st, route, method, this.root),
+          (file, line, method) => this.linker.link(file, line, method),
+        );
     } catch {
       routes = [];
     }
@@ -35,6 +46,8 @@ export class ExpressDiscoverySource implements DiscoverySource {
 }
 
 type Locate = (route: any, method: string) => { file: string; line: number } | undefined;
+/** The schemas of the `method` registration at a project-relative `file:line`. */
+type Link = (file: string, line: number, method: string) => SchemaInfo[];
 
 interface Group {
   info: RouteInfo;
@@ -46,7 +59,7 @@ interface Group {
  * (app.get('/x') and app.post('/x') are two routes) merge, each with its own registration line. A
  * template whose methods were registered in different files is listed once per file. Exported for tests.
  */
-export function discoverRoutes(entries: RouteEntry[], locate: Locate): RouteInfo[] {
+export function discoverRoutes(entries: RouteEntry[], locate: Locate, link?: Link): RouteInfo[] {
   const groups = new Map<string, Group>();
   const out: RouteInfo[] = [];
   for (const { route, templates } of entries) {
@@ -70,7 +83,7 @@ export function discoverRoutes(entries: RouteEntry[], locate: Locate): RouteInfo
         g.info.methods.push({
           method,
           line: loc?.line ?? 0,
-          schemas: [],
+          schemas: loc && link ? safeLink(link, loc.file, loc.line, method) : [],
           readsBody: BODY_METHODS.has(method),
         } satisfies MethodInfo);
       }
@@ -84,6 +97,14 @@ function safeLocate(locate: Locate, route: any, method: string) {
     return locate(route, method);
   } catch {
     return undefined;
+  }
+}
+
+function safeLink(link: Link, file: string, line: number, method: string): SchemaInfo[] {
+  try {
+    return link(file, line, method);
+  } catch {
+    return [];
   }
 }
 

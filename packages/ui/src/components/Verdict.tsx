@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type { Finding, TraceRecord } from "../api/types";
 import { clearHighlight, highlight, setHighlight, zoomTo } from "../state/canvas";
+import { ruleLabel } from "../state/framework";
 import { register } from "../state/keymap";
 import { openSourceAt } from "../state/source";
-import { RULE_LABELS, fmtMs } from "../state/stats";
+import { fmtMs } from "../state/stats";
+import { frameworkCopy } from "../state/store";
 import { type Verdict as VerdictModel, findingSentence, fullLoc, shortLoc, verdictFor } from "../state/verdict";
 import { InlineSource } from "./SourcePeek";
 import "../styles/verdict.css";
@@ -29,7 +31,8 @@ function act(v: VerdictModel): void {
 }
 
 export function Verdict({ trace }: { trace: TraceRecord }) {
-  const v = useMemo(() => verdictFor(trace), [trace]);
+  const fw = frameworkCopy.value;
+  const v = useMemo(() => verdictFor(trace, fw), [trace, fw]);
   // The line the inline peek marked: an N+1's call site rather than its function's declaration.
   const [hitLine, setHitLine] = useState<number | undefined>(undefined);
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the culprit changes
@@ -126,6 +129,7 @@ export function Verdict({ trace }: { trace: TraceRecord }) {
 /** The trace's other findings, folded behind one line so the verdict stays the focal point. */
 function MoreFindings({ trace, shown }: { trace: TraceRecord; shown?: Finding }) {
   const [open, setOpen] = useState(false);
+  const fw = frameworkCopy.value;
   const rest = (trace.findings ?? [])
     .filter((f) => f !== shown)
     .sort((a, b) => (b.estSavedMs ?? 0) - (a.estSavedMs ?? 0));
@@ -151,8 +155,8 @@ function MoreFindings({ trace, shown }: { trace: TraceRecord; shown?: Finding })
                   title={f.detail ?? f.title}
                 >
                   <span class={`sev-dot sev-${f.severity}`} aria-hidden="true" />
-                  <span class="verdict-more-rule">{RULE_LABELS[f.rule] ?? f.rule}</span>
-                  <span class="verdict-more-text">{findingSentence(f, trace.spans)}</span>
+                  <span class="verdict-more-rule">{ruleLabel(f.rule, fw)}</span>
+                  <span class="verdict-more-text">{findingSentence(f, trace.spans, undefined, fw)}</span>
                   {f.estSavedMs !== undefined && f.estSavedMs >= 1 && (
                     <span class="mono dim">~{fmtMs(f.estSavedMs)}</span>
                   )}

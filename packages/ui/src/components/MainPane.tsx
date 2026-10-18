@@ -5,11 +5,13 @@ import { initCompare } from "../state/compare";
 import { sinceNumber, tracesSince } from "../state/epochs";
 import { isMobile, neighbourId } from "../state/mobile";
 import { logMatchCount, logQuery, logRows } from "../state/requestLog";
+import { pickerGroups } from "../state/routePick";
 import { type Route, route } from "../state/router";
 import {
   builderOpen,
   closeBuilder,
   closeSubject,
+  frameworkCopy,
   liveHold,
   loadTrace,
   routesState,
@@ -324,16 +326,9 @@ function BuilderDrawer() {
   const routes = routesState.value?.routes ?? [];
   const key = selectedRouteKey.value ?? "";
   const dims = builderDims.value;
-  const groups = useComputed(() => {
-    const m = new Map<string, NonNullable<typeof routesState.value>["routes"]>();
-    for (const r of routesState.value?.routes ?? []) {
-      const g = r.path.split("/").filter(Boolean)[0] ?? "root";
-      const list = m.get(g) ?? [];
-      list.push(r);
-      m.set(g, list);
-    }
-    return [...m.entries()].sort(([x], [y]) => x.localeCompare(y));
-  }).value;
+  // Next keeps its `:param` paths; other frameworks show the template traces name. Regex routes are
+  // listed last, disabled (nothing to fill); a template + method in two files names the file.
+  const groups = useComputed(() => pickerGroups(routesState.value?.routes ?? [], frameworkCopy.value.isNext)).value;
 
   return (
     <section class={`builder-drawer${dims ? " dims-subject" : ""}`} aria-label="Request builder">
@@ -354,16 +349,13 @@ function BuilderDrawer() {
           <option value="" disabled>
             {routes.length ? "Pick a route…" : "No routes found"}
           </option>
-          {groups.map(([g, items]) => (
-            <optgroup key={g} label={`/${g}`}>
-              {items.flatMap((r) =>
-                r.methods.map((m) => (
-                  <option key={`${r.id}::${m.method}`} value={`${r.id}::${m.method}`}>
-                    {m.method} {r.path}
-                    {m.schemas.length > 0 ? "  (schema)" : ""}
-                  </option>
-                )),
-              )}
+          {groups.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.options.map((o) => (
+                <option key={o.value} value={o.value} disabled={o.disabled} title={o.reason}>
+                  {o.label}
+                </option>
+              ))}
             </optgroup>
           ))}
         </select>

@@ -2,6 +2,7 @@ import { type Signal, computed, signal } from "@preact/signals";
 import type { ComponentType } from "preact";
 import type { FindingRollup } from "../api/types";
 import { culpritLoc } from "../state/callSite";
+import { ruleLabel } from "../state/framework";
 import { openErrorsPanel, processErrorTotal } from "../state/health";
 import { register } from "../state/keymap";
 import { findingQuery, quoteValue } from "../state/querySuggest";
@@ -16,7 +17,6 @@ import {
   type Exemplars,
   type FindingGroup,
   type Hero,
-  RULE_LABELS,
   type RouteSort,
   type RouteStats,
   deltaLabel,
@@ -34,6 +34,7 @@ import {
 } from "../state/stats";
 import {
   finishedTraces,
+  frameworkCopy,
   includeCold,
   kpis,
   loadStatus,
@@ -116,7 +117,7 @@ export function Overview() {
           class={`chip ov-cold ${cold ? "chip-active" : ""}`}
           aria-pressed={cold}
           onClick={toggleIncludeCold}
-          title="Cold = first request after a rebuild, or one that waited on a dev compile. Excluded from percentiles by default."
+          title={frameworkCopy.value.coldToggleHint}
         >
           Include cold{k.coldExcluded > 0 && !cold ? ` (${k.coldExcluded})` : ""}
         </button>
@@ -190,7 +191,9 @@ function SourceNote({
   if (statsSource.value === "server") {
     const since = serverStats.value?.since;
     return (
-      <span title="GET /api/stats: kept per route and per dev-rebuild epoch on the server, so evicted requests still count. Cold requests are out of the percentiles.">
+      <span
+        title={`GET /api/stats: kept per route and per ${frameworkCopy.value.epoch} on the server, so evicted requests still count. Cold requests are out of the percentiles.`}
+      >
         {requests} request{plural}
         {since ? ` since ${new Date(since).toLocaleTimeString()}` : ""} · server stats
       </span>
@@ -228,7 +231,12 @@ function HeroBlock({ hero }: { hero: Hero }) {
   if (hero.kind === "finding" && hero.finding) {
     const g = hero.finding;
     const verb = hero.routes.length > 1 ? "are" : "is";
-    const sentence = findingSentence({ rule: g.rule, title: g.title, fn: g.fn, count: g.maxCount });
+    const sentence = findingSentence(
+      { rule: g.rule, title: g.title, fn: g.fn, count: g.maxCount },
+      undefined,
+      undefined,
+      frameworkCopy.value,
+    );
     const save = savingPhrase(g);
     return (
       <section class={`ov-hero ov-hero-${g.severity}`} aria-label="Top problem">
@@ -279,7 +287,7 @@ function HeroBlock({ hero }: { hero: Hero }) {
       </p>
       {hero.seenOnce > 0 && (
         <div class="ov-hero-sub dim">
-          {hero.seenOnce} finding{hero.seenOnce === 1 ? "" : "s"} seen once or caused by the dev compile, listed below.
+          {hero.seenOnce} finding{hero.seenOnce === 1 ? "" : "s"} {frameworkCopy.value.lowSignal}, listed below.
         </div>
       )}
     </section>
@@ -306,7 +314,7 @@ function LocButton({ loc }: { loc: { file: string; line: number; column?: number
 }
 
 function FindingActions({ g, primary = false }: { g: FindingGroup; primary?: boolean }) {
-  const label = RULE_LABELS[g.rule] ?? g.rule;
+  const label = ruleLabel(g.rule, frameworkCopy.value);
   return (
     <span class="ov-actions">
       <button
@@ -380,7 +388,7 @@ function NextFindings({ groups, hero }: { groups: FindingGroup[]; hero?: string 
           {once.length > 0 && (
             <details class="ov-once">
               <summary>
-                Seen once, dev compile or gone since an edit <span class="count">{once.length}</span>
+                {frameworkCopy.value.lowSignalHead} <span class="count">{once.length}</span>
                 <span class="dim"> · ranked after the rest</span>
               </summary>
               <ol class="ov-list">
@@ -397,7 +405,12 @@ function NextFindings({ groups, hero }: { groups: FindingGroup[]; hero?: string 
 }
 
 function FindingRow({ g }: { g: FindingGroup }) {
-  const sentence = findingSentence({ rule: g.rule, title: g.title, fn: g.fn, count: g.maxCount });
+  const sentence = findingSentence(
+    { rule: g.rule, title: g.title, fn: g.fn, count: g.maxCount },
+    undefined,
+    undefined,
+    frameworkCopy.value,
+  );
   const per = g.savedMsPerRequest !== undefined && g.savedMsPerRequest >= 1 ? g.savedMsPerRequest : undefined;
   return (
     <li class={`ov-find ov-find-${g.severity} ${isLowSignal(g) ? "ov-find-once" : ""}`}>
@@ -424,8 +437,8 @@ function FindingRow({ g }: { g: FindingGroup }) {
               </span>
             ))}
           {g.rule === "cold-compile" && (
-            <span class="ov-once-tag" title="Time the dev server spent compiling: not something the code saves">
-              likely dev compile
+            <span class="ov-once-tag" title={frameworkCopy.value.coldTagHint}>
+              {frameworkCopy.value.coldTag}
             </span>
           )}
           {g.seenOnce ? (
@@ -435,7 +448,11 @@ function FindingRow({ g }: { g: FindingGroup }) {
               n={g.requests}
             </span>
           )}
-          {g.isNew && <span class="ov-new">new since last rebuild</span>}
+          {g.isNew && (
+            <span class="ov-new">
+              {frameworkCopy.value.isNext ? "new since last rebuild" : "new since the restart"}
+            </span>
+          )}
           {g.goneSince !== undefined && (
             <span
               class="ov-once-tag"
@@ -521,7 +538,7 @@ function RoutesTable({ rows, errors }: { rows: RouteStats[]; errors: ErrorTally 
                 <th
                   scope="col"
                   class="num"
-                  title="p50 change in the newest dev-rebuild epoch against this route's previous one. Blank when either side has fewer than 3 warm requests."
+                  title={`p50 change in the newest ${frameworkCopy.value.epoch} against this route's previous one. Blank when either side has fewer than 3 warm requests.`}
                 >
                   Δ e{epoch}
                 </th>

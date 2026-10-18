@@ -40,6 +40,7 @@ Hoplens at all.
 | `src/lib/db.js` | In-memory Postgres: [PGlite](https://pglite.dev) behind a stock `pg.Pool` |
 | `public/` | `index.html`, `style.css`, `logo.svg`, served by `express.static` |
 | `scripts/traffic.mjs` | Hits every route `ROUNDS` times (default 5) and checks each status |
+| `scripts/check-schemas.mjs` | `pnpm --filter example-express-app check:schemas`: starts the app on its own ports (`PORT` 3110, `HOPLENS_PORT` 4990), checks the `OrderBody` schema Hoplens found for `POST /api/orders` and sends its example body (201) |
 
 `src/lib/db.js` is adapted from the Next example: PGlite (Postgres compiled to WASM) runs inside the
 process and `pg` talks to it over an in-memory stream, so every query goes through

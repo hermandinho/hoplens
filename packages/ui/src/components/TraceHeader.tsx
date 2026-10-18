@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "../api/client";
 import type { TimeBucket, TraceFacts, TraceRecord } from "../api/types";
+import type { FrameworkCopy } from "../state/framework";
 import { selectHop } from "../state/journey";
 import { register } from "../state/keymap";
 import { menuStep } from "../state/menuNav";
@@ -16,7 +17,7 @@ import {
   statusClass,
   warmDurations,
 } from "../state/stats";
-import { includeCold, metaState, openBuilder, selectedTrace, tracesState } from "../state/store";
+import { frameworkCopy, includeCold, metaState, openBuilder, selectedTrace, tracesState } from "../state/store";
 import { type SpanSelf, selfTimes, toCurl, toFetch, topSpansByBucket } from "../state/traceview";
 import { type Baseline, preHandlerWait, traceBaselines } from "../state/verdict";
 import { toVitest } from "../state/vitest";
@@ -31,15 +32,25 @@ import "../styles/verdict.css";
  * budget bar as evidence. Bar segments open their popover on click.
  */
 
-const BUCKET_HINTS: Record<TimeBucket, string> = {
-  db: "Database queries",
-  cache: "Redis / cache calls",
-  ext: "Outgoing fetch / HTTP calls",
-  fn: "Self time in your functions, route handler and proxy (span time, not CPU time)",
-  framework: "Next.js internals: routing, rendering, response",
-  compile: "Dev compile and module loading",
-  idle: "Request time that no captured span accounts for",
-};
+/** What each budget bucket holds; the framework and compile wording follow the framework. */
+function bucketHint(b: TimeBucket, fw: FrameworkCopy): string {
+  switch (b) {
+    case "db":
+      return "Database queries";
+    case "cache":
+      return "Redis / cache calls";
+    case "ext":
+      return "Outgoing fetch / HTTP calls";
+    case "fn":
+      return "Self time in your functions, route handler and proxy (span time, not CPU time)";
+    case "framework":
+      return fw.frameworkHint;
+    case "compile":
+      return fw.compileHint;
+    default:
+      return "Request time that no captured span accounts for";
+  }
+}
 
 export function TraceHeader() {
   const trace = selectedTrace.value;
@@ -89,7 +100,11 @@ export function TraceHeader() {
           {facts?.cold && (
             <span
               class="cold-badge"
-              title={`Cold: first request after a rebuild, or compiled ${fmtMs(facts.compileMs)}`}
+              title={
+                frameworkCopy.value.isNext
+                  ? `Cold: first request after a rebuild, or compiled ${fmtMs(facts.compileMs)}`
+                  : frameworkCopy.value.coldPlain
+              }
             >
               cold
             </span>
@@ -218,8 +233,6 @@ function segmentsOf(facts: TraceFacts, wait: number | undefined, total: number):
   return out;
 }
 
-const WAIT_HINT = "Time before your route handler started: dev compile, proxy and routing";
-
 function segLabel(k: SegKey): string {
   return k === "wait" ? "wait" : BUCKET_LABELS[k];
 }
@@ -317,7 +330,9 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
       )}
       <ul class="budget-legend" aria-label="Time per bucket">
         {wait && (
-          <li title={`${WAIT_HINT}${waitParts(wait.parts) ? `. Includes ${waitParts(wait.parts)}` : ""}`}>
+          <li
+            title={`${frameworkCopy.value.waitHint}${waitParts(wait.parts) ? `. Includes ${waitParts(wait.parts)}` : ""}`}
+          >
             <span class="legend-swatch budget-wait" aria-hidden="true" />
             <span>wait</span>
             <span class="mono">{fmtMs(wait.ms)}</span>
@@ -332,7 +347,7 @@ function BudgetBar({ trace }: { trace: TraceRecord }) {
           // Nothing drawn that is empty: a bucket with no time has no legend entry.
           if (v <= 0) return null;
           return (
-            <li key={b} title={BUCKET_HINTS[b]}>
+            <li key={b} title={bucketHint(b, frameworkCopy.value)}>
               <span class={`legend-swatch b-${b}`} aria-hidden="true" />
               <span>{BUCKET_LABELS[b]}</span>
               <span class="mono">{fmtMs(v)}</span>
@@ -375,7 +390,9 @@ function BudgetPopover({
           {fmtMs(ms)} · {pctLabel(pct)}
         </span>
       </span>
-      <span class="budget-tip-hint dim">{seg === "wait" ? WAIT_HINT : BUCKET_HINTS[seg]}</span>
+      <span class="budget-tip-hint dim">
+        {seg === "wait" ? frameworkCopy.value.waitHint : bucketHint(seg, frameworkCopy.value)}
+      </span>
       {spans.length > 0 && (
         <ol class="budget-tip-spans">
           {spans.map((x) => (
@@ -461,7 +478,7 @@ async function copyText(trace: TraceRecord, kind: CopyKind): Promise<string> {
         duration: trace.duration,
         counts: c ? { db: c.db, fetch: c.fetch, cache: c.cache } : undefined,
       },
-      { baseUrl: origin, p95: routeP95(trace), capturedAt: new Date(trace.startedAt) },
+      { baseUrl: origin, p95: routeP95(trace), capturedAt: new Date(trace.startedAt), copy: frameworkCopy.value },
     );
   }
   return toCurl(req, origin, kind === "curl");

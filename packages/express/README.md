@@ -82,9 +82,29 @@ listed with no file; on Express 5 they show once the app registers another route
 
 The request builder gets each route's path and params, with pattern syntax it cannot send turned
 into the shortest path that matches (`/file{.json}` as `/file`, Express 4 `/ab?cd` as `/acd`); a
-regex route is listed as written, with no params. Request-body schemas are not read yet: the
-builder starts a `POST`/`PUT`/`PATCH` body as `{}` instead of pre-filling it from a Zod schema (as
-it does for Next route handlers), so fill the body in before sending.
+regex route is listed as written, with no params.
+
+### Zod schemas
+
+The builder pre-fills a route's body from the Zod schema its handlers use, as it does for Next
+route handlers. Schemas (body, query, params) are read statically from the file and line that
+registered the route (your code is never run for this), at most one per part, handlers first:
+
+1. **Handlers.** `Schema.parse(req.body)` (or `safeParse`, `parseAsync`, `safeParseAsync`), also on
+   `req.query` and `req.params`, in an inline handler or in one referenced by name: a function in
+   the same file, an import (ESM `import` or CommonJS `require`, through re-exports and barrels), a
+   namespace or object member (`orders.create`, `ctrl.items.create`), or one wrapped in a call
+   (`asyncHandler(createOrder)`). The schema itself may live in another file.
+2. **Validation middleware** in the registration's arguments, by shape rather than by library: a
+   call with a single Zod schema argument (`validate(OrderBody)`, `validateBody(OrderBody)`; a
+   function name containing `query`, `param` or `form` targets that part, anything else the body);
+   a call with a part name and a schema (`zValidator("json", OrderBody)`, `validate(Q, "query")`);
+   or a call with `{ body, query, params }` schemas (`validate({ body: OrderBody })`). A name bound
+   to such a call (`const checkOrder = validate(OrderBody)`) works too.
+
+Not read: schemas built at runtime or imported from a package, parse calls in functions the handler
+calls, class-based controllers, and non-Zod validators (`celebrate`/Joi, `express-validator`). The
+result is cached until the registration file or a file the lookup read changes.
 
 ## When it runs
 

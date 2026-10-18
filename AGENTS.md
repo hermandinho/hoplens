@@ -84,11 +84,11 @@ Hoplens is split so that **everything downstream of the HTTP tap is framework-ne
 | Package | What lives here | Depends on |
 |---|---|---|
 | `@hoplens/core` | Runtime: capture, store, UI server, OTel bridge, source maps, redactor, trace helpers | `@opentelemetry/*`, `@hoplens/ui` |
-| `@hoplens/schema` | Zod static interpreter (framework-neutral); plug-in point for other validators later | `typescript` |
+| `@hoplens/schema` | Zod static interpreter (framework-neutral) and `SchemaProject` (schema finder + cross-file resolver shared by the Next and Express adapters); plug-in point for other validators later | `typescript` |
 | `@hoplens/transform` | Exported-function rewriter (no line/column moves), webpack/Turbopack loader entry, Node `register()` hook stub | `typescript` |
 | `@hoplens/ui` | Preact + signals, built by Vite to one inlined HTML file | — |
 | `@hoplens/next` | `withHoplens()` config wrapper, Next route+proxy scanner (first `DiscoverySource` impl) | `@hoplens/core`, `@hoplens/schema`, `@hoplens/transform` |
-| `@hoplens/express` | Express 4/5 adapter: register hook (`-r`/`--import`) and `hoplens(app)`; CJS build plus a hand-written ESM wrapper (`esm/index.mjs` + `.d.mts`) | `@hoplens/core` |
+| `@hoplens/express` | Express 4/5 adapter: register hook (`-r`/`--import`) and `hoplens(app)`; CJS build plus a hand-written ESM wrapper (`esm/index.mjs` + `.d.mts`); Zod schemas linked from each route's registration call (`src/schemas.ts`, schema/transform required lazily on scan) | `@hoplens/core`, `@hoplens/schema`, `@hoplens/transform` |
 | `@hoplens/cli` | bin `hoplens`: `init`, `doctor`, `remove` (also deletes `<distDir>/cache/hoplens`) | `@hoplens/transform` (for TS loader) |
 | `hoplens` (meta) | Unscoped meta — pulls in `@hoplens/cli` + `@hoplens/next` + `@hoplens/express` so `npm i -D hoplens` works (`hoplens/express`, `hoplens/express/register` re-export the adapter, kept external) | — |
 

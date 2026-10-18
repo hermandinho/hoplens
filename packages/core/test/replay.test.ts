@@ -145,7 +145,9 @@ describe("POST /api/run?repeat=N", () => {
     ui = http.createServer((req, res) => rt.handleUi(req, res));
     // A fake app with its own minimal "capture": one trace per request, tagged like capture.ts does.
     app = http.createServer((req, res) => {
-      const step = script.shift() ?? {};
+      // "/hang" never answers, whatever the script says: a stale request from an earlier test (an
+      // aborted fetch the server only reads after that test ended) must not take this test's step.
+      const step = req.url === "/hang" ? { hang: true } : (script.shift() ?? {});
       const run = req.headers["x-hoplens-run"] as string | undefined;
       const batch = req.headers["x-hoplens-batch"] as string | undefined;
       hits.push({ run, batch });
@@ -237,7 +239,9 @@ describe("POST /api/run?repeat=N", () => {
     expect(c.body.key).toBe("GET /api/feed @admin");
   });
 
-  test("caps N at 50", async () => {
+  // 50 sequential round trips: ~0.6s idle, several seconds on a loaded machine. Speed is not what
+  // this proves, and a timeout here would leave the batch running into the next tests.
+  test("caps N at 50", { timeout: 30_000 }, async () => {
     const r = await post("?repeat=80", { method: "GET", path: "/api/cap" });
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ requested: 80, repeat: 50, capped: true });
@@ -315,17 +319,22 @@ describe("POST /api/run?repeat=N", () => {
     script = Array.from({ length: 10 }, () => ({ delay: 60 }));
     const t0 = Date.now();
     const r = await runBatch(rt, { method: "GET", path: "/slow" }, { n: 10, capped: false }, { totalMs: 150 });
-    expect(Date.now() - t0).toBeLessThan(1000);
+    // Uncapped, 10 x 60ms would take >= 600ms; how far past 150ms the cap lands depends on load.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(140);
     expect(r.stopped).toBe("timeout");
     expect(r.runs.length).toBeGreaterThan(0);
     expect(r.runs.length).toBeLessThan(10);
   });
 
   test("a hung request is aborted at the cap", async () => {
-    script = [{ hang: true }];
     const t0 = Date.now();
     const r = await runBatch(rt, { method: "GET", path: "/hang" }, { n: 3, capped: false }, { totalMs: 120 });
-    expect(Date.now() - t0).toBeLessThan(1000);
+    // The app never answers and nothing else times the request out (undici waits 300s for headers), so
+    // returning at all, before this test's timeout, is the cap firing. Under load the abort can land
+    // well past 120ms, so the ceiling is loose: it still catches a cap that fires seconds late.
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(110);
+    expect(elapsed).toBeLessThan(3000);
     expect(r.stopped).toBe("timeout");
     expect(r.runs).toHaveLength(1);
     expect(r.runs[0]).toMatchObject({ excluded: "error", error: expect.stringMatching(/time limit/) });

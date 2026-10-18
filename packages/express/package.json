@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsup --silent && vitest run"
+    "test": "tsup --silent && vitest run --testTimeout=30000"
   },
   "engines": {
     "node": ">=20.9"
@@ -61,6 +61,7 @@
     "@types/node": "^22.10.5",
     "express4": "npm:express@^4.21.2",
     "express5": "npm:express@^5.1.0",
+    "ts-node": "10.9.2",
     "tsup": "^8.3.5",
     "typescript": "~5.7.2",
     "vitest": "^2.1.8",

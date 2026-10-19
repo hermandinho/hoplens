@@ -4,7 +4,6 @@ import { pathMode } from "../state/canvas";
 import { register } from "../state/keymap";
 import {
   PATH_COST_NOTE,
-  PATH_RESTART_NOTE,
   PHASES,
   PHASE_TEXT,
   type PathChip,
@@ -27,6 +26,7 @@ import {
   pathReady,
   pathSwitch,
   pathSwitchJob,
+  restartNote,
   retryLoadPath,
   runTracePath,
   setPathEnabled,
@@ -71,7 +71,7 @@ function TracePathAction({ trace }: { trace: TraceRecord }) {
   const job = pathJob.value;
   const fail = pathFailure.value?.sourceId === trace.id ? pathFailure.value.view : null;
   if (off) {
-    const sw = metaState.value?.path?.state === "off" ? pathSwitch(metaState.value, frameworkCopy.value.isNext) : null;
+    const sw = metaState.value?.path?.state === "off" ? pathSwitch(metaState.value) : null;
     return <OffState title={off.title} body={off.body} command={off.command} commandNote={off.commandNote} sw={sw} />;
   }
   const blocked = methodBlock(trace.method);
@@ -196,7 +196,8 @@ function SwitchControls({ sw }: { sw: PathSwitch }) {
       return (
         <>
           <output class="path-note path-pending">
-            <span class="path-badge path-badge-pending">on at next start</span> {PATH_RESTART_NOTE}.{" "}
+            <span class="path-badge path-badge-pending">on at next start</span>{" "}
+            {restartNote(frameworkCopy.value.isNext)}.{" "}
             <button type="button" class="link-btn" disabled={job.busy} onClick={() => void setPathEnabled(false)}>
               Undo
             </button>
@@ -213,7 +214,7 @@ function SwitchControls({ sw }: { sw: PathSwitch }) {
 /** Under the pane when the path is not plain off: Disable (on via the flag) or who decided. */
 function SwitchFooter() {
   const meta = metaState.value;
-  const sw = pathSwitch(meta, frameworkCopy.value.isNext);
+  const sw = pathSwitch(meta);
   // Plain off: the off state carries the switch. Enable / pending-on only arise there.
   if (!sw || meta?.path?.state === "off" || sw.kind === "enable" || sw.kind === "pending-on") return null;
   const job = pathSwitchJob.value;
@@ -237,7 +238,7 @@ function SwitchFooter() {
       {sw.kind === "pending-off" && (
         <output class="path-pending">
           <span class="path-badge path-badge-pending">off at next start</span>{" "}
-          <span class="dim">{PATH_RESTART_NOTE}.</span>{" "}
+          <span class="dim">{restartNote(frameworkCopy.value.isNext)}.</span>{" "}
           <button type="button" class="link-btn" disabled={job.busy} onClick={() => void setPathEnabled(true)}>
             Keep it on
           </button>

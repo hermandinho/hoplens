@@ -27,9 +27,10 @@ const commands: Record<string, Command> = {
   no). Idempotent and safe to re-run.
 
   --dry-run      Print the proposed edits without touching any file.
-  --path         Express: enable request path tracing without asking (writes
-                 node_modules/.cache/hoplens/path.json; HOPLENS_PATH=0 wins).
-  --no-path      Express: don't ask; removes that flag if it is there.
+  --path         Enable request path tracing without asking (writes the flag:
+                 Express node_modules/.cache/hoplens/path.json, Next
+                 .next/cache/hoplens/path.json; HOPLENS_PATH=0 wins).
+  --no-path      Don't ask; removes that flag if it is there.
   --framework    next or express. Detected from package.json; needed when
                  the project depends on both.`,
   },
@@ -51,7 +52,8 @@ const commands: Record<string, Command> = {
 
   Next.js: unwraps withHoplens(...) in next.config and strips the Hoplens
   block from instrumentation.register(). Deletes files that init created
-  when nothing user-authored remains.
+  when nothing user-authored remains, and .next/cache/hoplens (the request
+  path flag with it).
   Express: takes init's flag out of the dev script and deletes
   node_modules/.cache/hoplens (the request path flag with it). Idempotent.
 

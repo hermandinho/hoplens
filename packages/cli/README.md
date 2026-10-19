@@ -48,7 +48,8 @@ the app gets the flag. `--import` is used for CommonJS and ESM alike. Other runn
 `ts-node`, `pm2`, `bun`, `docker`) are left alone and init prints the line to use. With no dev
 script it prints the one to add. `scripts.start` and your code are never edited.
 
-In a terminal, init then asks whether to turn on request path tracing (Trace path, Express only):
+In a terminal, init then asks whether to turn on request path tracing (Trace path; for Next.js too,
+see below):
 
 ```text
 Enable request path tracing? (block coverage; slower for CPU-heavy code) [y/N]
@@ -60,6 +61,11 @@ the register hook reads it at each start. The default is no, and nothing is aske
 is not a terminal (CI) or the flag is already there. `--path` enables it without asking, `--no-path`
 skips the question and removes the flag. `HOPLENS_PATH=1` / `HOPLENS_PATH=0` in the environment always
 win over the flag. `--dry-run` prints the file instead of writing it.
+
+For Next.js, init asks the same question after wiring next.config and instrumentation, and writes
+the flag to `.next/cache/hoplens/path.json` (next.config's `distDir`, or withHoplens' `stateDir`,
+when they are plain strings), where `@hoplens/next` reads it when `next dev` starts serving; `doctor`
+reports it, and `remove` deletes it with `.next/cache/hoplens`.
 
 **Next.js:** patches `next.config.*` with `withHoplens()` (from `hoplens/next`) and adds
 the `hoplens/node` dev-only import to the `instrumentation` `register()`

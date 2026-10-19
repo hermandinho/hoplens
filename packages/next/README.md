@@ -63,6 +63,27 @@ documented in the [repo README](https://github.com/hermandinho/hoplens#options).
 
 Requires Next.js 15.3+. Next 16 is the primary target.
 
+## Request path (Trace path)
+
+Opt-in: `HOPLENS_PATH=1 next dev`, or **Enable request path** in the Path tab (or
+`hoplens init --path`), which writes `.next/cache/hoplens/path.json` (withHoplens'
+`stateDir` moves it) and applies at the next start of `next dev`. `HOPLENS_PATH`
+always wins over the switch. With it on, the instrumentation hook starts V8 block
+coverage before the first request's proxy and route code, and **Trace path**
+replays a GET once and shows which branches of your route and lib functions ran,
+mapped through the bundler's source maps (Turbopack and `--webpack`). Coverage
+stays on while `next dev` runs, so CPU-heavy code runs slower.
+
+After an edit, Turbopack rewrites its chunks in place and runs the edited module
+as an HMR update whose text exists only in V8: those functions are UNKNOWN
+(`stale-chunk`) until you restart `next dev`, or set `HOPLENS_PATH_DEBUGGER=1` to
+read the text from V8 instead. Under `--webpack` the re-emitted bundle holds the
+text V8 runs, so edited code maps again from disk.
+
+A lib that runs in two bundled copies in one request (the route's and the
+proxy's) is UNKNOWN (`bundle-copies`); a chunk over 4 MB, or one whose map cannot
+be read, is UNKNOWN (`unmapped`) with the chunk named in the trace's warnings.
+
 ## Dev-only guarantee
 
 The `NODE_ENV === "development"` gate on the import is non-negotiable. The

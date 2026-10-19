@@ -27,7 +27,7 @@
 //                           carries `pending` until then. Loopback only, even with allowRemote, and a
 //                           browser POST from a non-local Origin is refused.
 //   409 env             HOPLENS_PATH decided this boot: the env var always wins
-//   409 unsupported     the adapter has no switch (Express only for now)
+//   409 unsupported     the adapter has no switch (a custom adapter that passes no PathControl)
 //   403 forbidden       not from this machine, or from a non-local origin
 //   500 write-failed    the flag file could not be written / removed
 
@@ -48,6 +48,7 @@ export function captureDeps(rt: Runtime, source: TraceRecord, waitMs = PATH_TRAC
     coverage: coverageHandle(),
     store: rt.store,
     root: rt.root,
+    scripts: rt.pathScripts,
     busy: () => (batchesRunning() > 0 ? "a Replay xN batch is running" : undefined),
     // The signal bounds the fetch too: without it a GET that never answers holds the capture lock
     // until undici's own 300s header timeout.
@@ -112,7 +113,8 @@ export function toggle(on: boolean): ApiHandle {
     if (!control)
       return sendJson(res, 409, {
         code: "unsupported",
-        error: "Express only for now: this adapter has no request path switch.",
+        error:
+          "This adapter has no request path switch: set HOPLENS_PATH=1 in the dev server's environment and restart it.",
       });
     if (control.source === "env")
       return sendJson(res, 409, {

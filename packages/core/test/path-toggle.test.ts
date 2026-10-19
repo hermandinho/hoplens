@@ -52,12 +52,13 @@ const post = async (p: string, headers: Record<string, string> = {}) => {
 };
 
 describe("POST /api/path/enable|disable", () => {
-  test("no control (Next): 409 unsupported, Express only", async () => {
+  test("no control (a custom adapter): 409 unsupported, pointing at HOPLENS_PATH", async () => {
     rt.pathControl = undefined;
     const r = await post("/api/path/enable");
     expect(r.status).toBe(409);
     expect(r.body).toMatchObject({ code: "unsupported" });
-    expect(r.body.error).toMatch(/Express only/);
+    expect(r.body.error).toMatch(/HOPLENS_PATH=1/);
+    expect(r.body.error).not.toMatch(/Express only/);
   });
 
   test("source env: 409, the env var wins; nothing written", async () => {

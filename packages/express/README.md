@@ -266,7 +266,7 @@ loads, and the banner says `request path: on (flag; disable in the Path tab)` or
 
 The switch is `POST /__hoplens/api/path/enable` and `POST /__hoplens/api/path/disable`, answered only
 for callers on this machine (even with `allowRemote`); both answer 409 `env` when `HOPLENS_PATH` is
-set. Next.js apps answer 409 `unsupported`: the request path is Express only for now.
+set. Next.js apps have the same switch (`@hoplens/next`; the flag lives in `.next/cache/hoplens`).
 
 `POST /__hoplens/api/traces/:id/path` then replays a trace once, alone, as a **new** trace, and
 reports which handler and function code it ran, block by block.

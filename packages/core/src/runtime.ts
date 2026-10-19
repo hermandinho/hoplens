@@ -36,6 +36,7 @@ import {
 } from "./manifest";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
 import type { PathAnalyzer } from "./path/analyze";
+import type { PathScripts } from "./path/bundled";
 import type { PathControl } from "./path/capture";
 import { type PersistRow, Persister, type PersisterOptions, persistDir, rowToTrace, traceRow } from "./persist";
 import { QueryStatsStore } from "./queries";
@@ -82,8 +83,10 @@ export interface RuntimeConfig {
    * truth (core has no TypeScript; `@hoplens/express` passes `@hoplens/transform/cfg`). Without one,
    * path payloads keep function-level truth and every decision is UNKNOWN 'no-analyzer'. `control`
    * is the adapter's sticky on/off switch (PathControl), behind POST /api/path/enable|disable.
+   * `scripts` is a bundler's script view (`@hoplens/next`: path/bundled.ts) for an app whose code
+   * runs from bundles (Turbopack chunks, webpack eval modules) rather than from its own files.
    */
-  path?: { analyzer?: PathAnalyzer; control?: PathControl };
+  path?: { analyzer?: PathAnalyzer; control?: PathControl; scripts?: PathScripts };
 }
 
 /**
@@ -110,6 +113,8 @@ export class Runtime {
    * /api/path/enable|disable and meta.path.source/pending. Absent on adapters without one (Next).
    */
   readonly pathControl?: PathControl;
+  /** A bundler's script view for request-path captures (RuntimeConfig.path.scripts). */
+  readonly pathScripts?: PathScripts;
   readonly log: Logger;
   readonly startedAt = Date.now();
   /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
@@ -158,6 +163,7 @@ export class Runtime {
     this.framework = cfg.framework;
     this.pathAnalyzer = cfg.path?.analyzer;
     this.pathControl = cfg.path?.control;
+    this.pathScripts = cfg.path?.scripts;
     this.banner = cfg.banner;
     this.persistCfg = cfg.persist;
     this.log = createLogger("runtime");

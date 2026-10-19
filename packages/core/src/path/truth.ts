@@ -85,6 +85,13 @@ export type TruthWhy =
   | "unmapped"
   /** A loader compiled the file, and the text V8 ran is not at hand (P5: generated.ts). */
   | "no-generated-text"
+  /**
+   * A bundler rewrote the chunk / bundle that holds this file after V8 loaded it (Next dev: Turbopack
+   * rewrites chunks in place, webpack re-emits the module), and the text V8 ran is not at hand (P6).
+   */
+  | "stale-chunk"
+  /** The file's code ran in several bundled copies (a route layer and the proxy's), so no copy is joined (P6). */
+  | "bundle-copies"
   | "after-throw"
   | "arms-inconsistent"
   | "no-analyzer"

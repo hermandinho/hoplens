@@ -95,7 +95,11 @@ export function installHttpHook(rt: Runtime) {
         rt.handleUi(req, res);
         return true;
       }
-      if (isInternal(url)) return orig.call(this, event, ...args);
+      if (isInternal(url)) {
+        // Untraced; the request path's capture window still wants to know it ran (path/capture.ts).
+        rt.store.noteInternal(req.method, url);
+        return orig.call(this, event, ...args);
+      }
       const ctx = startTrace(rt, req, res, classify);
       if (rt.httpTap?.bindRequestEmitter) bindRequestEmitter(req, ctx);
       return als.run(ctx, () => orig.call(this, event, ...args));

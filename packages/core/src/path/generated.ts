@@ -18,7 +18,7 @@
 import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveSource } from "./srcmap";
+import { type RawMap, resolveSource } from "./srcmap";
 
 const KEY = Symbol.for("hoplens.generated");
 
@@ -75,13 +75,33 @@ export function compiledByMap(abs: string, url?: string): boolean {
   }
 }
 
-export type GeneratedVia = "hook" | "debugger";
+/**
+ * hook: a Hoplens loader retained it. debugger: Debugger.getScriptSource. bundle: a bundler's output
+ * on disk (a Turbopack chunk, a webpack eval-source-map module's eval literal) that the bundled-script
+ * filter (bundled.ts) checked against the script V8 ran.
+ */
+export type GeneratedVia = "hook" | "debugger" | "bundle";
 
 export type ScriptText =
-  /** The text V8 ran differs from the file: here it is. */
-  | { code: string; via: GeneratedVia }
-  /** It differs, and no text is at hand. */
-  | { missing: string };
+  /**
+   * The text V8 ran differs from the file: here it is. `map`: its source map when it is not the
+   * text's own inline one (a Turbopack sidecar map), sources already absolute; `mapId` names that map
+   * for the reverse-index cache.
+   */
+  | {
+      code: string;
+      via: GeneratedVia;
+      map?: RawMap;
+      mapId?: string;
+      /**
+       * The map carries sourcesContent for the file (srcmap.ts buildIndex checks it against the file
+       * on disk): the generated text was built from the file as it is now, so an mtime after the
+       * process started (a Next dev edit) does not make it stale.
+       */
+      verified?: boolean;
+    }
+  /** It differs, and no text is at hand. `why` defaults to 'no-generated-text'. */
+  | { missing: string; why?: "no-generated-text" | "stale-chunk" | "unmapped" };
 
 /** What buildPayload asks per script: undefined means identity (the file on disk is what V8 ran). */
 export type GeneratedLookup = (url: string, abs: string, scriptId: string) => ScriptText | undefined;

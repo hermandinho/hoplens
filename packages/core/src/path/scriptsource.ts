@@ -17,7 +17,12 @@
 
 import { createRequire } from "node:module";
 
-const load = (id: string): any => createRequire(__filename)(id);
+/** Builtins only; process.getBuiltinModule first (a bundler that inlines core rewrites __filename). */
+const load = (id: string): any => {
+  const builtin = (process as any).getBuiltinModule as ((id: string) => unknown) | undefined;
+  const m = typeof builtin === "function" ? builtin(id) : undefined;
+  return m ?? createRequire(__filename)(id);
+};
 
 const KEY = Symbol.for("hoplens.debuggerSession");
 

@@ -101,17 +101,20 @@ export const PATH_QUESTION = "Enable request path tracing? (block coverage; slow
 /**
  * The request path's sticky flag: --path writes it, --no-path removes it, else ask when interactive
  * (default no, and no question when it is already on). Same file the UI's Enable button writes, in
- * the state dir the register hook resolves (HOPLENS_OPTIONS from the dev script too). HOPLENS_PATH
+ * the state dir the register hook resolves (HOPLENS_OPTIONS from the dev script too), or for Next the
+ * one @hoplens/next reads (`loc`). HOPLENS_PATH
  * (dev script or environment) wins over the flag at boot: then no question, and --path / --no-path
  * still write / remove it but say it has no effect while HOPLENS_PATH is set.
  */
-async function initPath(
+export async function initPath(
   root: string,
   dev: { key: string; cmd: string } | null,
   dryRun: boolean,
   opt: PathOption,
+  /** The flag's location (default: the Express register hook's; Next passes its own). */
+  loc: { abs: string; rel: string } = flagPath(root, appEnv(dev?.cmd)),
 ): Promise<void> {
-  const { abs, rel } = flagPath(root, appEnv(dev?.cmd));
+  const { abs, rel } = loc;
   const now = readFlag(abs);
   const override = pathEnvOverride(dev, process.env);
   const overrideNote = override

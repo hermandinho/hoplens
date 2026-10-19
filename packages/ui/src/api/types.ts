@@ -964,6 +964,8 @@ export type PathWhy =
   | "compiled"
   | "unmapped"
   | "no-generated-text"
+  | "stale-chunk"
+  | "bundle-copies"
   | "after-throw"
   | "arms-inconsistent"
   | "no-analyzer"
@@ -1127,7 +1129,20 @@ export interface PathPayload {
   quality: PathQuality;
   contamination: string[];
   warnings: string[];
-  window: { quietMs: number; settleMs: number; taint: string[]; retries: number };
+  window: {
+    quietMs: number;
+    settleMs: number;
+    taint: string[];
+    retries: number;
+    /** Reset and final take, ms (V8 serializes every script: 0.1-1s under next dev). */
+    takeMs?: [number, number];
+    scripts?: number;
+    totalScripts?: number;
+    /** Next dev: the final take's script kinds, and what mapping the bundles cost. */
+    bundled?: { kinds: Record<string, number>; holding: number; files: number; reads: number; ms: number };
+    /** Untraced framework requests (Next's /_next/*) inside the window. */
+    internal?: string[];
+  };
   lanes: PathLane[];
   functions: Record<string, PathFn>;
   analysis?: PathPayloadAnalysis;

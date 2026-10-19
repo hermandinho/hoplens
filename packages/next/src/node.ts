@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { type ResolvedOptions, Runtime, createLogger } from "@hoplens/core";
+import { type ResolvedOptions, Runtime, createLogger, pathMeta } from "@hoplens/core";
+import { type NextPath, startNextPath } from "./path";
 import { NextDiscoverySource } from "./routes";
 
 const log = createLogger("next");
@@ -59,9 +60,36 @@ if (!G.__hoplens_runtime && shouldStart()) {
   try {
     const { options, configured } = readOptions();
     options.configured = configured;
+    // First: block coverage (when the request path is on) must start before any route code is
+    // called. This runs in register(), before the first request's proxy and route bundles (path.ts).
+    let path: NextPath | undefined;
+    if (options.enabled !== false) {
+      try {
+        path = startNextPath(options);
+      } catch (err) {
+        log.error("request path setup failed", err);
+      }
+    }
     const discovery = new NextDiscoverySource(options.root, options.basePath);
     const framework = { name: "next", version: nextVersion(options.root) };
-    G.__hoplens_runtime = new Runtime({ options, discovery, framework, banner: printBanner }).start();
+    G.__hoplens_runtime = new Runtime({
+      options,
+      discovery,
+      framework,
+      banner: printBanner,
+      path: path ? { analyzer: path.analyzer, control: path.control, scripts: path.scripts } : undefined,
+    }).start();
+    if (path?.on) {
+      // Load TypeScript once the server is up, so the first Trace path does not pay for it.
+      const t = setTimeout(() => {
+        try {
+          path?.analyzer.warm?.();
+        } catch {
+          /* the first analysis reports it */
+        }
+      }, 1000);
+      t.unref?.();
+    }
   } catch (err) {
     log.error("failed to start", err);
   }
@@ -75,8 +103,20 @@ function printBanner(rt: Runtime) {
   if (!rt.options.configured) notes.push("next.config isn't wrapped with withHoplens — function hops are off.");
   const fnOff = functionTracingReason(rt);
   if (fnOff) notes.push(`Function hops are off: ${fnOff}`);
+  const pathLine = requestPathLine(rt);
+  if (pathLine) notes.push(pathLine);
   const suffix = notes.length ? `\n   ! ${notes.join("\n   ! ")}` : "";
   process.stdout.write(`\n \x1b[35m◆ Hoplens\x1b[0m  ${appUrl}${standalone}${suffix}\n\n`);
+}
+
+/** The banner's request path note: only when it is on, or asked for and not running. */
+function requestPathLine(rt: Runtime): string | undefined {
+  const m = pathMeta(undefined, process.env, rt.pathControl);
+  if (m.state === "on")
+    return `Request path: on${m.source === "flag" ? " (enabled in the Path tab)" : " (HOPLENS_PATH)"}; block coverage runs, so CPU-heavy code runs slower.`;
+  if (m.state === "disabled-c8" || m.state === "error")
+    return `Request path: ${m.state} (${m.reason ?? "see the Path tab"}).`;
+  return undefined;
 }
 
 function nextVersion(root: string): string | undefined {

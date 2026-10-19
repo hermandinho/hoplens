@@ -8,6 +8,7 @@ import {
   offView,
   pathSwitch,
   pathSwitchJob,
+  restartNote,
   setPathEnabled,
   switchErrorText,
 } from "../src/state/path";
@@ -23,27 +24,29 @@ const meta = (path: PathMeta): Pick<Meta, "path" | "framework" | "root"> => ({ r
 
 describe("pathSwitch", () => {
   test("one control per state", () => {
-    expect(pathSwitch(meta({ state: "off", source: "default" }), false)).toEqual({ kind: "enable" });
-    expect(pathSwitch(meta({ state: "off", source: "default", pending: "on" }), false)).toEqual({
+    expect(pathSwitch(meta({ state: "off", source: "default" }))).toEqual({ kind: "enable" });
+    expect(pathSwitch(meta({ state: "off", source: "default", pending: "on" }))).toEqual({
       kind: "pending-on",
     });
-    expect(pathSwitch(meta({ state: "on", source: "flag" }), false)).toEqual({ kind: "disable" });
-    expect(pathSwitch(meta({ state: "on", source: "flag", pending: "off" }), false)).toEqual({ kind: "pending-off" });
-    expect(pathSwitch(meta({ state: "on", source: "env" }), false)).toEqual({ kind: "env" });
-    expect(pathSwitch(meta({ state: "off", source: "env" }), false)).toEqual({ kind: "env" });
+    expect(pathSwitch(meta({ state: "on", source: "flag" }))).toEqual({ kind: "disable" });
+    expect(pathSwitch(meta({ state: "on", source: "flag", pending: "off" }))).toEqual({ kind: "pending-off" });
+    expect(pathSwitch(meta({ state: "on", source: "env" }))).toEqual({ kind: "env" });
+    expect(pathSwitch(meta({ state: "off", source: "env" }))).toEqual({ kind: "env" });
     // Flag on but c8 owns coverage: the switch can still turn it off.
-    expect(pathSwitch(meta({ state: "disabled-c8", source: "flag" }), false)).toEqual({ kind: "disable" });
+    expect(pathSwitch(meta({ state: "disabled-c8", source: "flag" }))).toEqual({ kind: "disable" });
   });
 
-  test("no switch on Next, on an older core, or without meta", () => {
-    expect(pathSwitch(meta({ state: "off", source: "default" }), true)).toBeNull();
-    expect(pathSwitch(meta({ state: "off" }), false)).toBeNull();
-    expect(pathSwitch(null, false)).toBeNull();
+  test("no switch on an older core or without meta (Next has one now, like Express)", () => {
+    expect(pathSwitch(meta({ state: "off", source: "default" }))).toEqual({ kind: "enable" });
+    expect(pathSwitch(meta({ state: "off" }))).toBeNull();
+    expect(pathSwitch(null)).toBeNull();
   });
 
   test("copy", () => {
     expect(PATH_COST_NOTE).toBe("block coverage from start; CPU-heavy code runs slower");
     expect(PATH_RESTART_NOTE).toBe("Restart your dev server to apply (saving a file restarts node --watch)");
+    expect(restartNote(false)).toBe(PATH_RESTART_NOTE);
+    expect(restartNote(true)).toBe("Restart next dev to apply (a save hot-reloads; it does not restart)");
   });
 });
 

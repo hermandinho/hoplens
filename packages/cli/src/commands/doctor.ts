@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
-import { doctorExpress } from "../express/commands";
+import { doctorExpress, doctorPath } from "../express/commands";
 import { detectFramework, frameworkFlag } from "../framework";
+import { nextFlagPath } from "../next/pathflag";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
@@ -139,6 +140,10 @@ export async function doctor(args: string[]) {
       nope(`Your app isn't under src/ but instrumentation is at ${ins} — move it to the project root`, false);
     }
   }
+
+  // ── Request path ────────────────────────────────────────────────────────
+  const devCmd = typeof pkg.scripts?.dev === "string" ? pkg.scripts.dev : null;
+  doctorPath(devCmd ? { key: "dev", cmd: devCmd } : null, process.env, { nope }, nextFlagPath(root));
 
   integrations(pkg);
 

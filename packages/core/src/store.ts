@@ -7,7 +7,7 @@ export interface Internal {
   rawBody?: string;
 }
 
-type StoreEvent = "start" | "done" | "update" | "clear";
+type StoreEvent = "start" | "done" | "update" | "clear" | "internal";
 
 /** Minimum gap between two `update` events for the same trace (ms). */
 export const UPDATE_THROTTLE_MS = 250;
@@ -73,12 +73,14 @@ export class TraceStore extends EventEmitter {
 
   override on(event: "start" | "done" | "update", listener: (trace: TraceRecord) => void): this;
   override on(event: "clear", listener: () => void): this;
+  override on(event: "internal", listener: (what: string) => void): this;
   override on(event: StoreEvent, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 
   override off(event: "start" | "done" | "update", listener: (trace: TraceRecord) => void): this;
   override off(event: "clear", listener: () => void): this;
+  override off(event: "internal", listener: (what: string) => void): this;
   override off(event: StoreEvent, listener: (...args: any[]) => void): this {
     return super.off(event, listener);
   }
@@ -193,6 +195,25 @@ export class TraceStore extends EventEmitter {
   /** The running requests, oldest first (for a "2 requests in flight" message). */
   inflightTraces(): TraceRecord[] {
     return Array.from(this.running);
+  }
+
+  /**
+   * A request the HTTP hook passed through untraced (the framework's internal prefixes: Next's
+   * /_next/*). Only the request path's capture window listens (onInternal); without a listener this
+   * is one listenerCount read.
+   */
+  noteInternal(method: string | undefined, url: string): void {
+    if (this.listenerCount("internal") === 0) return;
+    const path = url.replace(/[?#].*$/, "");
+    this.emit("internal", `${method ?? "GET"} ${path}`);
+  }
+
+  /** Listen to noteInternal (`METHOD path`); the answer unsubscribes. */
+  onInternal(listener: (what: string) => void): () => void {
+    this.on("internal", listener);
+    return () => {
+      this.off("internal", listener);
+    };
   }
 
   get(id: string): TraceRecord | undefined {

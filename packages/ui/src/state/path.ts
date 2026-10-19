@@ -42,6 +42,10 @@ const WHY: Record<PathWhy, string> = {
   unmapped: "the compiled code does not line up with this source node for node, so nothing is claimed",
   "no-generated-text":
     "a loader compiled this file and Hoplens holds no copy of the text V8 ran (the trace's warnings say why)",
+  "stale-chunk":
+    "the bundler rewrote this file's chunk after it loaded (an edit), so the text V8 ran is not on disk: restart next dev, or set HOPLENS_PATH_DEBUGGER=1",
+  "bundle-copies":
+    "this file ran in more than one bundled copy in this request (e.g. the route's and the proxy's), so no copy is joined",
   "after-throw": "an exception was thrown before this point, so counts after it are not reliable",
   "arms-inconsistent": "the branch counts do not add up, so no side is claimed",
   "no-analyzer": "no control-flow analyzer was loaded (TypeScript missing)",
@@ -397,12 +401,8 @@ export function unsetEnvCommand(root: string | undefined): string {
 
 /** Why Path mode can't trace here, or null when the request path is on. */
 export function offView(meta: Pick<Meta, "path" | "framework" | "root"> | null, isNext: boolean): OffView | null {
-  if (isNext)
-    return {
-      title: "Request path: Express only for now",
-      body: "Tracing a request's decisions needs V8 block coverage started before the app loads. Hoplens does that for Express apps; Next.js support comes later.",
-    };
   const p = meta?.path;
+  const restart = isNext ? "restart next dev" : "restart the dev server";
   if (!p)
     return {
       title: "Request path: not in this Hoplens core",
@@ -425,29 +425,33 @@ export function offView(meta: Pick<Meta, "path" | "framework" | "root"> | null, 
       if (p.source === "env")
         return {
           title: "Request path is off (set by HOPLENS_PATH)",
-          body: `${p.reason ? `${capital(p.reason)}. ` : ""}The env var always wins over the switch here. It comes from the dev server's shell or an inline HOPLENS_PATH=... in its dev script (hoplens doctor says which): unset it to use the switch, or set it to 1, then restart the dev server.`,
+          body: `${p.reason ? `${capital(p.reason)}. ` : ""}The env var always wins over the switch here. It comes from the dev server's shell or an inline HOPLENS_PATH=... in its dev script (hoplens doctor says which): unset it to use the switch, or set it to 1, then ${restart}.`,
           command: unsetEnvCommand(meta?.root),
           commandNote: "Unset it in the dev server's shell (if the dev script sets it, edit the script instead):",
         };
       if (p.source === "flag")
         return {
           title: "Request path is enabled but did not start",
-          body: `${p.reason ? `${capital(p.reason)}. ` : ""}Coverage has to start before the app loads, from the register hook.`,
+          body: `${p.reason ? `${capital(p.reason)}. ` : ""}${
+            isNext
+              ? "Coverage starts in instrumentation (hoplens/node), before the first route compiles."
+              : "Coverage has to start before the app loads, from the register hook."
+          }`,
         };
       if (p.source === "default" && p.pending === "on")
         return {
           title: "Request path: on at next start",
-          body: "Enabled here. It is read at boot, so block coverage starts with the next start of the dev server and stays on while it runs (CPU-heavy code runs slower).",
+          body: `Enabled here. It is read at boot, so block coverage starts with the next start of ${isNext ? "next dev" : "the dev server"} and stays on while it runs (CPU-heavy code runs slower).`,
         };
       if (p.source === "default")
         return {
           title: "Request path is off",
-          body: "It is opt-in and read at boot: enable it here (it sticks across restarts), or set HOPLENS_PATH=1 in the dev server's environment. Coverage stays on while it runs, so CPU-heavy code runs slower.",
+          body: `It is opt-in and read at boot: enable it here (it sticks across restarts), or set HOPLENS_PATH=1 in ${isNext ? "next dev's" : "the dev server's"} environment. Coverage stays on while it runs, so CPU-heavy code runs slower.`,
           command: envCommand(meta?.root),
         };
       return {
         title: "Request path is off",
-        body: `${p.reason ? `${capital(p.reason)}. ` : ""}It is opt-in and read at boot: set HOPLENS_PATH=1, then restart the dev server. Coverage stays on while it runs, so CPU-heavy code runs slower.`,
+        body: `${p.reason ? `${capital(p.reason)}. ` : ""}It is opt-in and read at boot: set HOPLENS_PATH=1, then ${restart}. Coverage stays on while it runs, so CPU-heavy code runs slower.`,
         command: envCommand(meta?.root),
       };
   }
@@ -457,11 +461,18 @@ export function offView(meta: Pick<Meta, "path" | "framework" | "root"> | null, 
 
 /** The Enable button's cost note. */
 export const PATH_COST_NOTE = "block coverage from start; CPU-heavy code runs slower";
-/** After a toggle: the flag is read at the next start. */
+/** After a toggle: the flag is read at the next start (Express: a watcher restarts on save). */
 export const PATH_RESTART_NOTE = "Restart your dev server to apply (saving a file restarts node --watch)";
+/** The same for Next: a save hot-reloads, it does not restart, so next dev itself must restart. */
+export const PATH_RESTART_NOTE_NEXT = "Restart next dev to apply (a save hot-reloads; it does not restart)";
+
+/** The restart note for this app's framework. */
+export function restartNote(isNext: boolean): string {
+  return isNext ? PATH_RESTART_NOTE_NEXT : PATH_RESTART_NOTE;
+}
 
 /**
- * The sticky switch's control for this boot, or null where there is none (Next, an older core):
+ * The sticky switch's control for this boot, or null where there is none (an older core):
  * enable (off by default), pending-on (enabled, not applied yet), disable (on via the flag),
  * pending-off (disabled, not applied yet), env (HOPLENS_PATH decides: no toggle).
  */
@@ -472,9 +483,9 @@ export type PathSwitch =
   | { kind: "pending-off" }
   | { kind: "env" };
 
-export function pathSwitch(meta: Pick<Meta, "path"> | null, isNext: boolean): PathSwitch | null {
+export function pathSwitch(meta: Pick<Meta, "path"> | null): PathSwitch | null {
   const p = meta?.path;
-  if (isNext || !p?.source) return null;
+  if (!p?.source) return null;
   if (p.source === "env") return { kind: "env" };
   if (p.source === "flag") return { kind: p.pending === "off" ? "pending-off" : "disable" };
   return { kind: p.pending === "on" ? "pending-on" : "enable" };

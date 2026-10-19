@@ -24,11 +24,22 @@
 //   (probed on Node 22.20). A callback that did not run yet is reported as a failed take.
 // - The handle is a process-wide singleton on globalThis, so dist/coverage.js (loaded by the register
 //   hook) and dist/index.js (loaded at boot) share it.
+// - Next (P6): @hoplens/next's node.ts calls startCoverage() from core's main entry, first thing in
+//   the instrumentation hook, which Next runs before the first request's proxy and route code
+//   (packages/next/src/path.ts says why that is early enough).
 
 import { createRequire } from "node:module";
 
-/** Builtins only; createRequire so the ESM build can load them lazily too. */
-const load = (id: string): any => createRequire(__filename)(id);
+/**
+ * Builtins only, loaded lazily. process.getBuiltinModule first (Node 20.16+ / 22.3+): a bundler
+ * that inlines core (Turbopack bundles a workspace-linked @hoplens/core into Next's instrumentation
+ * chunk despite serverExternalPackages) rewrites `__filename`, and createRequire needs a real one.
+ */
+const load = (id: string): any => {
+  const builtin = (process as any).getBuiltinModule as ((id: string) => unknown) | undefined;
+  const m = typeof builtin === "function" ? builtin(id) : undefined;
+  return m ?? createRequire(__filename)(id);
+};
 
 export type CoverageState = "off" | "on" | "disabled-c8" | "error";
 
@@ -64,10 +75,11 @@ export interface CoverageSource {
   readonly state: CoverageState;
   readonly reason?: string;
   /**
-   * Take (and reset) the counts. `keep(url)` is applied right away, so dropped scripts are never held.
+   * Take (and reset) the counts. `keep(url, script)` is applied right away, so dropped scripts are
+   * never held; it sees every script of the take (a bundled-script filter records them: bundled.ts).
    * Undefined when coverage is not on or the take failed.
    */
-  take(keep?: (url: string) => boolean): TakeResult | undefined;
+  take(keep?: (url: string, script: ScriptCoverage) => boolean): TakeResult | undefined;
 }
 
 const KEY = Symbol.for("hoplens.coverage");
@@ -168,7 +180,7 @@ class Coverage implements CoverageSource {
     return result;
   }
 
-  take(keep?: (url: string) => boolean): TakeResult | undefined {
+  take(keep?: (url: string, script: ScriptCoverage) => boolean): TakeResult | undefined {
     if (this.state !== "on") return undefined;
     const t0 = performance.now();
     try {
@@ -185,7 +197,7 @@ class Coverage implements CoverageSource {
         }
         return undefined;
       }
-      const scripts = keep ? all.filter((s) => typeof s.url === "string" && keep(s.url)) : all;
+      const scripts = keep ? all.filter((s) => typeof s.url === "string" && keep(s.url, s)) : all;
       return { scripts, total: all.length, ms: performance.now() - t0 };
     } catch {
       return undefined;

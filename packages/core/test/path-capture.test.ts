@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import * as pathApi from "../src/api/path";
 import { captureDeps } from "../src/api/path";
+import type { PathScripts } from "../src/path/bundled";
 import {
   type CaptureDeps,
   MAX_LANES,
@@ -105,6 +106,12 @@ function replayTrace(id: string, finds = 1): TraceRecord {
 
 class FakeStore extends EventEmitter {
   running = 0;
+  onInternal(listener: (what: string) => void) {
+    this.on("internal", listener);
+    return () => {
+      this.off("internal", listener);
+    };
+  }
   inflight() {
     return this.running;
   }
@@ -122,14 +129,14 @@ class FakeCoverage implements CoverageSource {
   /** Coverage the next final takes return (one entry per attempt; the last one repeats). */
   runs: ScriptCoverage[][] = [scripts()];
   private takes = 0;
-  take(keep?: (url: string) => boolean): TakeResult | undefined {
+  take(keep?: (url: string, script: ScriptCoverage) => boolean): TakeResult | undefined {
     this.takes++;
     // Odd takes are resets, even takes the final ones.
     const final = this.takes % 2 === 0;
     this.log.push(final ? "take" : "reset");
     const all = final ? (this.runs.shift() ?? scripts()) : scripts();
     if (final && this.runs.length === 0) this.runs.push(all);
-    const kept = keep ? all.filter((s) => keep(s.url)) : all;
+    const kept = keep ? all.filter((s) => keep(s.url, s)) : all;
     return { scripts: kept, total: all.length, ms: 1 };
   }
 }
@@ -391,20 +398,22 @@ describe("capturePath: the window", () => {
   });
 
   test("settle: each update of our trace extends the window, foreign updates do not", async () => {
-    const { d, store } = deps({ timings: { ...FAST, settleMs: 40, settleMaxMs: 500 } });
+    // Wide margins: under a loaded run a timer can fire well late, and an update landing after the
+    // window closed is the window working, not a bug. Each update lands ~250ms before the window ends.
+    const { d, store } = deps({ timings: { ...FAST, settleMs: 300, settleMaxMs: 3000 } });
     const fire = d.fire;
     d.fire = async () => {
       const r = await fire();
       const t = r.trace!;
-      setTimeout(() => store.emit("update", t), 30);
-      setTimeout(() => store.emit("update", t), 60);
-      setTimeout(() => store.emit("update", makeTrace([], { id: "tr_x" })), 150);
+      setTimeout(() => store.emit("update", t), 50);
+      setTimeout(() => store.emit("update", t), 150);
+      setTimeout(() => store.emit("update", makeTrace([], { id: "tr_x" })), 1200);
       return r;
     };
     const p = await capturePath(d, SOURCE);
-    // 60 + 40, not 40 (no extension) and not 150 + 40 (the foreign update).
-    expect(p.window.settleMs).toBeGreaterThanOrEqual(90);
-    expect(p.window.settleMs).toBeLessThan(180);
+    // ~150 + 300, not 300 (no extension) and not 1200 + 300 (the foreign update).
+    expect(p.window.settleMs).toBeGreaterThanOrEqual(440);
+    expect(p.window.settleMs).toBeLessThan(1150);
   });
 
   test("settle: extensions stop at settleMaxMs", async () => {
@@ -646,6 +655,80 @@ describe("capturePath: the control window", () => {
     const p = await capturePath(d, SOURCE);
     expect(p.quality).toBe("partial");
     expect(p.window.control).toMatchObject({ clean: true });
+  });
+});
+
+describe("capturePath: untraced framework requests (Next's /_next/*)", () => {
+  /** A fire that also serves one untraced internal request inside the window. */
+  const withInternal = (d: CaptureDeps, store: FakeStore) => {
+    const fire = d.fire;
+    d.fire = async () => {
+      store.emit("internal", "GET /_next/static/chunks/main.js");
+      return fire();
+    };
+  };
+
+  test("TraceStore.noteInternal reaches onInternal listeners only while subscribed, query dropped", () => {
+    const st = new TraceStore(10);
+    const got: string[] = [];
+    st.noteInternal("GET", "/_next/x?y=1");
+    const off = st.onInternal((w) => got.push(w));
+    st.noteInternal(undefined, "/__nextjs_original-stack-frame?a=b");
+    off();
+    st.noteInternal("GET", "/_next/z");
+    expect(got).toEqual(["GET /__nextjs_original-stack-frame"]);
+  });
+
+  test("alone they are not foreign traffic: EXACT, listed in window.internal", async () => {
+    const { d, store } = deps();
+    withInternal(d, store);
+    const p = await capturePath(d, SOURCE);
+    expect(p.quality).toBe("exact");
+    expect(p.window.taint).toEqual([]);
+    expect(p.window.internal).toEqual(["GET /_next/static/chunks/main.js"]);
+  });
+
+  test("with the same K > H on both tries they block the local-binding verdict: CONTAMINATED naming them", async () => {
+    const cov = new FakeCoverage();
+    cov.runs = [scripts(2), scripts(2), scripts(0, 0)];
+    const { d, store } = deps({ cov });
+    withInternal(d, store);
+    const p = await capturePath(d, SOURCE);
+    expect(p.quality).toBe("contaminated");
+    expect(p.window.control).toBeUndefined();
+    expect(p.contamination.join("\n")).toMatch(/untraced requests ran too: GET \/_next\/static/);
+  });
+});
+
+describe("capturePath: a bundler's script view (deps.scripts)", () => {
+  test("keep() sees the reset take's scripts too, the final take keeps what it says, resolve maps", async () => {
+    const seen: string[] = [];
+    let resolved = 0;
+    const sc: PathScripts = {
+      startTake: () => seen.push("start"),
+      keep: (url) => {
+        seen.push(url);
+        return true;
+      },
+      resolve: (list) => {
+        resolved++;
+        return {
+          scriptFor: (abs) => list.find((x) => x.url === pathToFileURL(abs).href),
+          lookup: () => undefined,
+          counts: { kinds: { file: list.length }, holding: list.length, files: list.length, reads: 0, ms: 0 },
+          warnings: ["from the view"],
+        };
+      },
+    };
+    const { d } = deps({ scripts: sc });
+    const p = await capturePath(d, SOURCE);
+    const urls = scripts().map((x) => x.url);
+    // Reset take, then startTake + the final take.
+    expect(seen).toEqual([...urls, "start", ...urls]);
+    expect(resolved).toBe(1);
+    expect(p.window.bundled).toMatchObject({ kinds: { file: urls.length } });
+    expect(p.warnings).toContain("from the view");
+    expect(p.quality).toBe("exact");
   });
 });
 

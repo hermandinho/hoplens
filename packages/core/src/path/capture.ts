@@ -42,6 +42,7 @@ import { fileURLToPath } from "node:url";
 import { MAX_FN_SPANS_PER_TRACE, droppedFunctionSpans } from "../capture";
 import type { SpanRecord, TraceRecord } from "../types";
 import type { PayloadAnalysis } from "./analyze";
+import type { NoScript, PathScripts, ScriptCounts } from "./bundled";
 import { type CoverageSource, type FunctionCoverage, type ScriptCoverage, coverageHandle, pathFlag } from "./coverage";
 import {
   type GeneratedLookup,
@@ -52,7 +53,7 @@ import {
   urlPath,
 } from "./generated";
 import { debuggerFlag, debuggerSources } from "./scriptsource";
-import { MapError, type ReverseIndex, buildIndex } from "./srcmap";
+import { MapError, type RawMap, type ReverseIndex, buildIndex } from "./srcmap";
 import type { FnAnalysis, TruthWhy } from "./truth";
 
 /* ------------------------------------------------------------------- model */
@@ -165,6 +166,13 @@ export interface PathWindow {
   /** Project scripts kept / scripts V8 reported. */
   scripts: number;
   totalScripts: number;
+  /** A bundler's scripts (Next dev): the final take's script kinds and what resolving them cost. */
+  bundled?: ScriptCounts;
+  /**
+   * Requests the app's framework served untraced inside the window (Next's /_next/*, /__nextjs*):
+   * not foreign traffic by themselves; a traced function they ran shows as K > H.
+   */
+  internal?: string[];
 }
 
 export interface PathPayload {
@@ -269,9 +277,10 @@ export interface PathMeta {
 }
 
 /**
- * The adapter's sticky on/off switch for the request path (`@hoplens/express`: a flag file in its
- * state dir, read by the register hook at the next start). Core only calls it from the toggle API
- * (POST /api/path/enable|disable) and /api/meta; without one (Next) the toggle answers 409.
+ * The adapter's sticky on/off switch for the request path (a flag file in the adapter's state dir:
+ * `@hoplens/express` reads it in its register hook, `@hoplens/next` in node.ts at the first request;
+ * path/flag.ts). Core only calls it from the toggle API (POST /api/path/enable|disable) and
+ * /api/meta; without one the toggle answers 409.
  */
 export interface PathControl {
   /** How this boot decided (fixed for the process). */
@@ -283,6 +292,10 @@ export interface PathControl {
   /** Remove the flag. Throws on a file-system error. */
   disable(): void;
 }
+
+/** Where coverage starts, per adapter, for the "did not start" reasons. */
+const START_HINT =
+  "Express: load the register hook; Next: instrumentation.ts must import hoplens/node, then restart next dev";
 
 /** The request path's state for /api/meta, the banner and the routes. */
 export function pathMeta(
@@ -300,9 +313,8 @@ export function pathMeta(
   const extra = pending ? { source, pending } : { source };
   if (cov) return cov.reason ? { state: cov.state, reason: cov.reason, ...extra } : { state: cov.state, ...extra };
   let reason: string;
-  if (source === "flag")
-    reason = "the request path is enabled but coverage did not start at boot (load the register hook)";
-  else if (pathFlag(env)) reason = "HOPLENS_PATH is set but coverage did not start at boot (load the register hook)";
+  if (source === "flag") reason = `the request path is enabled but coverage did not start at boot (${START_HINT})`;
+  else if (pathFlag(env)) reason = `HOPLENS_PATH is set but coverage did not start at boot (${START_HINT})`;
   else if (source === "env") reason = `HOPLENS_PATH=${env.HOPLENS_PATH} turns it off`;
   else reason = control ? "enable it here, or restart with HOPLENS_PATH=1" : "restart with HOPLENS_PATH=1";
   return { state: "off", reason, ...extra };
@@ -316,6 +328,11 @@ export interface PathStore {
   off(event: "start" | "update", listener: (t: TraceRecord) => void): unknown;
   inflight(): number;
   inflightTraces?(): TraceRecord[];
+  /**
+   * Requests served without a trace (the framework's internal prefixes: Next's /_next/*): the
+   * listener gets `METHOD path`; the answer unsubscribes. TraceStore.onInternal.
+   */
+  onInternal?(listener: (what: string) => void): () => void;
   /** Announce a finished trace that changed (its `pathTrace` stamp): TraceStore.update. */
   update?(t: TraceRecord): void;
 }
@@ -343,6 +360,12 @@ export interface CaptureDeps {
   generated?: GeneratedLookup;
   /** Opt-in: read compiled scripts no loader retained through the process's Debugger session (default HOPLENS_PATH_DEBUGGER). */
   debuggerSource?: boolean;
+  /**
+   * A bundler's scripts (Next dev: bundled.ts): which scripts of a take to keep, which one holds a
+   * project file and the text + map V8 ran for it. Without it: project file:// scripts, identity or a
+   * loader's retained text (Express).
+   */
+  scripts?: PathScripts;
   timings?: Partial<PathTimings>;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -402,6 +425,9 @@ export async function capturePath(deps: CaptureDeps, source: TraceRecord): Promi
           second.contaminated &&
           !first.taint.length &&
           !second.taint.length &&
+          // An untraced framework request may be what ran the extra calls: no local-binding verdict.
+          !first.internal.length &&
+          !second.internal.length &&
           !first.implausible &&
           !second.implausible &&
           sameExcess(first, second)
@@ -492,6 +518,8 @@ interface Attempt {
   payload: PathPayload;
   contaminated: boolean;
   taint: string[];
+  /** Untraced framework requests inside the window. */
+  internal: string[];
   /** fnKey -> K - H where K > H. */
   excess: Record<string, number>;
   /** A block counted more often than its function was entered, outside a loop. */
@@ -515,6 +543,10 @@ function sameExcess(a: Attempt, b: Attempt): boolean {
 function watchOthers(store: PathStore, isOurs: (t: TraceRecord) => boolean, onOurUpdate?: () => void) {
   const starts: TraceRecord[] = [];
   const updates: TraceRecord[] = [];
+  const internal: string[] = [];
+  const offInternal = store.onInternal?.((what) => {
+    if (internal.length < 50 && !internal.includes(what)) internal.push(what);
+  });
   const onStart = (s: TraceRecord) => starts.push(s);
   const onUpdate = (u: TraceRecord) => {
     if (isOurs(u)) onOurUpdate?.();
@@ -526,7 +558,9 @@ function watchOthers(store: PathStore, isOurs: (t: TraceRecord) => boolean, onOu
     stop() {
       store.off("start", onStart);
       store.off("update", onUpdate);
+      offInternal?.();
     },
+    internal: () => internal.slice(),
     taint(): string[] {
       const out = [
         ...starts.filter((x) => !isOurs(x)).map((x) => `${x.method} ${x.path}`),
@@ -581,8 +615,10 @@ async function attempt(
   }
   const quietMs = now() - gateStart;
 
-  // 2. Reset, then watch for anything else that runs inside the window.
-  const reset = cov.take(() => false);
+  // 2. Reset, then watch for anything else that runs inside the window. A bundler's filter sees the
+  // reset take's scripts too (it records when it first saw each one: bundled.ts).
+  const sc = deps.scripts;
+  const reset = cov.take(sc ? recordOnly(sc) : () => false);
   if (!reset) throw takeFailed(cov);
   const resetAt = now();
   let ours: TraceRecord | undefined;
@@ -615,7 +651,8 @@ async function attempt(
     settleUntil = Math.min(settleCap, doneAt + t.settleMs);
     for (let at = now(); at < settleUntil; at = now()) await sleep(Math.min(t.pollMs, settleUntil - at));
     settleMs = now() - doneAt;
-    final = cov.take((url) => isProjectScript(url, deps.root));
+    sc?.startTake?.();
+    final = cov.take(keepOf(deps));
     windowMs = now() - resetAt;
   } finally {
     others.stop();
@@ -623,11 +660,22 @@ async function attempt(
   const trace = ours!;
   if (!final) throw takeFailed(cov, trace);
   const taint = others.taint();
+  const internal = others.internal();
 
   let lookup = deps.generated;
   let debuggerMs: number | undefined;
   const debuggerWarnings: string[] = [];
-  if (!lookup) {
+  let scriptFor: ScriptFor | undefined;
+  let bundled: ScriptCounts | undefined;
+  if (sc) {
+    // After the final take: reading chunks, maps (and the Debugger, when on) is outside the window.
+    const r = sc.resolve(final.scripts, { debuggerSource: deps.debuggerSource ?? debuggerFlag() });
+    scriptFor = r.scriptFor;
+    lookup ??= r.lookup;
+    bundled = r.counts;
+    debuggerMs = r.debuggerMs;
+    debuggerWarnings.push(...r.warnings);
+  } else if (!lookup) {
     let extra: Map<string, string> | undefined;
     if (deps.debuggerSource ?? debuggerFlag()) {
       // After the final take: the Debugger's cost is outside the window.
@@ -651,12 +699,16 @@ async function attempt(
     mtime: deps.readSource ? undefined : mtimeOf,
     processStart: PROCESS_START,
     generated: lookup,
+    scriptFor,
   });
   built.warnings.push(...debuggerWarnings);
   const contamination: string[] = [];
   if (taint.length) contamination.push(`other requests ran during the capture: ${taint.slice(0, 5).join(", ")}`);
+  // Untraced framework requests (Next's /_next/*) are not foreign traffic by themselves: they run the
+  // framework's code. One that ran a traced function shows as K > H, named here.
+  const via = internal.length ? ` (untraced requests ran too: ${internal.slice(0, 3).join(", ")})` : "";
   for (const [key, extra] of Object.entries(built.excess))
-    contamination.push(`${key} ran ${extra} more time(s) than its hops (K > H)`);
+    contamination.push(`${key} ran ${extra} more time(s) than its hops (K > H)${via}`);
   for (const why of Object.values(built.implausible)) contamination.push(why);
   const payload: PathPayload = {
     v: PATH_PAYLOAD_VERSION,
@@ -674,6 +726,8 @@ async function attempt(
       takeMs: [r1(reset.ms), r1(final.ms)],
       scripts: final.scripts.length,
       totalScripts: final.total,
+      ...(bundled ? { bundled } : {}),
+      ...(internal.length ? { internal } : {}),
     },
     lanes: built.lanes,
     functions: built.functions,
@@ -685,6 +739,7 @@ async function attempt(
     payload,
     contaminated: contamination.length > 0,
     taint,
+    internal,
     excess: built.excess,
     implausible: Object.keys(built.implausible).length > 0,
     joined: built.joined,
@@ -706,19 +761,20 @@ async function controlWindow(
   const now = deps.now ?? (() => performance.now());
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const wait = Math.min(Math.max(a.windowMs, t.pollMs), t.controlMaxMs);
-  if (!cov.take(() => false)) return { ms: 0, clean: false, reason: "the control take failed" };
+  const sc = deps.scripts;
+  if (!cov.take(sc ? recordOnly(sc) : () => false)) return { ms: 0, clean: false, reason: "the control take failed" };
   const t0 = now();
   const others = watchOthers(deps.store, () => false);
   let taken: ReturnType<CoverageSource["take"]>;
   try {
     for (let at = now(); at - t0 < wait; at = now()) await sleep(Math.min(t.pollMs, wait - (at - t0)));
-    taken = cov.take((url) => isProjectScript(url, deps.root));
+    taken = cov.take(keepOf(deps));
   } finally {
     others.stop();
   }
   const ms = r1(now() - t0);
   if (!taken) return { ms, clean: false, reason: "the control take failed" };
-  const taint = others.taint();
+  const taint = [...others.taint(), ...others.internal()];
   if (taint.length) return { ms, clean: false, reason: `other requests ran: ${taint.slice(0, 5).join(", ")}` };
   const want = new Map<string, Set<number>>();
   for (const j of a.joined) {
@@ -764,6 +820,23 @@ function markContaminated(p: PathPayload): void {
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
 /* ---------------------------------------------------------- script filter */
+
+/** The final take's filter: the bundler's, else project file:// scripts. */
+function keepOf(deps: CaptureDeps): (url: string, script: ScriptCoverage) => boolean {
+  const sc = deps.scripts;
+  return sc ? (url, script) => sc.keep(url, script) : (url) => isProjectScript(url, deps.root);
+}
+
+/** A reset take's filter for a bundler's view: it records every script (bundled.ts), keeps none. */
+function recordOnly(sc: PathScripts): (url: string, script: ScriptCoverage) => boolean {
+  return (url, script) => {
+    sc.keep(url, script);
+    return false;
+  };
+}
+
+/** Which script holds a file's code (bundled.ts ResolvedScripts.scriptFor). */
+type ScriptFor = (abs: string) => ScriptCoverage | NoScript | undefined;
 
 /** Normalize for comparison: Windows paths compare case-insensitively. */
 function norm(p: string): string {
@@ -862,6 +935,8 @@ export interface MappedScript {
   hash: string;
   index: ReverseIndex;
   via: GeneratedVia;
+  /** The map's sourcesContent is the file on disk (checked by buildIndex): see ScriptText.verified. */
+  verified?: boolean;
 }
 
 const mappedByPayload = new WeakMap<PathPayload, Map<string, MappedScript>>();
@@ -946,6 +1021,8 @@ export function buildPayload(
     processStart?: number;
     /** The text V8 ran per script when it is not the file (generated.ts); omitted: identity. */
     generated?: GeneratedLookup;
+    /** Which script holds a file (a bundler's: bundled.ts); omitted: the script whose URL is the file. */
+    scriptFor?: ScriptFor;
   } = {},
 ): Built {
   const droppedHopsN = opts.droppedHops ?? 0;
@@ -1041,7 +1118,7 @@ export function buildPayload(
       return base;
     }
     const abs = path.resolve(root, loc.file);
-    const script = byFile.get(norm(abs));
+    const held = opts.scriptFor ? opts.scriptFor(abs) : byFile.get(norm(abs));
     const src = textOf(abs);
     if (!src) {
       base.truth = { t: "unknown", why: "source-unreadable" };
@@ -1049,14 +1126,23 @@ export function buildPayload(
     }
     base.sourceHash = src.hash;
     const mt = opts.mtime?.(abs);
-    if (mt !== undefined && opts.processStart !== undefined && mt > opts.processStart + MTIME_SLACK_MS)
-      base.stale = true;
-    if (!script) return base;
+    const late = mt !== undefined && opts.processStart !== undefined && mt > opts.processStart + MTIME_SLACK_MS;
+    if (late) base.stale = true;
+    if (!held) return base;
+    if ("why" in held) {
+      // Not joined: the file ran in two bundled copies, or the chunk that may hold it was not read.
+      base.truth = { t: "unknown", why: held.why };
+      return base;
+    }
+    const script = held;
     const sj = joinOf(script, abs, src);
     if (sj.kind === "unknown") {
       base.truth = { t: "unknown", why: sj.why };
       return base;
     }
+    // A bundle built from the file as it is now (its map's sourcesContent is the file): an edit after
+    // the process started is not staleness there, the bundler rebuilt from it (Next dev).
+    if (late && sj.kind === "mapped" && sj.m.verified) base.stale = undefined;
     // Lines of generated offsets: through the source map's anchors (display and the hop join only).
     const m = sj.kind === "mapped" ? sj.m : undefined;
     // Identity reads V8's offsets in the text V8 ran: the file, or the file without its BOM.
@@ -1181,7 +1267,7 @@ function scriptJoin(
 ): ScriptJoin {
   const g = lookup?.(script.url, abs, script.scriptId);
   if (!g) return bomJoin(script, raw);
-  if ("missing" in g) return { kind: "unknown", why: "no-generated-text", detail: g.missing };
+  if ("missing" in g) return { kind: "unknown", why: g.why ?? "no-generated-text", detail: g.missing };
   // V8 reports the module function over the whole script: its end is the length of the text it ran.
   const mod = script.functions.find(isModuleFn);
   const len = mod?.ranges[0]?.endOffset;
@@ -1192,8 +1278,10 @@ function scriptJoin(
       detail: `the generated text Hoplens holds (${g.code.length} chars) is not the one V8 ran (${len})`,
     };
   try {
-    const { index, gen } = indexOf(abs, g.code, raw);
-    return { kind: "mapped", gen, m: { text: g.code, hash: gen.hash, index, via: g.via } };
+    const { index, gen } = indexOf(abs, g.code, raw, g.map, g.mapId);
+    const m: MappedScript = { text: g.code, hash: gen.hash, index, via: g.via };
+    if (g.verified) m.verified = true;
+    return { kind: "mapped", gen, m };
   } catch (err) {
     if (err instanceof MapError) return { kind: "unknown", why: err.why, detail: `not mapped: ${err.message}` };
     return {
@@ -1213,16 +1301,23 @@ const indexCache = new Map<string, { index: ReverseIndex; gen: SourceText }>();
  * text): least recently used dropped past INDEX_CACHE_MAX. Payloads share the cached objects.
  * Throws MapError as buildIndex does (a failure is not cached).
  */
-function indexOf(abs: string, code: string, raw: SourceText): { index: ReverseIndex; gen: SourceText } {
+function indexOf(
+  abs: string,
+  code: string,
+  raw: SourceText,
+  map?: RawMap,
+  mapId?: string,
+): { index: ReverseIndex; gen: SourceText } {
   const gen = sourceText(code);
-  const key = `${norm(abs)}\0${gen.hash}:${code.length}\0${raw.hash}`;
+  // A map given apart from the text (a Turbopack sidecar map) is part of the key: `mapId` names it.
+  const key = `${norm(abs)}\0${gen.hash}:${code.length}\0${raw.hash}\0${map ? (mapId ?? "map") : ""}`;
   const hit = indexCache.get(key);
   if (hit) {
     indexCache.delete(key);
     indexCache.set(key, hit);
     return hit;
   }
-  const entry = { index: buildIndex({ generated: code, genFile: abs, raw: raw.text, rawFile: abs }), gen };
+  const entry = { index: buildIndex({ generated: code, genFile: abs, raw: raw.text, rawFile: abs, map }), gen };
   indexCache.set(key, entry);
   if (indexCache.size > INDEX_CACHE_MAX) indexCache.delete(indexCache.keys().next().value as string);
   return entry;

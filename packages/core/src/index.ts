@@ -62,7 +62,27 @@ export {
   type UnknownWhy,
 } from "./path/capture";
 export {
+  BundledScripts,
+  bundledScripts,
+  type BundledOptions,
+  type BundledFs,
+  type PathScripts,
+  type ResolvedScripts,
+  type ScriptCounts,
+  type ScriptKind,
+} from "./path/bundled";
+export {
+  readPathFlagFile,
+  writePathFlagFile,
+  removePathFlagFile,
+  envPathSetting,
+  flagPathControl,
+  PATH_FLAG_FILE,
+  type PathFlagFile,
+} from "./path/flag";
+export {
   coverageHandle,
+  startCoverage,
   pathFlag,
   type CoverageSource,
   type CoverageState,
@@ -191,3 +211,4 @@ export type {
   ProxyInfo,
   SchemaInfo,
 } from "./types";
+export { persistDir } from "./persist";

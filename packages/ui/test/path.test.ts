@@ -339,7 +339,10 @@ describe("states", () => {
   test("disabled-c8, error, Next, older core, on", () => {
     expect(offView(meta("disabled-c8", "NODE_V8_COVERAGE is set"), false)!.title).toContain("c8");
     expect(offView(meta("error", "inspector failed"), false)!.body).toContain("inspector failed");
-    expect(offView(meta("on"), true)!.title).toContain("Express only for now");
+    // Next has the request path too: on is on, off says how, with Next's restart wording.
+    expect(offView(meta("on"), true)).toBeNull();
+    expect(offView(meta("off"), true)!.body).toContain("restart next dev");
+    expect(offView(meta("off"), true)!.title).not.toContain("Express only");
     expect(offView({ root: "/app" }, false)!.title).toContain("not in this Hoplens core");
     expect(offView(meta("on"), false)).toBeNull();
   });
@@ -478,5 +481,13 @@ describe("tracePath (capture flow)", () => {
     await tracePath({ id: "s2", method: "DELETE", url: "/a" });
     expect(spy).not.toHaveBeenCalled();
     expect(pathFailure.value?.view.code).toBe("method");
+  });
+});
+
+describe("bundle reasons (P6)", () => {
+  test("a file run in two bundled copies has its own copy, not the source-join one", () => {
+    expect(whyText("bundle-copies")).toMatch(/bundled copy/);
+    expect(whyText("bundle-copies")).not.toBe(whyText("join-ambiguous"));
+    expect(whyText("bundle-copies")).not.toMatch(/^unknown \(/);
   });
 });

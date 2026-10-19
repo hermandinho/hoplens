@@ -60,8 +60,15 @@ export async function capture(abs: string, fn: () => unknown): Promise<FnCoverag
 
 const ts = loadTypeScript(process.cwd());
 
-export function cfgOf(abs: string, text = fs.readFileSync(abs, "utf8")): CfgFile {
-  return buildCfg(ts, text, abs) as unknown as CfgFile;
+/**
+ * The production per-file parse budget (250ms) is wall time: under a loaded parallel test run a
+ * small fixture can blow it and fold to 'too-large'. Tests get a generous budget unless they are
+ * testing the budget itself (they pass their own maxMs).
+ */
+export const TEST_CFG_MS = 10_000;
+
+export function cfgOf(abs: string, text = fs.readFileSync(abs, "utf8"), opts?: { maxMs?: number }): CfgFile {
+  return buildCfg(ts, text, abs, { maxMs: TEST_CFG_MS, ...opts }) as unknown as CfgFile;
 }
 
 export function rangesOf(cov: FnCoverage[], name: string): RangeIn[] {

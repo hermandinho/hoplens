@@ -420,7 +420,10 @@ describe("guards", () => {
 /* -------------------------------------------------------- payload analysis */
 
 const ts = loadTypeScript(process.cwd());
-const analyzer = { cfg: (file: string, text: string) => buildCfg(ts, text, file) as unknown as CfgFile };
+// Generous parse budget: the production 250ms is wall time and folds under a loaded test run.
+const analyzer = {
+  cfg: (file: string, text: string) => buildCfg(ts, text, file, { maxMs: 10_000 }) as unknown as CfgFile,
+};
 const sha = (s: string) => createHash("sha1").update(s).digest("hex").slice(0, 12);
 
 /** A one-lane payload for `fn` of a fixture, the way capture.ts builds it. */

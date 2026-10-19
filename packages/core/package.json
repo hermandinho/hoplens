@@ -45,7 +45,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude \"**/benchmark.test.ts\"",
+    "test": "vitest run --exclude \"**/benchmark.test.ts\" --testTimeout=20000",
     "bench": "vitest run test/benchmark.test.ts"
   },
   "engines": {

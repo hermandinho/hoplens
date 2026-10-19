@@ -309,13 +309,15 @@ describe("samePortRetryMs", () => {
     const a = await hold();
     try {
       const t0 = Date.now();
-      const waited = await ui(a.port, 200);
+      const waited = await ui(a.port, 600);
+      const waitedMs = Date.now() - t0;
       expect(waited.uiPort).not.toBe(a.port);
-      expect(Date.now() - t0).toBeGreaterThanOrEqual(150);
+      expect(waitedMs).toBeGreaterThanOrEqual(550);
       const t1 = Date.now();
       const plain = await ui(a.port);
       expect(plain.uiPort).not.toBe(a.port);
-      expect(Date.now() - t1).toBeLessThan(150);
+      // "At once": well short of the 600ms wait. Relative, not a fixed ms, so a loaded run passes.
+      expect(Date.now() - t1).toBeLessThan(waitedMs - 300);
     } finally {
       a.server.close();
     }

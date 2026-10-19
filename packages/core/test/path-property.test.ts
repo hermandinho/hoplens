@@ -551,9 +551,15 @@ const PINNED: Array<[seed: number, inputs: number[][], located: boolean]> = [
   ],
 ];
 
-test.skipIf(!!DEBUG)("pinned counterexamples", async () => {
-  for (const [seed, inputs, located] of PINNED) await runOne(seed, inputs, located);
-});
+// Its own timeout: past the 5s default under load, vitest moved on while this loop still ran, and
+// the next property test then shared the coverage session with it ("no coverage for f").
+test.skipIf(!!DEBUG)(
+  "pinned counterexamples",
+  async () => {
+    for (const [seed, inputs, located] of PINNED) await runOne(seed, inputs, located);
+  },
+  120_000,
+);
 
 const inputArb = fc.array(fc.tuple(fc.nat(3), fc.nat(3), fc.nat(3), fc.nat(3)), { minLength: 1, maxLength: 4 });
 

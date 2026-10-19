@@ -290,7 +290,10 @@ describe("the graph agrees with the decisions and loops", () => {
 /* -------------------------------------------------------- payload verdicts */
 
 const ts = loadTypeScript(process.cwd());
-const analyzer = { cfg: (file: string, text: string) => buildCfg(ts, text, file) as unknown as CfgFile };
+// Generous parse budget: the production 250ms is wall time and folds under a loaded test run.
+const analyzer = {
+  cfg: (file: string, text: string) => buildCfg(ts, text, file, { maxMs: 10_000 }) as unknown as CfgFile,
+};
 
 function payloadOf(cov: FnCoverage[], fnName: string, errors?: PathFn["errors"]): PathPayload {
   const text = fs.readFileSync(EDGES, "utf8");

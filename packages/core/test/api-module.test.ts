@@ -47,7 +47,11 @@ describe("per-endpoint api modules", () => {
   });
 
   test("POST reads a JSON body", async () => {
-    const res = await fetch(`${base}/api/__test/echo`, { method: "POST", body: JSON.stringify({ n: 2 }) });
+    const res = await fetch(`${base}/api/__test/echo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ n: 2 }),
+    });
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ body: { n: 2 } });
   });

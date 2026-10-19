@@ -29,7 +29,11 @@ export interface HoplensOptions {
   redact?: string[];
   /** Number of traces kept in memory. Default 300. */
   maxTraces?: number;
-  /** Serve the UI to non-loopback clients. Default false. */
+  /**
+   * Serve the UI to non-loopback clients, under any Host name (a LAN address, name.local). Default
+   * false. This turns off the DNS rebinding guard (api/guard.ts): only the Origin and content-type
+   * checks remain, so protect that port yourself.
+   */
   allowRemote?: boolean;
   /**
    * Findings engine. Override thresholds (see `DEFAULT_THRESHOLDS`) or switch rules off:

@@ -3,8 +3,8 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { trustedCaller } from "../src/api/guard";
 import { sendJson } from "../src/api/module";
-import { trustedCaller } from "../src/api/path";
 import { type PathControl, pathMeta } from "../src/path/capture";
 import type { Runtime } from "../src/runtime";
 import { handleUi } from "../src/server";
@@ -44,7 +44,10 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
 const post = async (p: string, headers: Record<string, string> = {}) => {
-  const res = await fetch(`${base}${p}`, { method: "POST", headers });
+  const res = await fetch(`${base}${p}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+  });
   return { status: res.status, body: (await res.json()) as any };
 };
 

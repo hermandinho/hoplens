@@ -141,7 +141,7 @@ export default withHoplens(
 | `serverTiming` | `true` | Add `Server-Timing` and `x-hoplens-trace` to traced dev responses. Appended to an existing `Server-Timing`, never overwriting it, and never added when `NODE_ENV=production`. Streamed responses get the numbers known when headers flush. |
 | `persist` | `false` | Keep route stats, edits and regression verdicts across dev restarts (see below). |
 | `lateSpanGraceMs` | `40` | How long to wait after the response for spans that end late. |
-| `allowRemote` | `false` | Serve the UI to non-loopback clients. |
+| `allowRemote` | `false` | Serve the UI to non-loopback clients, under any Host name. This turns off the DNS rebinding guard, so protect that port yourself (a trusted network, a proxy with auth). |
 
 ### Persistence
 
@@ -207,6 +207,14 @@ Everything the UI shows comes from a loopback JSON API under
 | `POST /run[?repeat=N]` | Send a request through your app; `repeat` (up to 50) runs it in sequence and reports warm p50/p95 against the last batch |
 | `GET /events` (SSE) | `start` / `done` / `update` / `clear` per trace, plus `health` ticks |
 | `GET /routes` · `/meta` · `/source?file=&line=` | Discovered routes · runtime info · a source excerpt |
+
+Every route, the UI page and the SSE streams included, answers only callers on this machine that
+address it by a local name: the `Host` (and any `x-forwarded-host`) must be `localhost`,
+`*.localhost`, `127.x.x.x` or `[::1]` on any port, and an `Origin`, when a browser sends one, must be
+local too. Anything else gets 403 `{ code: "forbidden" }`, which stops DNS rebinding and other sites.
+`POST` and `DELETE` from a browser must send `content-type: application/json`, and a text/plain,
+form or multipart body is refused (415 `{ code: "content-type" }`): scripts that post JSON should
+set the header (`curl -H 'content-type: application/json' -d '{...}'`).
 
 ## Commands
 

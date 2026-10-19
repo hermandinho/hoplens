@@ -175,20 +175,23 @@ afterAll(() => fx?.cleanup());
 
 function request(port: number, method: string, p: string, headers: Record<string, string> = {}) {
   return new Promise<{ status: number; body: any }>((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port, path: p, method, headers }, (res) => {
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (c) => (body += c));
-      res.on("end", () => {
-        let parsed: any = body;
-        try {
-          parsed = JSON.parse(body);
-        } catch {
-          /* text */
-        }
-        resolve({ status: res.statusCode ?? 0, body: parsed });
-      });
-    });
+    const req = http.request(
+      { host: "127.0.0.1", port, path: p, method, headers: { "content-type": "application/json", ...headers } },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => {
+          let parsed: any = body;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            /* text */
+          }
+          resolve({ status: res.statusCode ?? 0, body: parsed });
+        });
+      },
+    );
     req.on("error", reject);
     req.end();
   });

@@ -199,6 +199,7 @@ describe("POST /api/run?repeat=N", () => {
   const post = async (qs: string, body: unknown) => {
     const r = await fetch(`http://127.0.0.1:${uiPort}/__hoplens/api/run${qs}`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     return { status: r.status, body: (await r.json()) as any };
@@ -277,7 +278,11 @@ describe("POST /api/run?repeat=N", () => {
 
   test("a body that is not JSON is a 400, not a crash", async () => {
     for (const qs of ["", "?repeat=2"]) {
-      const r = await fetch(`http://127.0.0.1:${uiPort}/__hoplens/api/run${qs}`, { method: "POST", body: "{nope" });
+      const r = await fetch(`http://127.0.0.1:${uiPort}/__hoplens/api/run${qs}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{nope",
+      });
       expect(r.status, qs).toBe(400);
       expect(((await r.json()) as { error: string }).error).toMatch(/JSON/);
     }

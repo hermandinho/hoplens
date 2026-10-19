@@ -18,6 +18,13 @@ import type {
 // in vite.config.ts rewrites both to the standalone runtime port on 127.0.0.1:4983.
 const API = "/__hoplens/api";
 
+/**
+ * Headers for every POST / DELETE: core refuses a state-changing call from a page unless it says
+ * content-type: application/json (never a "simple" request, so a cross-origin page can't send it
+ * without a CORS preflight). Same-origin calls are not preflighted.
+ */
+export const WRITE_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
+
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -75,11 +82,11 @@ export const api = {
     ),
   source: (file: string, line: number, context = 10) =>
     get<SourceResponse>(`/source?file=${encodeURIComponent(file)}&line=${line}&context=${context}`),
-  clearTraces: () => fetch(`${API}/traces`, { method: "DELETE" }).then((r) => r.ok),
+  clearTraces: () => fetch(`${API}/traces`, { method: "DELETE", headers: WRITE_HEADERS }).then((r) => r.ok),
   /** Request path: replay a GET/HEAD trace once, alone, and map its decisions (a NEW trace). */
   tracePath: async (id: string): Promise<{ traceId: string; path: PathPayload }> => {
     const path = `/traces/${encodeURIComponent(id)}/path`;
-    const res = await fetch(`${API}${path}`, { method: "POST", headers: { accept: "application/json" } });
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: WRITE_HEADERS });
     if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
     return (await res.json()) as { traceId: string; path: PathPayload };
   },
@@ -89,7 +96,7 @@ export const api = {
    */
   pathSwitch: async (on: boolean): Promise<{ path: PathMeta }> => {
     const path = `/path/${on ? "enable" : "disable"}`;
-    const res = await fetch(`${API}${path}`, { method: "POST", headers: { accept: "application/json" } });
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: WRITE_HEADERS });
     if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
     return (await res.json()) as { path: PathMeta };
   },

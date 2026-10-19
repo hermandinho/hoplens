@@ -1,0 +1,1926 @@
+{
+  "checkout": {
+    "payload": {
+      "v": 2,
+      "traceId": "tr_new",
+      "replayOf": "tr_src",
+      "quality": "exact",
+      "contamination": [],
+      "warnings": [],
+      "window": {
+        "quietMs": 0,
+        "settleMs": 0,
+        "taint": [],
+        "retries": 0,
+        "attempts": [],
+        "takeMs": [0, 0],
+        "scripts": 1,
+        "totalScripts": 1
+      },
+      "lanes": [
+        {
+          "spanId": "s1",
+          "kind": "handler",
+          "name": "POST /checkout",
+          "depth": 0,
+          "calls": 1,
+          "truth": { "t": "taken", "n": 1 },
+          "fnKey": "branchy.cjs:2:checkout",
+          "file": "branchy.cjs",
+          "line": 2
+        },
+        {
+          "spanId": "s2",
+          "kind": "function",
+          "name": "save",
+          "depth": 1,
+          "calls": 1,
+          "truth": { "t": "taken", "n": 1 },
+          "fnKey": "branchy.cjs:32:save",
+          "file": "branchy.cjs",
+          "line": 32
+        }
+      ],
+      "functions": {
+        "branchy.cjs:2:checkout": {
+          "key": "branchy.cjs:2:checkout",
+          "name": "checkout",
+          "file": "branchy.cjs",
+          "line": 2,
+          "startLine": 2,
+          "endLine": 30,
+          "mapping": "identity",
+          "calls": { "hops": 1, "coverage": 1, "checked": true },
+          "truth": { "t": "taken", "n": 1 },
+          "blocks": true,
+          "analysis": {
+            "status": "ok",
+            "calls": 1,
+            "blended": false,
+            "decisions": [
+              {
+                "id": "if#0",
+                "nodeId": 1,
+                "kind": "if",
+                "line": 3,
+                "label": "!user",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 3, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 5, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#1",
+                "nodeId": 7,
+                "kind": "if",
+                "line": 8,
+                "label": "item.qty <= 0",
+                "reach": 3,
+                "arms": [
+                  { "label": "then", "line": 8, "count": 1, "taken": "taken" },
+                  { "label": "else", "line": 8, "count": 2, "taken": "taken", "implied": true }
+                ],
+                "verdict": "split-loop",
+                "summary": "then 1/3 . else 2/3",
+                "inLoop": true
+              },
+              {
+                "id": "ternary#0",
+                "nodeId": 12,
+                "kind": "ternary",
+                "line": 11,
+                "label": "user.vip",
+                "reach": 1,
+                "arms": [
+                  { "label": "true", "line": 11, "count": 0, "taken": "not-taken" },
+                  { "label": "false", "line": 11, "count": 1, "taken": "taken" }
+                ],
+                "verdict": "one",
+                "summary": "false",
+                "inLoop": false
+              },
+              {
+                "id": "logical#0",
+                "nodeId": 14,
+                "kind": "logical",
+                "line": 12,
+                "label": "order.coupon &&",
+                "reach": 1,
+                "arms": [
+                  { "label": "right", "line": 12, "count": 1, "taken": "taken" },
+                  { "label": "short-circuit", "line": 12, "count": 0, "taken": "not-taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "right",
+                "inLoop": false
+              },
+              {
+                "id": "switch#0",
+                "nodeId": 15,
+                "kind": "switch",
+                "line": 13,
+                "label": "order.status",
+                "reach": 1,
+                "arms": [
+                  { "label": "case \"new\"", "line": 14, "count": 1, "taken": "taken" },
+                  { "label": "case \"paid\"", "line": 17, "count": 0, "taken": "not-taken" },
+                  { "label": "default", "line": 19, "count": 0, "taken": "not-taken" }
+                ],
+                "verdict": "one",
+                "summary": "case \"new\"",
+                "inLoop": false
+              },
+              {
+                "id": "try#0",
+                "nodeId": 20,
+                "kind": "try",
+                "line": 22,
+                "label": "try",
+                "reach": 1,
+                "arms": [
+                  { "label": "no throw", "line": 22, "count": 1, "taken": "taken", "implied": true },
+                  { "label": "catch", "line": 24, "count": 0, "taken": "not-taken" }
+                ],
+                "verdict": "one",
+                "summary": "no throw",
+                "inLoop": false
+              }
+            ],
+            "loops": [
+              {
+                "nodeId": 5,
+                "line": 7,
+                "label": "for (const item of order.items)",
+                "kind": "for-of",
+                "entries": 1,
+                "passes": 3
+              }
+            ],
+            "exits": [{ "nodeId": 27, "kind": "return", "line": 29, "count": 1 }],
+            "graph": {
+              "id": 0,
+              "k": "block",
+              "line": 2,
+              "endLine": 30,
+              "n": 1,
+              "body": [
+                {
+                  "id": 1,
+                  "k": "if",
+                  "line": 3,
+                  "endLine": 5,
+                  "n": 1,
+                  "label": "!user",
+                  "decisions": ["if#0"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 3,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 3,
+                          "k": "exit",
+                          "line": 4,
+                          "endLine": 4,
+                          "n": 0,
+                          "label": "return { ok: false, reason: \"anon\" };",
+                          "exit": "return"
+                        }
+                      ]
+                    },
+                    { "label": "else", "line": 5, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 4, "k": "stmt", "line": 6, "endLine": 6, "n": 1, "label": "let total = 0;" },
+                {
+                  "id": 5,
+                  "k": "loop",
+                  "line": 7,
+                  "endLine": 10,
+                  "n": 1,
+                  "label": "for (const item of order.items)",
+                  "passes": 3,
+                  "body": [
+                    {
+                      "id": 7,
+                      "k": "if",
+                      "line": 8,
+                      "endLine": 8,
+                      "n": 3,
+                      "label": "item.qty <= 0",
+                      "decisions": ["if#1"],
+                      "arms": [
+                        {
+                          "label": "then",
+                          "line": 8,
+                          "n": 1,
+                          "body": [
+                            {
+                              "id": 8,
+                              "k": "exit",
+                              "line": 8,
+                              "endLine": 8,
+                              "n": 1,
+                              "label": "continue;",
+                              "exit": "continue"
+                            }
+                          ]
+                        },
+                        { "label": "else", "line": 8, "n": 2, "implied": true }
+                      ]
+                    },
+                    { "id": 10, "k": "stmt", "line": 9, "endLine": 9, "n": 2, "label": "total += item.qty * 10;" }
+                  ]
+                },
+                {
+                  "id": 11,
+                  "k": "stmt",
+                  "line": 11,
+                  "endLine": 11,
+                  "n": 1,
+                  "label": "const discount = user.vip ? 0.2 : 0;",
+                  "decisions": ["ternary#0"]
+                },
+                {
+                  "id": 13,
+                  "k": "stmt",
+                  "line": 12,
+                  "endLine": 12,
+                  "n": 1,
+                  "label": "const label = order.coupon && order.coupon.toUpperCase();",
+                  "calls": ["order.coupon.toUpperCase"],
+                  "decisions": ["logical#0"]
+                },
+                {
+                  "id": 15,
+                  "k": "switch",
+                  "line": 13,
+                  "endLine": 21,
+                  "n": 1,
+                  "label": "order.status",
+                  "decisions": ["switch#0"],
+                  "arms": [
+                    {
+                      "label": "case \"new\"",
+                      "line": 14,
+                      "n": 1,
+                      "body": [
+                        {
+                          "id": 16,
+                          "k": "stmt",
+                          "line": 15,
+                          "endLine": 15,
+                          "n": 1,
+                          "label": "total = total * (1 - discount);"
+                        },
+                        { "id": 17, "k": "exit", "line": 16, "endLine": 16, "n": 1, "label": "break;", "exit": "break" }
+                      ]
+                    },
+                    {
+                      "label": "case \"paid\"",
+                      "line": 17,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 18,
+                          "k": "exit",
+                          "line": 18,
+                          "endLine": 18,
+                          "n": 0,
+                          "label": "return { ok: false, reason: \"already paid\" };",
+                          "exit": "return"
+                        }
+                      ]
+                    },
+                    {
+                      "label": "default",
+                      "line": 19,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 19,
+                          "k": "exit",
+                          "line": 20,
+                          "endLine": 20,
+                          "n": 0,
+                          "label": "throw new Error(\"bad status\");",
+                          "exit": "throw",
+                          "calls": ["Error"]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": 20,
+                  "k": "try",
+                  "line": 22,
+                  "endLine": 28,
+                  "n": 1,
+                  "arms": [
+                    {
+                      "label": "try",
+                      "line": 22,
+                      "n": 1,
+                      "body": [
+                        {
+                          "id": 22,
+                          "k": "stmt",
+                          "line": 23,
+                          "endLine": 23,
+                          "n": 1,
+                          "label": "await save(order.id, total, label);",
+                          "calls": ["save"],
+                          "awaits": 1,
+                          "callees": [{ "name": "save", "fnKey": "branchy.cjs:32:save" }]
+                        }
+                      ]
+                    },
+                    {
+                      "label": "catch",
+                      "line": 24,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 24,
+                          "k": "exit",
+                          "line": 25,
+                          "endLine": 25,
+                          "n": 0,
+                          "label": "return { ok: false, reason: String(err) };",
+                          "exit": "return",
+                          "calls": ["String"]
+                        }
+                      ]
+                    },
+                    {
+                      "label": "finally",
+                      "line": 26,
+                      "n": 1,
+                      "body": [
+                        {
+                          "id": 26,
+                          "k": "stmt",
+                          "line": 27,
+                          "endLine": 27,
+                          "n": 1,
+                          "label": "total = Math.round(total);",
+                          "calls": ["Math.round"]
+                        }
+                      ]
+                    }
+                  ],
+                  "decisions": ["try#0"]
+                },
+                {
+                  "id": 27,
+                  "k": "exit",
+                  "line": 29,
+                  "endLine": 29,
+                  "n": 1,
+                  "label": "return { ok: true, total };",
+                  "exit": "return"
+                }
+              ]
+            },
+            "nodeCount": 28
+          }
+        },
+        "branchy.cjs:32:save": {
+          "key": "branchy.cjs:32:save",
+          "name": "save",
+          "file": "branchy.cjs",
+          "line": 32,
+          "startLine": 32,
+          "endLine": 36,
+          "mapping": "identity",
+          "calls": { "hops": 1, "coverage": 1, "checked": true },
+          "truth": { "t": "taken", "n": 1 },
+          "blocks": true,
+          "analysis": {
+            "status": "ok",
+            "calls": 1,
+            "blended": false,
+            "decisions": [
+              {
+                "id": "if#0",
+                "nodeId": 1,
+                "kind": "if",
+                "line": 33,
+                "label": "total > 1000",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 33, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 33, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              }
+            ],
+            "loops": [],
+            "exits": [{ "kind": "end", "line": 36, "count": 1 }],
+            "graph": {
+              "id": 0,
+              "k": "block",
+              "line": 32,
+              "endLine": 36,
+              "n": 1,
+              "body": [
+                {
+                  "id": 1,
+                  "k": "if",
+                  "line": 33,
+                  "endLine": 33,
+                  "n": 1,
+                  "label": "total > 1000",
+                  "decisions": ["if#0"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 33,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 2,
+                          "k": "exit",
+                          "line": 33,
+                          "endLine": 33,
+                          "n": 0,
+                          "label": "throw new Error(\"too big\");",
+                          "exit": "throw",
+                          "calls": ["Error"]
+                        }
+                      ]
+                    },
+                    { "label": "else", "line": 33, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 4, "k": "stmt", "line": 34, "endLine": 34, "n": 1, "label": "void id;" },
+                { "id": 5, "k": "stmt", "line": 35, "endLine": 35, "n": 1, "label": "void label;" }
+              ]
+            },
+            "nodeCount": 6
+          }
+        }
+      },
+      "analysis": {
+        "text": "Exited: return at POST /checkout L29",
+        "exit": { "fnKey": "branchy.cjs:2:checkout", "kind": "return", "line": 29, "nodeId": 27 },
+        "ms": 44.2
+      }
+    },
+    "source": {
+      "branchy.cjs:2:checkout": {
+        "start": 2,
+        "lines": [
+          "async function checkout(order, user) {",
+          "  if (!user) {",
+          "    return { ok: false, reason: \"anon\" };",
+          "  }",
+          "  let total = 0;",
+          "  for (const item of order.items) {",
+          "    if (item.qty <= 0) continue;",
+          "    total += item.qty * 10;",
+          "  }",
+          "  const discount = user.vip ? 0.2 : 0;",
+          "  const label = order.coupon && order.coupon.toUpperCase();",
+          "  switch (order.status) {",
+          "    case \"new\":",
+          "      total = total * (1 - discount);",
+          "      break;",
+          "    case \"paid\":",
+          "      return { ok: false, reason: \"already paid\" };",
+          "    default:",
+          "      throw new Error(\"bad status\");",
+          "  }",
+          "  try {",
+          "    await save(order.id, total, label);",
+          "  } catch (err) {",
+          "    return { ok: false, reason: String(err) };",
+          "  } finally {",
+          "    total = Math.round(total);",
+          "  }",
+          "  return { ok: true, total };",
+          "}"
+        ]
+      },
+      "branchy.cjs:32:save": {
+        "start": 32,
+        "lines": [
+          "async function save(id, total, label) {",
+          "  if (total > 1000) throw new Error(\"too big\");",
+          "  void id;",
+          "  void label;",
+          "}"
+        ]
+      }
+    }
+  },
+  "early": {
+    "payload": {
+      "v": 2,
+      "traceId": "tr_new",
+      "replayOf": "tr_src",
+      "quality": "exact",
+      "contamination": [],
+      "warnings": [],
+      "window": {
+        "quietMs": 0,
+        "settleMs": 0,
+        "taint": [],
+        "retries": 0,
+        "attempts": [],
+        "takeMs": [0, 0],
+        "scripts": 1,
+        "totalScripts": 1
+      },
+      "lanes": [
+        {
+          "spanId": "s1",
+          "kind": "handler",
+          "name": "POST /checkout",
+          "depth": 0,
+          "calls": 1,
+          "truth": { "t": "taken", "n": 1 },
+          "fnKey": "branchy.cjs:2:checkout"
+        }
+      ],
+      "functions": {
+        "branchy.cjs:2:checkout": {
+          "key": "branchy.cjs:2:checkout",
+          "name": "checkout",
+          "file": "branchy.cjs",
+          "line": 2,
+          "startLine": 2,
+          "endLine": 30,
+          "mapping": "identity",
+          "calls": { "hops": 1, "coverage": 1, "checked": true },
+          "truth": { "t": "taken", "n": 1 },
+          "blocks": true,
+          "analysis": {
+            "status": "ok",
+            "calls": 1,
+            "blended": false,
+            "decisions": [
+              {
+                "id": "if#0",
+                "nodeId": 1,
+                "kind": "if",
+                "line": 3,
+                "label": "!user",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 3, "count": 1, "taken": "taken" },
+                  { "label": "else", "line": 5, "count": 0, "taken": "not-taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "then",
+                "inLoop": false
+              },
+              {
+                "id": "if#1",
+                "nodeId": 7,
+                "kind": "if",
+                "line": 8,
+                "label": "item.qty <= 0",
+                "reach": 0,
+                "arms": [
+                  { "label": "then", "line": 8, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 8, "count": 0, "taken": "not-taken", "implied": true }
+                ],
+                "verdict": "unreached",
+                "summary": "not reached",
+                "inLoop": true
+              },
+              {
+                "id": "ternary#0",
+                "nodeId": 12,
+                "kind": "ternary",
+                "line": 11,
+                "label": "user.vip",
+                "reach": 0,
+                "arms": [
+                  { "label": "true", "line": 11, "count": 0, "taken": "not-taken" },
+                  { "label": "false", "line": 11, "count": 0, "taken": "not-taken" }
+                ],
+                "verdict": "unreached",
+                "summary": "not reached",
+                "inLoop": false
+              },
+              {
+                "id": "logical#0",
+                "nodeId": 14,
+                "kind": "logical",
+                "line": 12,
+                "label": "order.coupon &&",
+                "reach": 0,
+                "arms": [
+                  { "label": "right", "line": 12, "count": 0, "taken": "not-taken" },
+                  { "label": "short-circuit", "line": 12, "count": 0, "taken": "not-taken", "implied": true }
+                ],
+                "verdict": "unreached",
+                "summary": "not reached",
+                "inLoop": false
+              },
+              {
+                "id": "switch#0",
+                "nodeId": 15,
+                "kind": "switch",
+                "line": 13,
+                "label": "order.status",
+                "reach": 0,
+                "arms": [
+                  { "label": "case \"new\"", "line": 14, "count": 0, "taken": "not-taken" },
+                  { "label": "case \"paid\"", "line": 17, "count": 0, "taken": "not-taken" },
+                  { "label": "default", "line": 19, "count": 0, "taken": "not-taken" }
+                ],
+                "verdict": "unreached",
+                "summary": "not reached",
+                "inLoop": false
+              },
+              {
+                "id": "try#0",
+                "nodeId": 20,
+                "kind": "try",
+                "line": 22,
+                "label": "try",
+                "reach": 0,
+                "arms": [
+                  { "label": "no throw", "line": 22, "count": 0, "taken": "not-taken", "implied": true },
+                  { "label": "catch", "line": 24, "count": 0, "taken": "not-taken" }
+                ],
+                "verdict": "unreached",
+                "summary": "not reached",
+                "inLoop": false
+              }
+            ],
+            "loops": [
+              {
+                "nodeId": 5,
+                "line": 7,
+                "label": "for (const item of order.items)",
+                "kind": "for-of",
+                "entries": 0,
+                "passes": 0
+              }
+            ],
+            "exits": [
+              {
+                "nodeId": 3,
+                "kind": "return",
+                "line": 4,
+                "count": 1,
+                "via": { "decision": "if#0", "label": "if !user", "arm": "then", "line": 3 }
+              }
+            ],
+            "graph": {
+              "id": 0,
+              "k": "block",
+              "line": 2,
+              "endLine": 30,
+              "n": 1,
+              "body": [
+                {
+                  "id": 1,
+                  "k": "if",
+                  "line": 3,
+                  "endLine": 5,
+                  "n": 1,
+                  "label": "!user",
+                  "decisions": ["if#0"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 3,
+                      "n": 1,
+                      "body": [
+                        {
+                          "id": 3,
+                          "k": "exit",
+                          "line": 4,
+                          "endLine": 4,
+                          "n": 1,
+                          "label": "return { ok: false, reason: \"anon\" };",
+                          "exit": "return"
+                        }
+                      ]
+                    },
+                    { "label": "else", "line": 5, "n": 0, "implied": true }
+                  ]
+                },
+                { "id": 4, "k": "stmt", "line": 6, "endLine": 6, "n": 0, "label": "let total = 0;" },
+                {
+                  "id": 5,
+                  "k": "loop",
+                  "line": 7,
+                  "endLine": 10,
+                  "n": 0,
+                  "label": "for (const item of order.items)",
+                  "passes": 0,
+                  "body": [
+                    {
+                      "id": 7,
+                      "k": "if",
+                      "line": 8,
+                      "endLine": 8,
+                      "n": 0,
+                      "label": "item.qty <= 0",
+                      "decisions": ["if#1"],
+                      "arms": [
+                        {
+                          "label": "then",
+                          "line": 8,
+                          "n": 0,
+                          "body": [
+                            {
+                              "id": 8,
+                              "k": "exit",
+                              "line": 8,
+                              "endLine": 8,
+                              "n": 0,
+                              "label": "continue;",
+                              "exit": "continue"
+                            }
+                          ]
+                        },
+                        { "label": "else", "line": 8, "n": 0, "implied": true }
+                      ]
+                    },
+                    { "id": 10, "k": "stmt", "line": 9, "endLine": 9, "n": 0, "label": "total += item.qty * 10;" }
+                  ]
+                },
+                {
+                  "id": 11,
+                  "k": "stmt",
+                  "line": 11,
+                  "endLine": 11,
+                  "n": 0,
+                  "label": "const discount = user.vip ? 0.2 : 0;",
+                  "decisions": ["ternary#0"]
+                },
+                {
+                  "id": 13,
+                  "k": "stmt",
+                  "line": 12,
+                  "endLine": 12,
+                  "n": 0,
+                  "label": "const label = order.coupon && order.coupon.toUpperCase();",
+                  "calls": ["order.coupon.toUpperCase"],
+                  "decisions": ["logical#0"]
+                },
+                {
+                  "id": 15,
+                  "k": "switch",
+                  "line": 13,
+                  "endLine": 21,
+                  "n": 0,
+                  "label": "order.status",
+                  "decisions": ["switch#0"],
+                  "arms": [
+                    {
+                      "label": "case \"new\"",
+                      "line": 14,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 16,
+                          "k": "stmt",
+                          "line": 15,
+                          "endLine": 15,
+                          "n": 0,
+                          "label": "total = total * (1 - discount);"
+                        },
+                        { "id": 17, "k": "exit", "line": 16, "endLine": 16, "n": 0, "label": "break;", "exit": "break" }
+                      ]
+                    },
+                    {
+                      "label": "case \"paid\"",
+                      "line": 17,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 18,
+                          "k": "exit",
+                          "line": 18,
+                          "endLine": 18,
+                          "n": 0,
+                          "label": "return { ok: false, reason: \"already paid\" };",
+                          "exit": "return"
+                        }
+                      ]
+                    },
+                    {
+                      "label": "default",
+                      "line": 19,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 19,
+                          "k": "exit",
+                          "line": 20,
+                          "endLine": 20,
+                          "n": 0,
+                          "label": "throw new Error(\"bad status\");",
+                          "exit": "throw",
+                          "calls": ["Error"]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": 20,
+                  "k": "try",
+                  "line": 22,
+                  "endLine": 28,
+                  "n": 0,
+                  "arms": [
+                    {
+                      "label": "try",
+                      "line": 22,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 22,
+                          "k": "stmt",
+                          "line": 23,
+                          "endLine": 23,
+                          "n": 0,
+                          "label": "await save(order.id, total, label);",
+                          "calls": ["save"],
+                          "awaits": 1
+                        }
+                      ]
+                    },
+                    {
+                      "label": "catch",
+                      "line": 24,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 24,
+                          "k": "exit",
+                          "line": 25,
+                          "endLine": 25,
+                          "n": 0,
+                          "label": "return { ok: false, reason: String(err) };",
+                          "exit": "return",
+                          "calls": ["String"]
+                        }
+                      ]
+                    },
+                    {
+                      "label": "finally",
+                      "line": 26,
+                      "n": 0,
+                      "body": [
+                        {
+                          "id": 26,
+                          "k": "stmt",
+                          "line": 27,
+                          "endLine": 27,
+                          "n": 0,
+                          "label": "total = Math.round(total);",
+                          "calls": ["Math.round"]
+                        }
+                      ]
+                    }
+                  ],
+                  "decisions": ["try#0"]
+                },
+                {
+                  "id": 27,
+                  "k": "exit",
+                  "line": 29,
+                  "endLine": 29,
+                  "n": 0,
+                  "label": "return { ok: true, total };",
+                  "exit": "return"
+                }
+              ]
+            },
+            "nodeCount": 28
+          }
+        }
+      },
+      "analysis": {
+        "text": "Exited: return at POST /checkout L4 via if !user -> then",
+        "exit": {
+          "fnKey": "branchy.cjs:2:checkout",
+          "kind": "return",
+          "line": 4,
+          "nodeId": 3,
+          "via": { "decision": "if#0", "label": "if !user", "arm": "then", "line": 3 }
+        },
+        "ms": 0.9
+      }
+    },
+    "source": {
+      "branchy.cjs:2:checkout": {
+        "start": 2,
+        "lines": [
+          "async function checkout(order, user) {",
+          "  if (!user) {",
+          "    return { ok: false, reason: \"anon\" };",
+          "  }",
+          "  let total = 0;",
+          "  for (const item of order.items) {",
+          "    if (item.qty <= 0) continue;",
+          "    total += item.qty * 10;",
+          "  }",
+          "  const discount = user.vip ? 0.2 : 0;",
+          "  const label = order.coupon && order.coupon.toUpperCase();",
+          "  switch (order.status) {",
+          "    case \"new\":",
+          "      total = total * (1 - discount);",
+          "      break;",
+          "    case \"paid\":",
+          "      return { ok: false, reason: \"already paid\" };",
+          "    default:",
+          "      throw new Error(\"bad status\");",
+          "  }",
+          "  try {",
+          "    await save(order.id, total, label);",
+          "  } catch (err) {",
+          "    return { ok: false, reason: String(err) };",
+          "  } finally {",
+          "    total = Math.round(total);",
+          "  }",
+          "  return { ok: true, total };",
+          "}"
+        ]
+      }
+    }
+  },
+  "big": {
+    "payload": {
+      "v": 2,
+      "traceId": "tr_new",
+      "replayOf": "tr_src",
+      "quality": "exact",
+      "contamination": [],
+      "warnings": [],
+      "window": {
+        "quietMs": 0,
+        "settleMs": 0,
+        "taint": [],
+        "retries": 0,
+        "attempts": [],
+        "takeMs": [0, 0],
+        "scripts": 1,
+        "totalScripts": 1
+      },
+      "lanes": [
+        {
+          "spanId": "s1",
+          "kind": "handler",
+          "name": "GET /big",
+          "depth": 0,
+          "calls": 1,
+          "truth": { "t": "taken", "n": 1 },
+          "fnKey": "big.cjs:1:big"
+        }
+      ],
+      "functions": {
+        "big.cjs:1:big": {
+          "key": "big.cjs:1:big",
+          "name": "big",
+          "file": "big.cjs",
+          "line": 1,
+          "startLine": 1,
+          "endLine": 215,
+          "mapping": "identity",
+          "calls": { "hops": 1, "coverage": 1, "checked": true },
+          "truth": { "t": "taken", "n": 1 },
+          "blocks": true,
+          "analysis": {
+            "status": "ok",
+            "calls": 1,
+            "blended": false,
+            "decisions": [
+              {
+                "id": "if#0",
+                "nodeId": 19,
+                "kind": "if",
+                "line": 20,
+                "label": "req.flag0",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 20, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 22, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#1",
+                "nodeId": 39,
+                "kind": "if",
+                "line": 40,
+                "label": "req.flag1",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 40, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 42, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#2",
+                "nodeId": 59,
+                "kind": "if",
+                "line": 60,
+                "label": "req.flag2",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 60, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 62, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#3",
+                "nodeId": 79,
+                "kind": "if",
+                "line": 80,
+                "label": "req.flag3",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 80, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 82, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#4",
+                "nodeId": 99,
+                "kind": "if",
+                "line": 100,
+                "label": "req.flag4",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 100, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 102, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#5",
+                "nodeId": 119,
+                "kind": "if",
+                "line": 120,
+                "label": "req.flag5",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 120, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 122, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#6",
+                "nodeId": 139,
+                "kind": "if",
+                "line": 140,
+                "label": "req.flag6",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 140, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 142, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#7",
+                "nodeId": 159,
+                "kind": "if",
+                "line": 160,
+                "label": "req.flag7",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 160, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 162, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#8",
+                "nodeId": 179,
+                "kind": "if",
+                "line": 180,
+                "label": "req.flag8",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 180, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 182, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#9",
+                "nodeId": 199,
+                "kind": "if",
+                "line": 200,
+                "label": "req.flag9",
+                "reach": 1,
+                "arms": [
+                  { "label": "then", "line": 200, "count": 0, "taken": "not-taken" },
+                  { "label": "else", "line": 202, "count": 1, "taken": "taken", "implied": true }
+                ],
+                "verdict": "one",
+                "summary": "else",
+                "inLoop": false
+              },
+              {
+                "id": "if#10",
+                "nodeId": 204,
+                "kind": "if",
+                "line": 204,
+                "label": "x > 1",
+                "reach": 3,
+                "arms": [
+                  { "label": "then", "line": 204, "count": 2, "taken": "taken" },
+                  { "label": "else", "line": 206, "count": 1, "taken": "taken" }
+                ],
+                "verdict": "split-loop",
+                "summary": "then 2/3 . else 1/3",
+                "inLoop": true
+              }
+            ],
+            "loops": [
+              {
+                "nodeId": 202,
+                "line": 203,
+                "label": "for (const x of req.items)",
+                "kind": "for-of",
+                "entries": 1,
+                "passes": 3
+              }
+            ],
+            "exits": [{ "nodeId": 213, "kind": "return", "line": 214, "count": 1 }],
+            "graph": {
+              "id": 0,
+              "k": "block",
+              "line": 1,
+              "endLine": 215,
+              "n": 1,
+              "body": [
+                { "id": 1, "k": "stmt", "line": 2, "endLine": 2, "n": 1, "label": "let acc = 0;" },
+                { "id": 2, "k": "stmt", "line": 3, "endLine": 3, "n": 1, "label": "acc += 1;" },
+                { "id": 3, "k": "stmt", "line": 4, "endLine": 4, "n": 1, "label": "acc += 2;" },
+                { "id": 4, "k": "stmt", "line": 5, "endLine": 5, "n": 1, "label": "acc += 3;" },
+                { "id": 5, "k": "stmt", "line": 6, "endLine": 6, "n": 1, "label": "acc += 4;" },
+                { "id": 6, "k": "stmt", "line": 7, "endLine": 7, "n": 1, "label": "acc += 5;" },
+                { "id": 7, "k": "stmt", "line": 8, "endLine": 8, "n": 1, "label": "acc += 6;" },
+                { "id": 8, "k": "stmt", "line": 9, "endLine": 9, "n": 1, "label": "acc += 7;" },
+                { "id": 9, "k": "stmt", "line": 10, "endLine": 10, "n": 1, "label": "acc += 8;" },
+                { "id": 10, "k": "stmt", "line": 11, "endLine": 11, "n": 1, "label": "acc += 9;" },
+                { "id": 11, "k": "stmt", "line": 12, "endLine": 12, "n": 1, "label": "acc += 10;" },
+                { "id": 12, "k": "stmt", "line": 13, "endLine": 13, "n": 1, "label": "acc += 11;" },
+                { "id": 13, "k": "stmt", "line": 14, "endLine": 14, "n": 1, "label": "acc += 12;" },
+                { "id": 14, "k": "stmt", "line": 15, "endLine": 15, "n": 1, "label": "acc += 13;" },
+                { "id": 15, "k": "stmt", "line": 16, "endLine": 16, "n": 1, "label": "acc += 14;" },
+                { "id": 16, "k": "stmt", "line": 17, "endLine": 17, "n": 1, "label": "acc += 15;" },
+                { "id": 17, "k": "stmt", "line": 18, "endLine": 18, "n": 1, "label": "acc += 16;" },
+                { "id": 18, "k": "stmt", "line": 19, "endLine": 19, "n": 1, "label": "acc += 17;" },
+                {
+                  "id": 19,
+                  "k": "if",
+                  "line": 20,
+                  "endLine": 22,
+                  "n": 1,
+                  "label": "req.flag0",
+                  "decisions": ["if#0"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 20,
+                      "n": 0,
+                      "body": [{ "id": 21, "k": "stmt", "line": 21, "endLine": 21, "n": 0, "label": "acc -= 0;" }]
+                    },
+                    { "label": "else", "line": 22, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 22, "k": "stmt", "line": 23, "endLine": 23, "n": 1, "label": "acc += 20;" },
+                { "id": 23, "k": "stmt", "line": 24, "endLine": 24, "n": 1, "label": "acc += 21;" },
+                { "id": 24, "k": "stmt", "line": 25, "endLine": 25, "n": 1, "label": "acc += 22;" },
+                { "id": 25, "k": "stmt", "line": 26, "endLine": 26, "n": 1, "label": "acc += 23;" },
+                { "id": 26, "k": "stmt", "line": 27, "endLine": 27, "n": 1, "label": "acc += 24;" },
+                { "id": 27, "k": "stmt", "line": 28, "endLine": 28, "n": 1, "label": "acc += 25;" },
+                { "id": 28, "k": "stmt", "line": 29, "endLine": 29, "n": 1, "label": "acc += 26;" },
+                { "id": 29, "k": "stmt", "line": 30, "endLine": 30, "n": 1, "label": "acc += 27;" },
+                { "id": 30, "k": "stmt", "line": 31, "endLine": 31, "n": 1, "label": "acc += 28;" },
+                { "id": 31, "k": "stmt", "line": 32, "endLine": 32, "n": 1, "label": "acc += 29;" },
+                { "id": 32, "k": "stmt", "line": 33, "endLine": 33, "n": 1, "label": "acc += 30;" },
+                { "id": 33, "k": "stmt", "line": 34, "endLine": 34, "n": 1, "label": "acc += 31;" },
+                { "id": 34, "k": "stmt", "line": 35, "endLine": 35, "n": 1, "label": "acc += 32;" },
+                { "id": 35, "k": "stmt", "line": 36, "endLine": 36, "n": 1, "label": "acc += 33;" },
+                { "id": 36, "k": "stmt", "line": 37, "endLine": 37, "n": 1, "label": "acc += 34;" },
+                { "id": 37, "k": "stmt", "line": 38, "endLine": 38, "n": 1, "label": "acc += 35;" },
+                { "id": 38, "k": "stmt", "line": 39, "endLine": 39, "n": 1, "label": "acc += 36;" },
+                {
+                  "id": 39,
+                  "k": "if",
+                  "line": 40,
+                  "endLine": 42,
+                  "n": 1,
+                  "label": "req.flag1",
+                  "decisions": ["if#1"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 40,
+                      "n": 0,
+                      "body": [{ "id": 41, "k": "stmt", "line": 41, "endLine": 41, "n": 0, "label": "acc -= 1;" }]
+                    },
+                    { "label": "else", "line": 42, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 42, "k": "stmt", "line": 43, "endLine": 43, "n": 1, "label": "acc += 39;" },
+                { "id": 43, "k": "stmt", "line": 44, "endLine": 44, "n": 1, "label": "acc += 40;" },
+                { "id": 44, "k": "stmt", "line": 45, "endLine": 45, "n": 1, "label": "acc += 41;" },
+                { "id": 45, "k": "stmt", "line": 46, "endLine": 46, "n": 1, "label": "acc += 42;" },
+                { "id": 46, "k": "stmt", "line": 47, "endLine": 47, "n": 1, "label": "acc += 43;" },
+                { "id": 47, "k": "stmt", "line": 48, "endLine": 48, "n": 1, "label": "acc += 44;" },
+                { "id": 48, "k": "stmt", "line": 49, "endLine": 49, "n": 1, "label": "acc += 45;" },
+                { "id": 49, "k": "stmt", "line": 50, "endLine": 50, "n": 1, "label": "acc += 46;" },
+                { "id": 50, "k": "stmt", "line": 51, "endLine": 51, "n": 1, "label": "acc += 47;" },
+                { "id": 51, "k": "stmt", "line": 52, "endLine": 52, "n": 1, "label": "acc += 48;" },
+                { "id": 52, "k": "stmt", "line": 53, "endLine": 53, "n": 1, "label": "acc += 49;" },
+                { "id": 53, "k": "stmt", "line": 54, "endLine": 54, "n": 1, "label": "acc += 50;" },
+                { "id": 54, "k": "stmt", "line": 55, "endLine": 55, "n": 1, "label": "acc += 51;" },
+                { "id": 55, "k": "stmt", "line": 56, "endLine": 56, "n": 1, "label": "acc += 52;" },
+                { "id": 56, "k": "stmt", "line": 57, "endLine": 57, "n": 1, "label": "acc += 53;" },
+                { "id": 57, "k": "stmt", "line": 58, "endLine": 58, "n": 1, "label": "acc += 54;" },
+                { "id": 58, "k": "stmt", "line": 59, "endLine": 59, "n": 1, "label": "acc += 55;" },
+                {
+                  "id": 59,
+                  "k": "if",
+                  "line": 60,
+                  "endLine": 62,
+                  "n": 1,
+                  "label": "req.flag2",
+                  "decisions": ["if#2"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 60,
+                      "n": 0,
+                      "body": [{ "id": 61, "k": "stmt", "line": 61, "endLine": 61, "n": 0, "label": "acc -= 2;" }]
+                    },
+                    { "label": "else", "line": 62, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 62, "k": "stmt", "line": 63, "endLine": 63, "n": 1, "label": "acc += 58;" },
+                { "id": 63, "k": "stmt", "line": 64, "endLine": 64, "n": 1, "label": "acc += 59;" },
+                { "id": 64, "k": "stmt", "line": 65, "endLine": 65, "n": 1, "label": "acc += 60;" },
+                { "id": 65, "k": "stmt", "line": 66, "endLine": 66, "n": 1, "label": "acc += 61;" },
+                { "id": 66, "k": "stmt", "line": 67, "endLine": 67, "n": 1, "label": "acc += 62;" },
+                { "id": 67, "k": "stmt", "line": 68, "endLine": 68, "n": 1, "label": "acc += 63;" },
+                { "id": 68, "k": "stmt", "line": 69, "endLine": 69, "n": 1, "label": "acc += 64;" },
+                { "id": 69, "k": "stmt", "line": 70, "endLine": 70, "n": 1, "label": "acc += 65;" },
+                { "id": 70, "k": "stmt", "line": 71, "endLine": 71, "n": 1, "label": "acc += 66;" },
+                { "id": 71, "k": "stmt", "line": 72, "endLine": 72, "n": 1, "label": "acc += 67;" },
+                { "id": 72, "k": "stmt", "line": 73, "endLine": 73, "n": 1, "label": "acc += 68;" },
+                { "id": 73, "k": "stmt", "line": 74, "endLine": 74, "n": 1, "label": "acc += 69;" },
+                { "id": 74, "k": "stmt", "line": 75, "endLine": 75, "n": 1, "label": "acc += 70;" },
+                { "id": 75, "k": "stmt", "line": 76, "endLine": 76, "n": 1, "label": "acc += 71;" },
+                { "id": 76, "k": "stmt", "line": 77, "endLine": 77, "n": 1, "label": "acc += 72;" },
+                { "id": 77, "k": "stmt", "line": 78, "endLine": 78, "n": 1, "label": "acc += 73;" },
+                { "id": 78, "k": "stmt", "line": 79, "endLine": 79, "n": 1, "label": "acc += 74;" },
+                {
+                  "id": 79,
+                  "k": "if",
+                  "line": 80,
+                  "endLine": 82,
+                  "n": 1,
+                  "label": "req.flag3",
+                  "decisions": ["if#3"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 80,
+                      "n": 0,
+                      "body": [{ "id": 81, "k": "stmt", "line": 81, "endLine": 81, "n": 0, "label": "acc -= 3;" }]
+                    },
+                    { "label": "else", "line": 82, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 82, "k": "stmt", "line": 83, "endLine": 83, "n": 1, "label": "acc += 77;" },
+                { "id": 83, "k": "stmt", "line": 84, "endLine": 84, "n": 1, "label": "acc += 78;" },
+                { "id": 84, "k": "stmt", "line": 85, "endLine": 85, "n": 1, "label": "acc += 79;" },
+                { "id": 85, "k": "stmt", "line": 86, "endLine": 86, "n": 1, "label": "acc += 80;" },
+                { "id": 86, "k": "stmt", "line": 87, "endLine": 87, "n": 1, "label": "acc += 81;" },
+                { "id": 87, "k": "stmt", "line": 88, "endLine": 88, "n": 1, "label": "acc += 82;" },
+                { "id": 88, "k": "stmt", "line": 89, "endLine": 89, "n": 1, "label": "acc += 83;" },
+                { "id": 89, "k": "stmt", "line": 90, "endLine": 90, "n": 1, "label": "acc += 84;" },
+                { "id": 90, "k": "stmt", "line": 91, "endLine": 91, "n": 1, "label": "acc += 85;" },
+                { "id": 91, "k": "stmt", "line": 92, "endLine": 92, "n": 1, "label": "acc += 86;" },
+                { "id": 92, "k": "stmt", "line": 93, "endLine": 93, "n": 1, "label": "acc += 87;" },
+                { "id": 93, "k": "stmt", "line": 94, "endLine": 94, "n": 1, "label": "acc += 88;" },
+                { "id": 94, "k": "stmt", "line": 95, "endLine": 95, "n": 1, "label": "acc += 89;" },
+                { "id": 95, "k": "stmt", "line": 96, "endLine": 96, "n": 1, "label": "acc += 90;" },
+                { "id": 96, "k": "stmt", "line": 97, "endLine": 97, "n": 1, "label": "acc += 91;" },
+                { "id": 97, "k": "stmt", "line": 98, "endLine": 98, "n": 1, "label": "acc += 92;" },
+                { "id": 98, "k": "stmt", "line": 99, "endLine": 99, "n": 1, "label": "acc += 93;" },
+                {
+                  "id": 99,
+                  "k": "if",
+                  "line": 100,
+                  "endLine": 102,
+                  "n": 1,
+                  "label": "req.flag4",
+                  "decisions": ["if#4"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 100,
+                      "n": 0,
+                      "body": [{ "id": 101, "k": "stmt", "line": 101, "endLine": 101, "n": 0, "label": "acc -= 4;" }]
+                    },
+                    { "label": "else", "line": 102, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 102, "k": "stmt", "line": 103, "endLine": 103, "n": 1, "label": "acc += 96;" },
+                { "id": 103, "k": "stmt", "line": 104, "endLine": 104, "n": 1, "label": "acc += 97;" },
+                { "id": 104, "k": "stmt", "line": 105, "endLine": 105, "n": 1, "label": "acc += 98;" },
+                { "id": 105, "k": "stmt", "line": 106, "endLine": 106, "n": 1, "label": "acc += 99;" },
+                { "id": 106, "k": "stmt", "line": 107, "endLine": 107, "n": 1, "label": "acc += 100;" },
+                { "id": 107, "k": "stmt", "line": 108, "endLine": 108, "n": 1, "label": "acc += 101;" },
+                { "id": 108, "k": "stmt", "line": 109, "endLine": 109, "n": 1, "label": "acc += 102;" },
+                { "id": 109, "k": "stmt", "line": 110, "endLine": 110, "n": 1, "label": "acc += 103;" },
+                { "id": 110, "k": "stmt", "line": 111, "endLine": 111, "n": 1, "label": "acc += 104;" },
+                { "id": 111, "k": "stmt", "line": 112, "endLine": 112, "n": 1, "label": "acc += 105;" },
+                { "id": 112, "k": "stmt", "line": 113, "endLine": 113, "n": 1, "label": "acc += 106;" },
+                { "id": 113, "k": "stmt", "line": 114, "endLine": 114, "n": 1, "label": "acc += 107;" },
+                { "id": 114, "k": "stmt", "line": 115, "endLine": 115, "n": 1, "label": "acc += 108;" },
+                { "id": 115, "k": "stmt", "line": 116, "endLine": 116, "n": 1, "label": "acc += 109;" },
+                { "id": 116, "k": "stmt", "line": 117, "endLine": 117, "n": 1, "label": "acc += 110;" },
+                { "id": 117, "k": "stmt", "line": 118, "endLine": 118, "n": 1, "label": "acc += 111;" },
+                { "id": 118, "k": "stmt", "line": 119, "endLine": 119, "n": 1, "label": "acc += 112;" },
+                {
+                  "id": 119,
+                  "k": "if",
+                  "line": 120,
+                  "endLine": 122,
+                  "n": 1,
+                  "label": "req.flag5",
+                  "decisions": ["if#5"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 120,
+                      "n": 0,
+                      "body": [{ "id": 121, "k": "stmt", "line": 121, "endLine": 121, "n": 0, "label": "acc -= 5;" }]
+                    },
+                    { "label": "else", "line": 122, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 122, "k": "stmt", "line": 123, "endLine": 123, "n": 1, "label": "acc += 115;" },
+                { "id": 123, "k": "stmt", "line": 124, "endLine": 124, "n": 1, "label": "acc += 116;" },
+                { "id": 124, "k": "stmt", "line": 125, "endLine": 125, "n": 1, "label": "acc += 117;" },
+                { "id": 125, "k": "stmt", "line": 126, "endLine": 126, "n": 1, "label": "acc += 118;" },
+                { "id": 126, "k": "stmt", "line": 127, "endLine": 127, "n": 1, "label": "acc += 119;" },
+                { "id": 127, "k": "stmt", "line": 128, "endLine": 128, "n": 1, "label": "acc += 120;" },
+                { "id": 128, "k": "stmt", "line": 129, "endLine": 129, "n": 1, "label": "acc += 121;" },
+                { "id": 129, "k": "stmt", "line": 130, "endLine": 130, "n": 1, "label": "acc += 122;" },
+                { "id": 130, "k": "stmt", "line": 131, "endLine": 131, "n": 1, "label": "acc += 123;" },
+                { "id": 131, "k": "stmt", "line": 132, "endLine": 132, "n": 1, "label": "acc += 124;" },
+                { "id": 132, "k": "stmt", "line": 133, "endLine": 133, "n": 1, "label": "acc += 125;" },
+                { "id": 133, "k": "stmt", "line": 134, "endLine": 134, "n": 1, "label": "acc += 126;" },
+                { "id": 134, "k": "stmt", "line": 135, "endLine": 135, "n": 1, "label": "acc += 127;" },
+                { "id": 135, "k": "stmt", "line": 136, "endLine": 136, "n": 1, "label": "acc += 128;" },
+                { "id": 136, "k": "stmt", "line": 137, "endLine": 137, "n": 1, "label": "acc += 129;" },
+                { "id": 137, "k": "stmt", "line": 138, "endLine": 138, "n": 1, "label": "acc += 130;" },
+                { "id": 138, "k": "stmt", "line": 139, "endLine": 139, "n": 1, "label": "acc += 131;" },
+                {
+                  "id": 139,
+                  "k": "if",
+                  "line": 140,
+                  "endLine": 142,
+                  "n": 1,
+                  "label": "req.flag6",
+                  "decisions": ["if#6"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 140,
+                      "n": 0,
+                      "body": [{ "id": 141, "k": "stmt", "line": 141, "endLine": 141, "n": 0, "label": "acc -= 6;" }]
+                    },
+                    { "label": "else", "line": 142, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 142, "k": "stmt", "line": 143, "endLine": 143, "n": 1, "label": "acc += 134;" },
+                { "id": 143, "k": "stmt", "line": 144, "endLine": 144, "n": 1, "label": "acc += 135;" },
+                { "id": 144, "k": "stmt", "line": 145, "endLine": 145, "n": 1, "label": "acc += 136;" },
+                { "id": 145, "k": "stmt", "line": 146, "endLine": 146, "n": 1, "label": "acc += 137;" },
+                { "id": 146, "k": "stmt", "line": 147, "endLine": 147, "n": 1, "label": "acc += 138;" },
+                { "id": 147, "k": "stmt", "line": 148, "endLine": 148, "n": 1, "label": "acc += 139;" },
+                { "id": 148, "k": "stmt", "line": 149, "endLine": 149, "n": 1, "label": "acc += 140;" },
+                { "id": 149, "k": "stmt", "line": 150, "endLine": 150, "n": 1, "label": "acc += 141;" },
+                { "id": 150, "k": "stmt", "line": 151, "endLine": 151, "n": 1, "label": "acc += 142;" },
+                { "id": 151, "k": "stmt", "line": 152, "endLine": 152, "n": 1, "label": "acc += 143;" },
+                { "id": 152, "k": "stmt", "line": 153, "endLine": 153, "n": 1, "label": "acc += 144;" },
+                { "id": 153, "k": "stmt", "line": 154, "endLine": 154, "n": 1, "label": "acc += 145;" },
+                { "id": 154, "k": "stmt", "line": 155, "endLine": 155, "n": 1, "label": "acc += 146;" },
+                { "id": 155, "k": "stmt", "line": 156, "endLine": 156, "n": 1, "label": "acc += 147;" },
+                { "id": 156, "k": "stmt", "line": 157, "endLine": 157, "n": 1, "label": "acc += 148;" },
+                { "id": 157, "k": "stmt", "line": 158, "endLine": 158, "n": 1, "label": "acc += 149;" },
+                { "id": 158, "k": "stmt", "line": 159, "endLine": 159, "n": 1, "label": "acc += 150;" },
+                {
+                  "id": 159,
+                  "k": "if",
+                  "line": 160,
+                  "endLine": 162,
+                  "n": 1,
+                  "label": "req.flag7",
+                  "decisions": ["if#7"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 160,
+                      "n": 0,
+                      "body": [{ "id": 161, "k": "stmt", "line": 161, "endLine": 161, "n": 0, "label": "acc -= 7;" }]
+                    },
+                    { "label": "else", "line": 162, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 162, "k": "stmt", "line": 163, "endLine": 163, "n": 1, "label": "acc += 153;" },
+                { "id": 163, "k": "stmt", "line": 164, "endLine": 164, "n": 1, "label": "acc += 154;" },
+                { "id": 164, "k": "stmt", "line": 165, "endLine": 165, "n": 1, "label": "acc += 155;" },
+                { "id": 165, "k": "stmt", "line": 166, "endLine": 166, "n": 1, "label": "acc += 156;" },
+                { "id": 166, "k": "stmt", "line": 167, "endLine": 167, "n": 1, "label": "acc += 157;" },
+                { "id": 167, "k": "stmt", "line": 168, "endLine": 168, "n": 1, "label": "acc += 158;" },
+                { "id": 168, "k": "stmt", "line": 169, "endLine": 169, "n": 1, "label": "acc += 159;" },
+                { "id": 169, "k": "stmt", "line": 170, "endLine": 170, "n": 1, "label": "acc += 160;" },
+                { "id": 170, "k": "stmt", "line": 171, "endLine": 171, "n": 1, "label": "acc += 161;" },
+                { "id": 171, "k": "stmt", "line": 172, "endLine": 172, "n": 1, "label": "acc += 162;" },
+                { "id": 172, "k": "stmt", "line": 173, "endLine": 173, "n": 1, "label": "acc += 163;" },
+                { "id": 173, "k": "stmt", "line": 174, "endLine": 174, "n": 1, "label": "acc += 164;" },
+                { "id": 174, "k": "stmt", "line": 175, "endLine": 175, "n": 1, "label": "acc += 165;" },
+                { "id": 175, "k": "stmt", "line": 176, "endLine": 176, "n": 1, "label": "acc += 166;" },
+                { "id": 176, "k": "stmt", "line": 177, "endLine": 177, "n": 1, "label": "acc += 167;" },
+                { "id": 177, "k": "stmt", "line": 178, "endLine": 178, "n": 1, "label": "acc += 168;" },
+                { "id": 178, "k": "stmt", "line": 179, "endLine": 179, "n": 1, "label": "acc += 169;" },
+                {
+                  "id": 179,
+                  "k": "if",
+                  "line": 180,
+                  "endLine": 182,
+                  "n": 1,
+                  "label": "req.flag8",
+                  "decisions": ["if#8"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 180,
+                      "n": 0,
+                      "body": [{ "id": 181, "k": "stmt", "line": 181, "endLine": 181, "n": 0, "label": "acc -= 8;" }]
+                    },
+                    { "label": "else", "line": 182, "n": 1, "implied": true }
+                  ]
+                },
+                { "id": 182, "k": "stmt", "line": 183, "endLine": 183, "n": 1, "label": "acc += 172;" },
+                { "id": 183, "k": "stmt", "line": 184, "endLine": 184, "n": 1, "label": "acc += 173;" },
+                { "id": 184, "k": "stmt", "line": 185, "endLine": 185, "n": 1, "label": "acc += 174;" },
+                { "id": 185, "k": "stmt", "line": 186, "endLine": 186, "n": 1, "label": "acc += 175;" },
+                { "id": 186, "k": "stmt", "line": 187, "endLine": 187, "n": 1, "label": "acc += 176;" },
+                { "id": 187, "k": "stmt", "line": 188, "endLine": 188, "n": 1, "label": "acc += 177;" },
+                { "id": 188, "k": "stmt", "line": 189, "endLine": 189, "n": 1, "label": "acc += 178;" },
+                { "id": 189, "k": "stmt", "line": 190, "endLine": 190, "n": 1, "label": "acc += 179;" },
+                { "id": 190, "k": "stmt", "line": 191, "endLine": 191, "n": 1, "label": "acc += 180;" },
+                { "id": 191, "k": "stmt", "line": 192, "endLine": 192, "n": 1, "label": "acc += 181;" },
+                { "id": 192, "k": "stmt", "line": 193, "endLine": 193, "n": 1, "label": "acc += 182;" },
+                { "id": 193, "k": "stmt", "line": 194, "endLine": 194, "n": 1, "label": "acc += 183;" },
+                { "id": 194, "k": "stmt", "line": 195, "endLine": 195, "n": 1, "label": "acc += 184;" },
+                { "id": 195, "k": "stmt", "line": 196, "endLine": 196, "n": 1, "label": "acc += 185;" },
+                { "id": 196, "k": "stmt", "line": 197, "endLine": 197, "n": 1, "label": "acc += 186;" },
+                { "id": 197, "k": "stmt", "line": 198, "endLine": 198, "n": 1, "label": "acc += 187;" },
+                { "id": 198, "k": "stmt", "line": 199, "endLine": 199, "n": 1, "label": "acc += 188;" },
+                {
+                  "id": 199,
+                  "k": "if",
+                  "line": 200,
+                  "endLine": 202,
+                  "n": 1,
+                  "label": "req.flag9",
+                  "decisions": ["if#9"],
+                  "arms": [
+                    {
+                      "label": "then",
+                      "line": 200,
+                      "n": 0,
+                      "body": [{ "id": 201, "k": "stmt", "line": 201, "endLine": 201, "n": 0, "label": "acc -= 9;" }]
+                    },
+                    { "label": "else", "line": 202, "n": 1, "implied": true }
+                  ]
+                },
+                {
+                  "id": 202,
+                  "k": "loop",
+                  "line": 203,
+                  "endLine": 209,
+                  "n": 1,
+                  "label": "for (const x of req.items)",
+                  "passes": 3,
+                  "body": [
+                    {
+                      "id": 204,
+                      "k": "if",
+                      "line": 204,
+                      "endLine": 208,
+                      "n": 3,
+                      "label": "x > 1",
+                      "decisions": ["if#10"],
+                      "arms": [
+                        {
+                          "label": "then",
+                          "line": 204,
+                          "n": 2,
+                          "body": [
+                            { "id": 206, "k": "stmt", "line": 205, "endLine": 205, "n": 2, "label": "acc += x;" }
+                          ]
+                        },
+                        {
+                          "label": "else",
+                          "line": 206,
+                          "n": 1,
+                          "body": [
+                            { "id": 208, "k": "stmt", "line": 207, "endLine": 207, "n": 1, "label": "acc -= x;" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                { "id": 209, "k": "stmt", "line": 210, "endLine": 210, "n": 1, "label": "acc += 195;" },
+                { "id": 210, "k": "stmt", "line": 211, "endLine": 211, "n": 1, "label": "acc += 196;" },
+                { "id": 211, "k": "stmt", "line": 212, "endLine": 212, "n": 1, "label": "acc += 197;" },
+                { "id": 212, "k": "stmt", "line": 213, "endLine": 213, "n": 1, "label": "acc += 198;" },
+                {
+                  "id": 213,
+                  "k": "exit",
+                  "line": 214,
+                  "endLine": 214,
+                  "n": 1,
+                  "label": "return acc;",
+                  "exit": "return"
+                }
+              ]
+            },
+            "nodeCount": 214
+          }
+        }
+      },
+      "analysis": {
+        "text": "Exited: return at GET /big L214",
+        "exit": { "fnKey": "big.cjs:1:big", "kind": "return", "line": 214, "nodeId": 213 },
+        "ms": 25.9
+      }
+    },
+    "source": {
+      "big.cjs:1:big": {
+        "start": 1,
+        "lines": [
+          "function big(req) {",
+          "  let acc = 0;",
+          "  acc += 1;",
+          "  acc += 2;",
+          "  acc += 3;",
+          "  acc += 4;",
+          "  acc += 5;",
+          "  acc += 6;",
+          "  acc += 7;",
+          "  acc += 8;",
+          "  acc += 9;",
+          "  acc += 10;",
+          "  acc += 11;",
+          "  acc += 12;",
+          "  acc += 13;",
+          "  acc += 14;",
+          "  acc += 15;",
+          "  acc += 16;",
+          "  acc += 17;",
+          "  if (req.flag0) {",
+          "    acc -= 0;",
+          "  }",
+          "  acc += 20;",
+          "  acc += 21;",
+          "  acc += 22;",
+          "  acc += 23;",
+          "  acc += 24;",
+          "  acc += 25;",
+          "  acc += 26;",
+          "  acc += 27;",
+          "  acc += 28;",
+          "  acc += 29;",
+          "  acc += 30;",
+          "  acc += 31;",
+          "  acc += 32;",
+          "  acc += 33;",
+          "  acc += 34;",
+          "  acc += 35;",
+          "  acc += 36;",
+          "  if (req.flag1) {",
+          "    acc -= 1;",
+          "  }",
+          "  acc += 39;",
+          "  acc += 40;",
+          "  acc += 41;",
+          "  acc += 42;",
+          "  acc += 43;",
+          "  acc += 44;",
+          "  acc += 45;",
+          "  acc += 46;",
+          "  acc += 47;",
+          "  acc += 48;",
+          "  acc += 49;",
+          "  acc += 50;",
+          "  acc += 51;",
+          "  acc += 52;",
+          "  acc += 53;",
+          "  acc += 54;",
+          "  acc += 55;",
+          "  if (req.flag2) {",
+          "    acc -= 2;",
+          "  }",
+          "  acc += 58;",
+          "  acc += 59;",
+          "  acc += 60;",
+          "  acc += 61;",
+          "  acc += 62;",
+          "  acc += 63;",
+          "  acc += 64;",
+          "  acc += 65;",
+          "  acc += 66;",
+          "  acc += 67;",
+          "  acc += 68;",
+          "  acc += 69;",
+          "  acc += 70;",
+          "  acc += 71;",
+          "  acc += 72;",
+          "  acc += 73;",
+          "  acc += 74;",
+          "  if (req.flag3) {",
+          "    acc -= 3;",
+          "  }",
+          "  acc += 77;",
+          "  acc += 78;",
+          "  acc += 79;",
+          "  acc += 80;",
+          "  acc += 81;",
+          "  acc += 82;",
+          "  acc += 83;",
+          "  acc += 84;",
+          "  acc += 85;",
+          "  acc += 86;",
+          "  acc += 87;",
+          "  acc += 88;",
+          "  acc += 89;",
+          "  acc += 90;",
+          "  acc += 91;",
+          "  acc += 92;",
+          "  acc += 93;",
+          "  if (req.flag4) {",
+          "    acc -= 4;",
+          "  }",
+          "  acc += 96;",
+          "  acc += 97;",
+          "  acc += 98;",
+          "  acc += 99;",
+          "  acc += 100;",
+          "  acc += 101;",
+          "  acc += 102;",
+          "  acc += 103;",
+          "  acc += 104;",
+          "  acc += 105;",
+          "  acc += 106;",
+          "  acc += 107;",
+          "  acc += 108;",
+          "  acc += 109;",
+          "  acc += 110;",
+          "  acc += 111;",
+          "  acc += 112;",
+          "  if (req.flag5) {",
+          "    acc -= 5;",
+          "  }",
+          "  acc += 115;",
+          "  acc += 116;",
+          "  acc += 117;",
+          "  acc += 118;",
+          "  acc += 119;",
+          "  acc += 120;",
+          "  acc += 121;",
+          "  acc += 122;",
+          "  acc += 123;",
+          "  acc += 124;",
+          "  acc += 125;",
+          "  acc += 126;",
+          "  acc += 127;",
+          "  acc += 128;",
+          "  acc += 129;",
+          "  acc += 130;",
+          "  acc += 131;",
+          "  if (req.flag6) {",
+          "    acc -= 6;",
+          "  }",
+          "  acc += 134;",
+          "  acc += 135;",
+          "  acc += 136;",
+          "  acc += 137;",
+          "  acc += 138;",
+          "  acc += 139;",
+          "  acc += 140;",
+          "  acc += 141;",
+          "  acc += 142;",
+          "  acc += 143;",
+          "  acc += 144;",
+          "  acc += 145;",
+          "  acc += 146;",
+          "  acc += 147;",
+          "  acc += 148;",
+          "  acc += 149;",
+          "  acc += 150;",
+          "  if (req.flag7) {",
+          "    acc -= 7;",
+          "  }",
+          "  acc += 153;",
+          "  acc += 154;",
+          "  acc += 155;",
+          "  acc += 156;",
+          "  acc += 157;",
+          "  acc += 158;",
+          "  acc += 159;",
+          "  acc += 160;",
+          "  acc += 161;",
+          "  acc += 162;",
+          "  acc += 163;",
+          "  acc += 164;",
+          "  acc += 165;",
+          "  acc += 166;",
+          "  acc += 167;",
+          "  acc += 168;",
+          "  acc += 169;",
+          "  if (req.flag8) {",
+          "    acc -= 8;",
+          "  }",
+          "  acc += 172;",
+          "  acc += 173;",
+          "  acc += 174;",
+          "  acc += 175;",
+          "  acc += 176;",
+          "  acc += 177;",
+          "  acc += 178;",
+          "  acc += 179;",
+          "  acc += 180;",
+          "  acc += 181;",
+          "  acc += 182;",
+          "  acc += 183;",
+          "  acc += 184;",
+          "  acc += 185;",
+          "  acc += 186;",
+          "  acc += 187;",
+          "  acc += 188;",
+          "  if (req.flag9) {",
+          "    acc -= 9;",
+          "  }",
+          "  for (const x of req.items) {",
+          "    if (x > 1) {",
+          "      acc += x;",
+          "    } else {",
+          "      acc -= x;",
+          "    }",
+          "  }",
+          "  acc += 195;",
+          "  acc += 196;",
+          "  acc += 197;",
+          "  acc += 198;",
+          "  return acc;",
+          "}"
+        ]
+      }
+    }
+  },
+  "throws": {
+    "payload": {
+      "v": 2,
+      "traceId": "tr_new",
+      "replayOf": "tr_src",
+      "quality": "exact",
+      "contamination": [],
+      "warnings": [],
+      "window": {
+        "quietMs": 0,
+        "settleMs": 0,
+        "taint": [],
+        "retries": 0,
+        "attempts": [],
+        "takeMs": [0, 0],
+        "scripts": 1,
+        "totalScripts": 1
+      },
+      "lanes": [
+        {
+          "spanId": "s1",
+          "kind": "handler",
+          "name": "GET /throws",
+          "depth": 0,
+          "calls": 1,
+          "truth": { "t": "taken", "n": 1 },
+          "fnKey": "throws.cjs:8:caller",
+          "threw": true
+        }
+      ],
+      "functions": {
+        "throws.cjs:8:caller": {
+          "key": "throws.cjs:8:caller",
+          "name": "caller",
+          "file": "throws.cjs",
+          "line": 8,
+          "startLine": 8,
+          "endLine": 14,
+          "mapping": "identity",
+          "calls": { "hops": 1, "coverage": 1, "checked": true },
+          "truth": { "t": "taken", "n": 1 },
+          "blocks": true,
+          "errors": { "hops": 1, "lines": [10] },
+          "analysis": {
+            "status": "ok",
+            "calls": 1,
+            "blended": false,
+            "decisions": [],
+            "loops": [],
+            "exits": [{ "kind": "exception", "line": 10, "count": 1 }],
+            "graph": {
+              "id": 0,
+              "k": "block",
+              "line": 8,
+              "endLine": 14,
+              "n": 1,
+              "body": [
+                { "id": 1, "k": "stmt", "line": 9, "endLine": 9, "n": 1, "label": "let a = 1;" },
+                { "id": 2, "k": "stmt", "line": 10, "endLine": 10, "n": 1, "label": "boom(x);", "calls": ["boom"] },
+                { "id": 3, "k": "stmt", "line": 11, "endLine": 11, "n": null, "why": "after-throw", "label": "a = 2;" },
+                {
+                  "id": 4,
+                  "k": "stmt",
+                  "line": 12,
+                  "endLine": 12,
+                  "n": null,
+                  "why": "after-throw",
+                  "label": "a += 3;"
+                },
+                {
+                  "id": 5,
+                  "k": "exit",
+                  "line": 13,
+                  "endLine": 13,
+                  "n": null,
+                  "why": "after-throw",
+                  "label": "return a;",
+                  "exit": "return"
+                }
+              ]
+            },
+            "nodeCount": 6
+          }
+        }
+      },
+      "analysis": {
+        "text": "Threw: exception in GET /throws L10",
+        "exit": { "fnKey": "throws.cjs:8:caller", "kind": "exception", "line": 10 },
+        "ms": 15.6
+      }
+    },
+    "source": {
+      "throws.cjs:8:caller": {
+        "start": 8,
+        "lines": ["function caller(x) {", "  let a = 1;", "  boom(x);", "  a = 2;", "  a += 3;", "  return a;", "}"]
+      }
+    }
+  }
+}

@@ -196,6 +196,8 @@ export interface PathNode {
   calls?: string[];
   /** Calls whose callee the trace recorded as a hop of this function (analyze.ts links them). */
   callees?: Array<{ name: string; fnKey: string }>;
+  /** Calls left unlinked because more than one recorded hop of this function matches the name. */
+  ambiguous?: string[];
   /** Functions created here (callbacks, class members); `fnKey` when the payload has one. */
   fns?: Array<{ id: number; name: string; line: number; fnKey?: string }>;
   awaits?: number;

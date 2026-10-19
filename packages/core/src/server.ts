@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
@@ -249,12 +250,16 @@ addRoute("GET", "/api/traces/:id/request", ({ rt, params, res }) => {
 addRoute("GET", "/api/source", ({ rt, url, res }) => {
   const file = rt.resolveFile(url.searchParams.get("file") ?? "");
   if (!file) return json(res, 404, { error: "File not found in this project" });
-  const all = fs.readFileSync(file, "utf8").split("\n");
+  const text = fs.readFileSync(file, "utf8");
+  const all = text.split("\n");
+  // The same sha1/12 a path trace records per function (path/capture.ts): the UI checks the lines it
+  // lays counts over are the ones that were traced.
+  const hash = createHash("sha1").update(text).digest("hex").slice(0, 12);
   const line = Number(url.searchParams.get("line") || 1);
   const ctx = Number(url.searchParams.get("context") || 10);
   const start = Math.max(1, line - ctx);
   const end = Math.min(all.length, line + ctx);
-  json(res, 200, { file: url.searchParams.get("file"), line, start, lines: all.slice(start - 1, end) });
+  json(res, 200, { file: url.searchParams.get("file"), line, start, lines: all.slice(start - 1, end), hash });
 });
 
 addRoute("GET", "/api/events", ({ rt, req, res }) => {

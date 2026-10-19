@@ -34,9 +34,11 @@ import {
   trailSummary,
   verdictModel,
 } from "../state/path";
+import { panelDo, pathPanel } from "../state/pathPanel";
 import { openSourceAt } from "../state/source";
 import { frameworkCopy, loadTrace, metaState } from "../state/store";
 import "../styles/path.css";
+import { PathFunction } from "./PathFunction";
 
 /*
  * Path mode of the Journey pane (plan P3, mockup B): on a normal trace, the Trace path action (or why
@@ -341,31 +343,48 @@ function PathBody({ payload }: { payload: PathPayload }) {
   const model = useMemo(() => trailModel(payload), [payload]);
   const v = verdictModel(payload);
   const notes = [...payload.contamination.map((c) => `contaminated: ${c}`), ...payload.warnings];
+  const panel = pathPanel.value?.traceId === payload.traceId ? pathPanel.value : null;
+  // Opening another path trace closes the panel of the last one.
+  useEffect(() => {
+    if (pathPanel.peek() && pathPanel.peek()!.traceId !== payload.traceId) panelDo({ t: "close" });
+  }, [payload.traceId]);
+  const open = (fnKey: string | undefined, file?: string, line?: number) => {
+    if (fnKey && payload.functions[fnKey]) panelDo({ t: "open", traceId: payload.traceId, fnKey, line });
+    else openAt(file, line);
+  };
   return (
-    <>
-      {v.at ? (
-        <button
-          type="button"
-          class={`path-verdict path-v-${v.tone}`}
-          title="Open the exit's source"
-          onClick={() => openSourceAt(v.at!.file, v.at!.line)}
-        >
-          {v.text}
-        </button>
-      ) : (
-        <p class={`path-verdict path-v-${v.tone}`}>{v.text}</p>
-      )}
-      <div class="path-sub dim">{trailSummary(model)}</div>
-      {notes.length > 0 && (
-        <ul class="path-warnings" aria-label="Capture warnings">
-          {notes.map((n) => (
-            <li key={n}>{n}</li>
-          ))}
-        </ul>
-      )}
-      <Trail key={payload.traceId} traceId={payload.traceId} rows={model.rows} />
-    </>
+    <div class={`path-split${panel ? " has-panel" : ""}`}>
+      <div class="path-split-trail">
+        {v.at ? (
+          <button
+            type="button"
+            class={`path-verdict path-v-${v.tone}`}
+            title="Open the exit's source"
+            onClick={() => openSourceAt(v.at!.file, v.at!.line)}
+          >
+            {v.text}
+          </button>
+        ) : (
+          <p class={`path-verdict path-v-${v.tone}`}>{v.text}</p>
+        )}
+        <div class="path-sub dim">{trailSummary(model)}</div>
+        {notes.length > 0 && (
+          <ul class="path-warnings" aria-label="Capture warnings">
+            {notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        )}
+        <Trail key={payload.traceId} traceId={payload.traceId} rows={model.rows} open={open} panelOpen={!!panel} />
+      </div>
+      {panel && <PathFunction payload={payload} state={panel} />}
+    </div>
   );
+}
+
+/** The trail is hidden behind the panel (narrower than the split view). */
+function trailHidden(): boolean {
+  return !!pathPanel.value && !(typeof matchMedia === "function" && matchMedia("(min-width: 1100px)").matches);
 }
 
 /* -------------------------------------------------------------------- trail */
@@ -374,13 +393,27 @@ function openAt(file: string | undefined, line: number | undefined): void {
   if (file && line) openSourceAt(file, line);
 }
 
-function Trail({ rows, traceId }: { rows: TrailRow[]; traceId: string }) {
+type OpenFn = (fnKey: string | undefined, file?: string, line?: number) => void;
+
+function Trail({
+  rows,
+  traceId,
+  open: openFn,
+  panelOpen,
+}: { rows: TrailRow[]; traceId: string; open: OpenFn; panelOpen: boolean }) {
   const [rawCursor, setCursor] = useState(0);
   const cursor = laneCursor(rawCursor, rows.length);
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const listRef = useRef<HTMLOListElement>(null);
-  const state = useRef({ rows, cursor });
-  state.current = { rows, cursor };
+  const state = useRef({ rows, cursor, openFn });
+  state.current = { rows, cursor, openFn };
+  // Back from the panel: focus returns to the lane it was opened from.
+  const wasOpen = useRef(panelOpen);
+  useEffect(() => {
+    if (wasOpen.current && !panelOpen)
+      listRef.current?.querySelectorAll<HTMLElement>(".path-lane-name")[state.current.cursor]?.focus();
+    wasOpen.current = panelOpen;
+  }, [panelOpen]);
   // After Trace path (or x on a path trace), the trail takes focus so j / k reach the lanes.
   const focusFor = pathFocus.value;
   useEffect(() => {
@@ -395,20 +428,20 @@ function Trail({ rows, traceId }: { rows: TrailRow[]; traceId: string }) {
       setCursor(n);
       listRef.current?.querySelectorAll<HTMLElement>(".path-lane-name")[n]?.focus();
     };
-    const opts = { when: () => pathMode.value, hint: "lane" };
+    const opts = { when: () => pathMode.value && !trailHidden(), hint: "lane" };
     const offs = [
       register("canvas", "j", "Next lane of the path", () => focusRow(state.current.cursor + 1), opts),
       register("canvas", "k", "Previous lane of the path", () => focusRow(state.current.cursor - 1), opts),
       register(
         "canvas",
         "Enter",
-        "Open the lane's source",
+        "Open the lane's function (flowchart / source)",
         () => {
           const r = state.current.rows[state.current.cursor];
-          openAt(r?.file, r?.line);
+          state.current.openFn(r?.fnKey, r?.file, r?.line);
         },
         // Only from a lane name: a chip, '+N not reached', the verdict or a link keeps its own Enter.
-        { when: (e) => pathMode.value && (!e || enterOpensLane(e.target)), hint: "source" },
+        { when: (e) => pathMode.value && !trailHidden() && (!e || enterOpensLane(e.target)), hint: "open" },
       ),
     ];
     return () => {
@@ -426,6 +459,7 @@ function Trail({ rows, traceId }: { rows: TrailRow[]; traceId: string }) {
           tabbable={i === cursor}
           seeName={r.seeRow ? rows.find((x) => x.key === r.seeRow)?.name : undefined}
           open={open.has(r.key)}
+          openFn={openFn}
           onFocus={() => setCursor(i)}
           onToggle={() => {
             const next = new Set(open);
@@ -444,6 +478,7 @@ function Lane({
   tabbable,
   seeName,
   open,
+  openFn,
   onFocus,
   onToggle,
 }: {
@@ -451,9 +486,11 @@ function Lane({
   tabbable: boolean;
   seeName?: string;
   open: boolean;
+  openFn: OpenFn;
   onFocus: () => void;
   onToggle: () => void;
 }) {
+  const go = (line?: number) => openFn(row.fnKey, row.file, line ?? row.line);
   const calls = row.hops > 1 ? `x${row.hops}` : `x${row.calls}`;
   const where = row.file ? `${row.file}${row.line ? `:${row.line}` : ""}` : "";
   return (
@@ -464,8 +501,8 @@ function Lane({
           class="path-lane-name mono"
           tabIndex={tabbable ? 0 : -1}
           onFocus={onFocus}
-          onClick={() => openAt(row.file, row.line)}
-          aria-label={`${row.kind} ${row.name}${where ? ` at ${where}` : ""}, ${calls}${row.threw ? ", threw" : ""}. Opens the source.`}
+          onClick={() => go()}
+          aria-label={`${row.kind} ${row.name}${where ? ` at ${where}` : ""}, ${calls}${row.threw ? ", threw" : ""}. ${row.fnKey ? "Opens its flowchart and source." : "Opens the source."}`}
         >
           <span aria-hidden="true">&gt; </span>
           {row.name}
@@ -513,20 +550,20 @@ function Lane({
               tone: "unknown",
               line: row.line,
             }}
-            file={row.file}
+            go={go}
             label={row.unknown}
           />
         ) : (
           <>
             {row.chips.map((c) => (
-              <Chip key={c.id} chip={c} file={row.file} />
+              <Chip key={c.id} chip={c} go={go} />
             ))}
             {row.notReached.length > 0 && (
               <button type="button" class="path-more" aria-expanded={open} onClick={onToggle}>
                 {open ? "- hide not reached" : `+${row.notReached.length} not reached`}
               </button>
             )}
-            {open && row.notReached.map((c) => <Chip key={c.id} chip={c} file={row.file} />)}
+            {open && row.notReached.map((c) => <Chip key={c.id} chip={c} go={go} />)}
             {!row.chips.length && !row.notReached.length && !row.truncated && <span class="dim">no decisions</span>}
           </>
         )}
@@ -535,15 +572,15 @@ function Lane({
   );
 }
 
-function Chip({ chip, file, label }: { chip: PathChip; file?: string; label?: string }) {
+function Chip({ chip, go, label }: { chip: PathChip; go: (line?: number) => void; label?: string }) {
   return (
     <button
       type="button"
       class={`pt-chip pt-chip-${chip.tone}${chip.exit ? " pt-chip-exit" : ""}`}
       title={chip.title}
       data-why={chip.tone === "unknown" ? chip.title : undefined}
-      aria-label={`${chip.title}${chip.line ? `. Opens line ${chip.line}.` : ""}`}
-      onClick={() => openAt(file, chip.line)}
+      aria-label={`${chip.title}${chip.line ? `. Opens its function at line ${chip.line}.` : ""}`}
+      onClick={() => go(chip.line)}
     >
       {chip.tone === "unknown" && chip.text !== "?" && <span aria-hidden="true">? </span>}
       {chip.text}

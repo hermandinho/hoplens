@@ -361,6 +361,30 @@ describe("graph links", () => {
     const inner = nodes(each.analysis!.graph).find((n) => n.k === "exit")!;
     expect(inner.calls).toEqual(["helper"]);
     expect(inner.callees).toBeUndefined();
+    expect(inner.ambiguous).toBeUndefined();
+  });
+
+  test("a call two recorded hops could be is left unlinked and marked ambiguous", async () => {
+    const { cov } = await run(() => m.cbHost([1, 2]));
+    const host = payloadOf(cov, "cbHost");
+    const helper = Object.values(payloadOf(cov, "helper").functions)[0]!;
+    const twin = { ...helper, key: `${helper.key}#twin` };
+    for (const f of [helper, twin]) {
+      host.functions[f.key] = f;
+      host.lanes.push({
+        spanId: f.key,
+        kind: "function",
+        name: "helper",
+        depth: 1,
+        calls: 1,
+        truth: f.truth,
+        fnKey: f.key,
+      });
+    }
+    analyzePayload(host, { analyzer, root: FIXTURES });
+    const call = nodes(Object.values(host.functions)[0]!.analysis!.graph).find((n) => n.label === "helper(0);")!;
+    expect(call.callees).toBeUndefined();
+    expect(call.ambiguous).toEqual(["helper"]);
   });
 });
 

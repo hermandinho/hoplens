@@ -372,6 +372,472 @@ button.path-verdict:focus-visible {
   color: var(--fg);
 }
 
+/* ------------------------------------------------- function panel (P4) */
+
+/* Trail and function panel: side by side at >= 1100px, else the panel takes the trail's place. */
+.path-split {
+  display: grid;
+  gap: 10px 18px;
+  min-width: 0;
+}
+
+.path-split-trail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.path-split.has-panel > .path-split-trail {
+  display: none;
+}
+
+@media (min-width: 1100px) {
+  .path-split.has-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    align-items: start;
+  }
+
+  .path-split.has-panel > .path-split-trail {
+    display: flex;
+  }
+
+  .path-fn {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.path-fn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.path-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.path-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 1;
+  gap: 2px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-label);
+  min-width: 0;
+}
+
+.path-crumbs li {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.path-crumbs li + li::before {
+  content: ">";
+  margin: 0 6px;
+  color: var(--dim);
+}
+
+.path-fn-close {
+  flex: none;
+}
+
+.path-fn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: var(--fs-label);
+}
+
+.path-fn-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.path-fn-head .path-fn-view {
+  margin-left: auto;
+}
+
+.path-fn-unknown {
+  color: var(--path-unknown);
+}
+
+.path-evidence {
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+}
+
+/* flowchart: scrolls sideways inside the panel only */
+.path-flow {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.path-fold-all {
+  position: sticky;
+  left: 0;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.path-flow-cap {
+  position: sticky;
+  left: 0;
+  min-height: 1.4em;
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.pf {
+  display: block;
+  font: 11px var(--font-mono);
+}
+
+.pf text {
+  fill: var(--fg);
+}
+
+.pf-e polyline {
+  fill: none;
+  stroke-linejoin: round;
+}
+
+.pf-e.pf-taken polyline {
+  stroke: var(--path-taken);
+  stroke-width: 2.5;
+}
+
+.pf-e.pf-not polyline {
+  stroke: var(--path-untaken);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.pf-e.pf-unknown polyline {
+  stroke: var(--path-unknown);
+  stroke-width: 1.5;
+  stroke-dasharray: 1 3;
+}
+
+.pf-el {
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3;
+}
+
+.pf-taken > .pf-el {
+  fill: var(--path-taken);
+}
+
+.pf-not > .pf-el,
+.pf-not .pf-t,
+.pf-not .pf-c {
+  fill: var(--path-untaken);
+}
+
+.pf-unknown > .pf-el,
+.pf-unknown .pf-c {
+  fill: var(--path-unknown);
+}
+
+.pf-s {
+  fill: var(--panel-2);
+  stroke: var(--line-3);
+}
+
+.pf-taken .pf-s {
+  stroke: var(--path-taken);
+  stroke-width: 1.5;
+}
+
+.pf-taken .pf-c {
+  fill: var(--path-taken);
+}
+
+.pf-not .pf-s {
+  fill: none;
+  stroke: var(--path-untaken);
+  stroke-dasharray: 3 3;
+}
+
+.pf-unknown .pf-s {
+  fill: url(#pf-hatch);
+  stroke: var(--path-unknown);
+}
+
+.pf-hatch-line {
+  stroke: var(--path-unknown-bg);
+  stroke-width: 4;
+}
+
+.pf-k-entry .pf-t,
+.pf-exit .pf-t {
+  font-weight: 600;
+}
+
+.pf-exit .pf-s {
+  stroke-width: 3;
+}
+
+.pf-frame rect {
+  fill: none;
+  stroke: var(--line-3);
+  stroke-dasharray: 4 3;
+}
+
+.pf-frame text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.pf-n {
+  outline: none;
+}
+
+.pf-act {
+  cursor: pointer;
+}
+
+.pf-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0;
+}
+
+.pf-n:focus-visible .pf-ring,
+.pf-n:hover .pf-ring {
+  opacity: 1;
+}
+
+.pf-n:hover .pf-ring {
+  stroke: var(--line-3);
+}
+
+.pf-k-callee .pf-s {
+  fill: var(--path-taken-bg);
+}
+
+.pf-k-callee .pf-t {
+  /* Chips are sized at the 10px tag width (pathFlow.ts TAG_CH). */
+  font-size: 10px;
+  fill: var(--path-taken);
+  text-decoration: underline;
+}
+
+.pf-tag {
+  font-size: 10px;
+}
+
+.pf-tag rect {
+  fill: none;
+  stroke: var(--line-3);
+}
+
+.pf-tag.pf-taken rect {
+  stroke: var(--path-taken);
+  fill: var(--path-taken-bg);
+}
+
+.pf-tag.pf-split rect {
+  stroke: var(--path-taken);
+}
+
+.pf-tag.pf-not rect {
+  stroke-dasharray: 3 3;
+}
+
+.pf-tag.pf-unknown rect {
+  stroke: var(--path-unknown);
+  fill: url(#pf-hatch);
+}
+
+.pf-tag.pf-taken text,
+.pf-tag.pf-split text {
+  fill: var(--path-taken);
+}
+
+.pf-tag.pf-not text {
+  fill: var(--path-untaken);
+}
+
+.pf-tag.pf-unknown text {
+  fill: var(--path-unknown);
+}
+
+/* source with a count gutter */
+.path-src {
+  max-width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.path-src:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ps-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 10px;
+}
+
+.ps-g {
+  flex: none;
+  width: 4ch;
+  padding-right: 4px;
+  text-align: right;
+  border-right: 2px solid var(--line-2);
+  color: var(--muted);
+}
+
+/* The counts and line numbers stay put while a long line scrolls sideways. */
+.ps-g,
+.ps-n {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.ps-g {
+  left: 0;
+}
+
+.ps-n {
+  left: calc(4ch + 8px);
+}
+
+.ps-hit .ps-g,
+.ps-hit .ps-n {
+  background: linear-gradient(var(--accent-bg), var(--accent-bg)), var(--bg);
+}
+
+.ps-br {
+  display: none;
+}
+
+.ps-taken .ps-g {
+  color: var(--path-taken);
+  border-right-color: var(--path-taken);
+}
+
+.ps-not .ps-g,
+.ps-not .ps-code,
+.ps-not .ps-n {
+  color: var(--path-untaken);
+}
+
+.ps-not .ps-g {
+  border-right-style: dashed;
+}
+
+.ps-unknown .ps-g {
+  color: var(--path-unknown);
+  border-right-color: var(--path-unknown);
+  background: repeating-linear-gradient(135deg, var(--path-unknown-bg) 0 4px, transparent 4px 8px), var(--bg);
+}
+
+.ps-n {
+  flex: none;
+  width: 4ch;
+  text-align: right;
+  color: var(--dim);
+}
+
+.ps-code {
+  white-space: pre;
+  color: var(--fg);
+}
+
+.ps-hit {
+  background: var(--accent-bg);
+}
+
+.ps-exit .ps-code {
+  font-weight: 600;
+}
+
+.ps-note {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: var(--fs-label);
+  border: 1px solid var(--line-3);
+  color: var(--muted);
+}
+
+.ps-note-taken,
+.ps-note-split {
+  border-color: var(--path-taken);
+  color: var(--path-taken);
+}
+
+.ps-note-taken {
+  background: var(--path-taken-bg);
+}
+
+.ps-note-not {
+  border-style: dashed;
+  color: var(--path-untaken);
+}
+
+.ps-note-unknown {
+  border-color: var(--path-unknown);
+  color: var(--path-unknown);
+}
+
+.ps-fold {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 0 10px 0 0;
+  border: 0;
+  background: none;
+  color: var(--path-untaken);
+  font: inherit;
+  text-align: left;
+}
+
+.ps-fold:hover,
+.ps-fold:focus-visible {
+  color: var(--fg);
+}
+
+.ps-fold .ps-g {
+  border-right-style: dashed;
+  color: var(--path-untaken);
+}
+
 /* Path chip of the mode switch: a dot when the open trace is a path trace. */
 .tc-path-dot {
   display: inline-block;
@@ -393,8 +859,24 @@ button.path-verdict:focus-visible {
 }
 
 @media (max-width: 760px) {
-  .journey-pane-head .tc-mode.tc-mode-path {
+  .journey-pane-head .tc-mode.tc-mode-path,
+  .path-fn-head .tc-mode.path-fn-view {
     display: inline-flex;
+  }
+
+  /* Decision / loop notes on their own line under the code, where a phone can read them. */
+  .ps-row {
+    flex-wrap: wrap;
+  }
+
+  .ps-br {
+    display: block;
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .ps-br + .ps-note {
+    margin-left: calc(8ch + 16px);
   }
 
   .path-pane {

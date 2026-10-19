@@ -219,6 +219,8 @@ export interface SourceResponse {
   line: number;
   start: number;
   lines: string[];
+  /** sha1/12 of the whole file as it is now (compared with PathFn.sourceHash). */
+  hash?: string;
 }
 
 export interface RunInput {
@@ -1021,6 +1023,44 @@ export interface PathExit {
   via?: PathExitVia;
 }
 
+export interface PathNodeArm {
+  label: string;
+  line: number;
+  n: number | null;
+  why?: PathWhy;
+  /** No code of its own (an unwritten else). */
+  implied?: boolean;
+  body?: PathNode[];
+  fallsThrough?: boolean;
+  sharedArm?: string;
+}
+
+/**
+ * The flowchart tree (core truth.ts PathNode): `n` is the node's structural reach (null: UNKNOWN
+ * with `why`); arm and loop counts are the server's, read as they are.
+ */
+export interface PathNode {
+  id: number;
+  k: "block" | "stmt" | "if" | "switch" | "loop" | "try" | "exit" | "fold";
+  line: number;
+  endLine: number;
+  label?: string;
+  n: number | null;
+  why?: PathWhy;
+  body?: PathNode[];
+  arms?: PathNodeArm[];
+  passes?: number | null;
+  exit?: "return" | "throw" | "break" | "continue";
+  target?: string;
+  calls?: string[];
+  callees?: Array<{ name: string; fnKey: string }>;
+  /** Calls left unlinked because more than one recorded hop of this function matches the name. */
+  ambiguous?: string[];
+  fns?: Array<{ id: number; name: string; line: number; fnKey?: string }>;
+  awaits?: number;
+  decisions?: string[];
+}
+
 export interface PathFnAnalysis {
   status: "ok" | "unknown";
   why?: PathWhy;
@@ -1029,6 +1069,8 @@ export interface PathFnAnalysis {
   decisions: PathDecision[];
   loops: PathLoop[];
   exits: PathExit[];
+  /** The flowchart (left out past the payload cap: PathPayloadAnalysis.graphsDropped). */
+  graph?: PathNode;
   nodeCount: number;
   truncated?: boolean;
   warnings?: string[];
@@ -1047,6 +1089,8 @@ export interface PathFn {
   blocks: boolean;
   truncated?: boolean;
   stale?: boolean;
+  /** sha1/12 of the file's text when the trace was captured (the Source view checks it). */
+  sourceHash?: string;
   analysis?: PathFnAnalysis;
 }
 

@@ -180,12 +180,16 @@ function linkGraphs(p: PathPayload, root: string, cfgs: Map<string, CfgFile | un
         if (key) x.fnKey = key;
       }
       const callees: NonNullable<PathNode["callees"]> = [];
+      const ambiguous: string[] = [];
       for (const name of n.calls ?? []) {
         const last = name.split(/[.?]+/).pop() ?? name;
         const hits = kids.filter((k) => k.name === name || k.name === last || (k.v8Name && k.v8Name === last));
         if (hits.length === 1) callees.push({ name, fnKey: hits[0]!.key });
+        // More than one hop could be this call: left unlinked, and the UI says why.
+        else if (hits.length > 1) ambiguous.push(name);
       }
       if (callees.length) n.callees = callees;
+      if (ambiguous.length) n.ambiguous = ambiguous;
       for (const c of n.body ?? []) visit(c);
       for (const a of n.arms ?? []) for (const c of a.body ?? []) visit(c);
     };

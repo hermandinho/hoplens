@@ -3,6 +3,7 @@ import type {
   HealthSnapshot,
   HealthTick,
   Meta,
+  PathPayload,
   QueriesResponse,
   RunInput,
   RunResult,
@@ -74,6 +75,15 @@ export const api = {
   source: (file: string, line: number, context = 10) =>
     get<SourceResponse>(`/source?file=${encodeURIComponent(file)}&line=${line}&context=${context}`),
   clearTraces: () => fetch(`${API}/traces`, { method: "DELETE" }).then((r) => r.ok),
+  /** Request path: replay a GET/HEAD trace once, alone, and map its decisions (a NEW trace). */
+  tracePath: async (id: string): Promise<{ traceId: string; path: PathPayload }> => {
+    const path = `/traces/${encodeURIComponent(id)}/path`;
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: { accept: "application/json" } });
+    if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
+    return (await res.json()) as { traceId: string; path: PathPayload };
+  },
+  /** The stored path of a path trace (the last 20 are kept). */
+  path: (id: string) => get<PathPayload>(`/traces/${encodeURIComponent(id)}/path`),
   run: async (input: RunInput): Promise<RunResult> => {
     const res = await fetch(`${API}/run`, {
       method: "POST",

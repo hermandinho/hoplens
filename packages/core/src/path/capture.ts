@@ -628,9 +628,14 @@ async function controlWindow(
     : { ms, clean: true };
 }
 
-/** Function hops the trace did not record (over MAX_FN_SPANS_PER_TRACE, or late and dropped). */
+/**
+ * Function hops the trace did not record: the ones over MAX_FN_SPANS_PER_TRACE. facts.droppedSpans
+ * also counts late spans (core capture.ts bumps it per late span), but those are still pushed to
+ * spans with attrs["hoplens.late"], so they are recorded hops: subtract them.
+ */
 function droppedHops(trace: TraceRecord): number {
-  return Math.max(trace.facts?.droppedSpans ?? 0, droppedFunctionSpans(trace));
+  const late = trace.spans.filter((s) => s.attrs?.["hoplens.late"]).length;
+  return Math.max(Math.max(0, (trace.facts?.droppedSpans ?? 0) - late), droppedFunctionSpans(trace));
 }
 
 /** CONTAMINATED: keep the capture, but no truth survives. */

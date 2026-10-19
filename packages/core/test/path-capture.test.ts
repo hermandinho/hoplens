@@ -667,6 +667,24 @@ describe("capturePath: capped hops and lanes", () => {
     expect(p.warnings.join("\n")).toMatch(/hops capped/);
   });
 
+  test("late spans counted in facts.droppedSpans are recorded hops, not capped ones: no 'hops capped'", async () => {
+    const cov = new FakeCoverage();
+    cov.runs = [scripts(1)];
+    const { d, store } = deps({ cov });
+    d.fire = async () => {
+      const t = replayTrace("tr_late");
+      // A late span is still pushed to spans (attrs hoplens.late) and bumps facts.droppedSpans.
+      const last = t.spans[t.spans.length - 1]!;
+      last.attrs = { ...last.attrs, "hoplens.late": true };
+      t.facts = { droppedSpans: 1 } as any;
+      store.emit("start", t);
+      return { trace: t, status: 200 };
+    };
+    const p = await capturePath(d, SOURCE);
+    expect(p.warnings.join("\n")).not.toMatch(/hops capped/);
+    expect(p.functions["src/s.js:1:find"]!.calls.checked).toBe(true);
+  });
+
   test("lanes are capped", async () => {
     const cov = new FakeCoverage();
     cov.runs = [scripts(MAX_LANES + 50)];

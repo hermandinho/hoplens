@@ -513,6 +513,7 @@ function LogRow({
     dur !== undefined ? `${Math.round(dur)} milliseconds` : undefined,
     isHandledError(t) ? "handled error" : undefined,
     f?.cold ? "cold" : undefined,
+    t.pathTrace && !t.pathTrace.supersededBy ? "path trace" : undefined,
     runs ? `replay batch of ${runs} runs` : undefined,
     pinned ? "pinned" : undefined,
     nFindings ? `${nFindings} finding${nFindings === 1 ? "" : "s"}` : undefined,
@@ -548,7 +549,17 @@ function LogRow({
       pin
     </span>
   ) : null;
-  const flags = cold || handled || batch || pin;
+  // A request-path replay (Trace path): its path opens in Path mode. A discarded attempt is not marked.
+  const pathMark =
+    t.pathTrace && !t.pathTrace.supersededBy ? (
+      <span
+        class="path-mark"
+        title={`Path trace (${t.pathTrace.failed ? `capture failed: ${t.pathTrace.failed}` : t.pathTrace.quality}): a replay of ${t.pathTrace.replayOf}; opens in Path mode`}
+      >
+        path
+      </span>
+    ) : null;
+  const flags = cold || handled || batch || pin || pathMark;
 
   return (
     <li
@@ -586,6 +597,7 @@ function LogRow({
               </span>
               {flags && (
                 <span class="rlog-flags">
+                  {pathMark}
                   {batch}
                   {pin}
                   {cold}
@@ -616,6 +628,7 @@ function LogRow({
                   {io} io
                 </span>
               )}
+              {pathMark}
               {batch}
               {pin}
               {cold}

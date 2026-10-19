@@ -913,3 +913,199 @@ export interface StatsResponse {
   /** Present only on a `?since=` request a core understood: epochs >= sinceEpoch are counted. */
   scope?: { sinceEpoch: number; partial: boolean };
 }
+
+// Request path (P3 trail UI): POST|GET /api/traces/:id/path, meta.path and the pathTrace stamp
+// (mirrors core path/capture.ts, path/truth.ts, path/analyze.ts). Interfaces merge into Meta,
+// TraceSummary and TraceRecord above. Truth is decided server-side: the UI only renders it.
+
+export interface PathMeta {
+  state: "off" | "on" | "disabled-c8" | "error";
+  reason?: string;
+}
+
+export interface Meta {
+  /** Request path state. Absent on a core that predates it. */
+  path?: PathMeta;
+}
+
+/** A request-path replay (core TraceRecord.pathTrace). No payload of its own when superseded / failed. */
+export interface PathTraceStamp {
+  quality: PathQuality;
+  replayOf: string;
+  supersededBy?: string;
+  failed?: string;
+}
+
+export interface TraceSummary {
+  pathTrace?: PathTraceStamp;
+}
+
+export interface TraceRecord {
+  pathTrace?: PathTraceStamp;
+}
+
+export type PathQuality = "exact" | "partial" | "contaminated";
+
+export type PathWhy =
+  | "no-blocks"
+  | "contaminated"
+  | "join-mismatch"
+  | "join-ambiguous"
+  | "no-location"
+  | "source-unreadable"
+  | "too-large"
+  | "source-moved"
+  | "compiled"
+  | "after-throw"
+  | "arms-inconsistent"
+  | "no-analyzer"
+  | "no-function"
+  | "no-counter"
+  | "suspended";
+
+export type PathTruth = { t: "taken"; n: number } | { t: "not" } | { t: "unknown"; why: PathWhy };
+
+export interface PathArm {
+  label: string;
+  line?: number;
+  count: number | null;
+  taken: "taken" | "not-taken" | "unknown";
+  why?: PathWhy;
+  implied?: boolean;
+}
+
+export type PathDecisionKind = "if" | "switch" | "ternary" | "logical" | "try";
+
+export interface PathDecision {
+  id: string;
+  nodeId: number;
+  kind: PathDecisionKind;
+  line: number;
+  label: string;
+  reach: number | null;
+  why?: PathWhy;
+  arms: PathArm[];
+  verdict: "one" | "split-loop" | "split-calls" | "unreached" | "unknown";
+  /** Server-made chip text: `then`, `then 1/3 . else 2/3`, `not reached`, `? (after-throw)`. */
+  summary: string;
+  inLoop: boolean;
+}
+
+export interface PathLoop {
+  nodeId: number;
+  line: number;
+  label: string;
+  kind: string;
+  entries: number | null;
+  passes: number | null;
+  why?: PathWhy;
+}
+
+export interface PathExitVia {
+  decision: string;
+  label: string;
+  arm: string;
+  line: number;
+}
+
+export interface PathExit {
+  nodeId?: number;
+  kind: "return" | "throw" | "end" | "exception";
+  line: number | null;
+  count: number | null;
+  why?: PathWhy;
+  via?: PathExitVia;
+}
+
+export interface PathFnAnalysis {
+  status: "ok" | "unknown";
+  why?: PathWhy;
+  calls: number;
+  blended: boolean;
+  decisions: PathDecision[];
+  loops: PathLoop[];
+  exits: PathExit[];
+  nodeCount: number;
+  truncated?: boolean;
+  warnings?: string[];
+}
+
+export interface PathFn {
+  key: string;
+  name: string;
+  file: string;
+  line: number;
+  startLine?: number;
+  endLine?: number;
+  mapping: "identity" | "none";
+  calls: { hops: number; coverage: number | null; checked: boolean };
+  truth: PathTruth;
+  blocks: boolean;
+  truncated?: boolean;
+  stale?: boolean;
+  analysis?: PathFnAnalysis;
+}
+
+export interface PathLane {
+  spanId: string;
+  kind: "handler" | "function";
+  name: string;
+  file?: string;
+  line?: number;
+  fnKey?: string;
+  depth: number;
+  calls: number;
+  truth: PathTruth;
+  threw?: boolean;
+}
+
+export interface PathPayloadAnalysis {
+  text: string;
+  exit?: { fnKey: string; nodeId?: number; kind: PathExit["kind"]; line: number | null; via?: PathExitVia };
+  ms: number;
+  graphsDropped?: boolean;
+  error?: string;
+}
+
+export interface PathPayload {
+  v: number;
+  traceId: string;
+  replayOf: string;
+  quality: PathQuality;
+  contamination: string[];
+  warnings: string[];
+  window: { quietMs: number; settleMs: number; taint: string[]; retries: number };
+  lanes: PathLane[];
+  functions: Record<string, PathFn>;
+  analysis?: PathPayloadAnalysis;
+}
+
+export type PathErrorCode =
+  | "method"
+  | "not-found"
+  | "no-path"
+  | "superseded"
+  | "evicted"
+  | "path-off"
+  | "busy"
+  | "not-quiet"
+  | "take-failed"
+  | "replay-failed";
+
+/** Every path API error body: `{ code, error, ...details }`. */
+export interface PathErrorBody {
+  code: PathErrorCode | string;
+  error: string;
+  /** not-quiet */
+  reason?: string;
+  inflight?: number;
+  requests?: string[];
+  /** replay-failed */
+  status?: number;
+  /** superseded */
+  traceId?: string;
+  /** evicted */
+  replayOf?: string;
+  /** path-off */
+  state?: PathMeta["state"];
+}

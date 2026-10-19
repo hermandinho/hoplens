@@ -1,0 +1,445 @@
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { PathPayload, PathTraceStamp, TraceRecord } from "../api/types";
+import { pathMode } from "../state/canvas";
+import { register } from "../state/keymap";
+import {
+  PHASES,
+  PHASE_TEXT,
+  type PathChip,
+  type PathErrorView,
+  QUALITY,
+  type TrailRow,
+  enterOpensLane,
+  laneCursor,
+  loadPath,
+  methodBlock,
+  offView,
+  pathAnnounce,
+  pathFailure,
+  pathFocus,
+  pathJob,
+  pathLoad,
+  pathPayloads,
+  pathReady,
+  retryLoadPath,
+  runTracePath,
+  trailModel,
+  trailSummary,
+  verdictModel,
+} from "../state/path";
+import { openSourceAt } from "../state/source";
+import { frameworkCopy, loadTrace, metaState } from "../state/store";
+import "../styles/path.css";
+
+/*
+ * Path mode of the Journey pane (plan P3, mockup B): on a normal trace, the Trace path action (or why
+ * it is off); on a path trace, its quality, the verdict line and the decision trail. Everything shown
+ * as taken / not reached / UNKNOWN comes from the server's analysis (state/path.ts).
+ */
+
+export function PathPane({ trace, stamp }: { trace: TraceRecord; stamp?: PathTraceStamp }) {
+  // Keyed per trace: the trail's cursor and open lists belong to one path trace. The live region
+  // stays mounted across traces so 'Path traced' is announced.
+  return (
+    <div class="path-pane" data-key-scope="canvas">
+      <output class="sr-only" aria-live="polite">
+        {pathAnnounce.value}
+      </output>
+      {stamp ? (
+        <PathTraceView key={trace.id} trace={trace} stamp={stamp} />
+      ) : (
+        <TracePathAction key={trace.id} trace={trace} />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ normal trace */
+
+function TracePathAction({ trace }: { trace: TraceRecord }) {
+  const off = offView(metaState.value, frameworkCopy.value.isNext);
+  const job = pathJob.value;
+  const fail = pathFailure.value?.sourceId === trace.id ? pathFailure.value.view : null;
+  if (off) return <OffState title={off.title} body={off.body} command={off.command} />;
+  const blocked = methodBlock(trace.method);
+  const running = job?.sourceId === trace.id;
+  const ready = pathReady.value?.sourceId === trace.id ? pathReady.value.traceId : null;
+  return (
+    <div class="path-empty">
+      <p class="path-lede">
+        See which side of every <span class="mono">if</span>, <span class="mono">switch</span> and loop this request
+        took, from V8's block counts.
+      </p>
+      <div class="path-action">
+        <button
+          type="button"
+          class="sbtn path-go"
+          disabled={!!blocked || !!job}
+          title={blocked ?? (job ? "A path capture is running" : "Replays this request once, alone, as a new trace")}
+          onClick={() => void runTracePath(trace)}
+        >
+          Trace path
+        </button>
+        <span class="dim">-- replays this request once, alone</span>
+      </div>
+      {blocked && <p class="path-note">{blocked}.</p>}
+      {running && job && <Progress phase={job.phase} />}
+      {fail && !running && <ErrorBox view={fail} onRetry={() => void runTracePath(trace)} />}
+      {ready && !running && (
+        <p class="path-note">
+          Path ready:{" "}
+          <button
+            type="button"
+            class="link-btn mono"
+            onClick={() => {
+              pathReady.value = null;
+              pathFocus.value = ready;
+              void loadTrace(ready, "user");
+            }}
+          >
+            open {ready}
+          </button>
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Progress({ phase }: { phase: (typeof PHASES)[number] }) {
+  const at = PHASES.indexOf(phase);
+  return (
+    <ol class="path-phases" aria-live="polite" aria-label={`Trace path: ${PHASE_TEXT[phase]}`}>
+      {PHASES.map((p, i) => (
+        <li
+          key={p}
+          class={i < at ? "done" : i === at ? "now" : ""}
+          aria-current={i === at ? "step" : undefined}
+          title={PHASE_TEXT[p]}
+        >
+          {p}
+          {i === at ? "..." : ""}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ErrorBox({ view, onRetry }: { view: PathErrorView; onRetry?: () => void }) {
+  return (
+    <div class="path-error" role="alert">
+      <b>{view.title}</b>
+      {view.detail && <div class="muted">{view.detail}</div>}
+      {view.list && (
+        <ul class="path-inflight mono">
+          {view.list.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+      <div class="path-error-actions">
+        {view.retry && onRetry && (
+          <button type="button" class="sbtn" onClick={onRetry}>
+            Retry
+          </button>
+        )}
+        {view.link && (
+          <button type="button" class="link-btn" onClick={() => void loadTrace(view.link!.traceId, "user")}>
+            {view.link.label}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OffState({ title, body, command }: { title: string; body: string; command?: string }) {
+  const [copied, setCopied] = useState<"" | "ok" | "fail">("");
+  return (
+    <div class="path-empty">
+      <b class="path-off-title">{title}</b>
+      <p class="muted">{body}</p>
+      {command && (
+        <div class="path-cmd">
+          <code class="mono">{command}</code>
+          <button
+            type="button"
+            class="sbtn"
+            onClick={() => {
+              const done = (r: "ok" | "fail") => setCopied(r);
+              try {
+                navigator.clipboard.writeText(command).then(
+                  () => done("ok"),
+                  () => done("fail"),
+                );
+              } catch {
+                done("fail");
+              }
+            }}
+          >
+            {copied === "ok" ? "Copied" : "Copy"}
+          </button>
+          {copied === "fail" && <span class="dim">select the line and copy it</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- path trace */
+
+function PathTraceView({ trace, stamp }: { trace: TraceRecord; stamp: PathTraceStamp }) {
+  const payload = pathPayloads.value.get(trace.id);
+  const load = pathLoad.value.get(trace.id);
+  const failed = stamp.failed || stamp.supersededBy;
+  useEffect(() => {
+    if (!payload && !stamp.failed) void loadPath(trace.id);
+  }, [trace.id, payload, stamp.failed]);
+  const q = QUALITY[payload?.quality ?? stamp.quality];
+  return (
+    <>
+      <div class="path-badges">
+        <span class="path-badge">path trace</span>
+        {!failed && (
+          <span class={`path-badge path-q-${payload?.quality ?? stamp.quality}`} title={q.title}>
+            {q.label}
+          </span>
+        )}
+        <button type="button" class="link-btn mono" onClick={() => void loadTrace(stamp.replayOf, "user")}>
+          replay of {stamp.replayOf}
+        </button>
+      </div>
+      {stamp.failed ? (
+        <ErrorBox
+          view={{
+            code: stamp.failed,
+            title: "The capture failed after this replay ran",
+            detail: `No path was kept (${stamp.failed}). Trace path the source request again.`,
+            retry: false,
+            link: { label: "open the source request", traceId: stamp.replayOf },
+          }}
+        />
+      ) : payload ? (
+        <PathBody payload={payload} />
+      ) : load && load !== "loading" ? (
+        <ErrorBox view={load} onRetry={() => retryLoadPath(trace.id)} />
+      ) : (
+        <div class="path-note dim">loading the path...</div>
+      )}
+    </>
+  );
+}
+
+function PathBody({ payload }: { payload: PathPayload }) {
+  const model = useMemo(() => trailModel(payload), [payload]);
+  const v = verdictModel(payload);
+  const notes = [...payload.contamination.map((c) => `contaminated: ${c}`), ...payload.warnings];
+  return (
+    <>
+      {v.at ? (
+        <button
+          type="button"
+          class={`path-verdict path-v-${v.tone}`}
+          title="Open the exit's source"
+          onClick={() => openSourceAt(v.at!.file, v.at!.line)}
+        >
+          {v.text}
+        </button>
+      ) : (
+        <p class={`path-verdict path-v-${v.tone}`}>{v.text}</p>
+      )}
+      <div class="path-sub dim">{trailSummary(model)}</div>
+      {notes.length > 0 && (
+        <ul class="path-warnings" aria-label="Capture warnings">
+          {notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
+      <Trail key={payload.traceId} traceId={payload.traceId} rows={model.rows} />
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------- trail */
+
+function openAt(file: string | undefined, line: number | undefined): void {
+  if (file && line) openSourceAt(file, line);
+}
+
+function Trail({ rows, traceId }: { rows: TrailRow[]; traceId: string }) {
+  const [rawCursor, setCursor] = useState(0);
+  const cursor = laneCursor(rawCursor, rows.length);
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const listRef = useRef<HTMLOListElement>(null);
+  const state = useRef({ rows, cursor });
+  state.current = { rows, cursor };
+  // After Trace path (or x on a path trace), the trail takes focus so j / k reach the lanes.
+  const focusFor = pathFocus.value;
+  useEffect(() => {
+    if (focusFor !== traceId) return;
+    pathFocus.value = null;
+    listRef.current?.querySelectorAll<HTMLElement>(".path-lane-name")[state.current.cursor]?.focus();
+  }, [focusFor, traceId]);
+
+  useEffect(() => {
+    const focusRow = (i: number) => {
+      const n = Math.max(0, Math.min(state.current.rows.length - 1, i));
+      setCursor(n);
+      listRef.current?.querySelectorAll<HTMLElement>(".path-lane-name")[n]?.focus();
+    };
+    const opts = { when: () => pathMode.value, hint: "lane" };
+    const offs = [
+      register("canvas", "j", "Next lane of the path", () => focusRow(state.current.cursor + 1), opts),
+      register("canvas", "k", "Previous lane of the path", () => focusRow(state.current.cursor - 1), opts),
+      register(
+        "canvas",
+        "Enter",
+        "Open the lane's source",
+        () => {
+          const r = state.current.rows[state.current.cursor];
+          openAt(r?.file, r?.line);
+        },
+        // Only from a lane name: a chip, '+N not reached', the verdict or a link keeps its own Enter.
+        { when: (e) => pathMode.value && (!e || enterOpensLane(e.target)), hint: "source" },
+      ),
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, []);
+
+  if (!rows.length) return <p class="path-note dim">No function or handler hops were recorded for this request.</p>;
+  return (
+    <ol class="path-trail" ref={listRef} aria-label="Request path: one lane per function hop, in span order">
+      {rows.map((r, i) => (
+        <Lane
+          key={r.key}
+          row={r}
+          tabbable={i === cursor}
+          seeName={r.seeRow ? rows.find((x) => x.key === r.seeRow)?.name : undefined}
+          open={open.has(r.key)}
+          onFocus={() => setCursor(i)}
+          onToggle={() => {
+            const next = new Set(open);
+            if (next.has(r.key)) next.delete(r.key);
+            else next.add(r.key);
+            setOpen(next);
+          }}
+        />
+      ))}
+    </ol>
+  );
+}
+
+function Lane({
+  row,
+  tabbable,
+  seeName,
+  open,
+  onFocus,
+  onToggle,
+}: {
+  row: TrailRow;
+  tabbable: boolean;
+  seeName?: string;
+  open: boolean;
+  onFocus: () => void;
+  onToggle: () => void;
+}) {
+  const calls = row.hops > 1 ? `x${row.hops}` : `x${row.calls}`;
+  const where = row.file ? `${row.file}${row.line ? `:${row.line}` : ""}` : "";
+  return (
+    <li class="path-lane" style={{ "--depth": Math.min(row.depth, 8) }}>
+      <div class="path-lane-head">
+        <button
+          type="button"
+          class="path-lane-name mono"
+          tabIndex={tabbable ? 0 : -1}
+          onFocus={onFocus}
+          onClick={() => openAt(row.file, row.line)}
+          aria-label={`${row.kind} ${row.name}${where ? ` at ${where}` : ""}, ${calls}${row.threw ? ", threw" : ""}. Opens the source.`}
+        >
+          <span aria-hidden="true">&gt; </span>
+          {row.name}
+        </button>
+        {where && <span class="path-lane-file mono dim">{where}</span>}
+        <span
+          class="path-lane-calls mono dim"
+          title={`${row.calls} hop${row.calls === 1 ? "" : "s"} of this function in the trace`}
+        >
+          {calls}
+        </span>
+        {row.blended && (
+          <span
+            class="path-blend"
+            title="This function ran more than once: its counts are totals over every call, not one call's path"
+          >
+            {row.coverageCalls ?? row.calls} calls: totals
+          </span>
+        )}
+        {row.threw && <span class="path-threw">threw</span>}
+      </div>
+      {(row.truncated || row.fnWarnings) && !row.seeRow && (
+        <ul class="path-lane-notes">
+          {row.truncated && (
+            <li>
+              <span class="pt-chip pt-chip-unknown">? truncated</span> too large to map whole: decisions past the cap
+              are not shown (UNKNOWN)
+            </li>
+          )}
+          {row.fnWarnings?.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+      <div class="pt-chips">
+        {row.seeRow ? (
+          <span class="dim">same function as {seeName ?? "above"}: its chips are shown there (totals)</span>
+        ) : row.unknown ? (
+          <Chip
+            chip={{
+              id: "fn",
+              kind: "fn",
+              text: "?",
+              title: `UNKNOWN: ${row.unknown}`,
+              tone: "unknown",
+              line: row.line,
+            }}
+            file={row.file}
+            label={row.unknown}
+          />
+        ) : (
+          <>
+            {row.chips.map((c) => (
+              <Chip key={c.id} chip={c} file={row.file} />
+            ))}
+            {row.notReached.length > 0 && (
+              <button type="button" class="path-more" aria-expanded={open} onClick={onToggle}>
+                {open ? "- hide not reached" : `+${row.notReached.length} not reached`}
+              </button>
+            )}
+            {open && row.notReached.map((c) => <Chip key={c.id} chip={c} file={row.file} />)}
+            {!row.chips.length && !row.notReached.length && !row.truncated && <span class="dim">no decisions</span>}
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function Chip({ chip, file, label }: { chip: PathChip; file?: string; label?: string }) {
+  return (
+    <button
+      type="button"
+      class={`pt-chip pt-chip-${chip.tone}${chip.exit ? " pt-chip-exit" : ""}`}
+      title={chip.title}
+      data-why={chip.tone === "unknown" ? chip.title : undefined}
+      aria-label={`${chip.title}${chip.line ? `. Opens line ${chip.line}.` : ""}`}
+      onClick={() => openAt(file, chip.line)}
+    >
+      {chip.tone === "unknown" && chip.text !== "?" && <span aria-hidden="true">? </span>}
+      {chip.text}
+      {label && <span class="pt-chip-why"> {label}</span>}
+    </button>
+  );
+}

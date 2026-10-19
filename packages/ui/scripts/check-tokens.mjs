@@ -29,6 +29,8 @@ const TEXT = ["--fg", "--muted", "--dim", "--accent", "--err", "--warn", "--info
   "--syn-bool",
   "--diff-worse",
   "--diff-better",
+  "--path-taken",
+  "--path-unknown",
 ]);
 const EDGES = [...FAMILIES.bucket, ...FAMILIES.severity, ...FAMILIES.accent, "--diff-same"];
 const PAIRS = [

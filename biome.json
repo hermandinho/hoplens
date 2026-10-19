@@ -6,6 +6,7 @@
       "**/dist/**",
       "**/node_modules/**",
       "packages/transform/test/fixture/tsx/**",
+      "packages/core/test/fixtures/path/**",
       "**/.next/**",
       "**/coverage/**",
       "**/*.html",

@@ -34,22 +34,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAX_FN_SPANS_PER_TRACE, droppedFunctionSpans } from "../capture";
 import type { SpanRecord, TraceRecord } from "../types";
+import type { PayloadAnalysis } from "./analyze";
 import { type CoverageSource, type FunctionCoverage, type ScriptCoverage, coverageHandle, pathFlag } from "./coverage";
+import type { FnAnalysis, TruthWhy } from "./truth";
 
 /* ------------------------------------------------------------------- model */
 
-export const PATH_PAYLOAD_VERSION = 1;
+/** 2: per-function `analysis` (decisions, loops, exits, graph) and the payload's `analysis` verdict (P2). */
+export const PATH_PAYLOAD_VERSION = 2;
 
 export type PathQuality = "exact" | "partial" | "contaminated";
 
-export type UnknownWhy =
-  | "no-blocks"
-  | "contaminated"
-  | "join-mismatch"
-  | "join-ambiguous"
-  | "no-location"
-  | "source-unreadable"
-  | "too-large";
+/** Why a truth is UNKNOWN (truth.ts adds the per-decision reasons: after-throw, source-moved, ...). */
+export type UnknownWhy = TruthWhy;
 
 export type Truth = { t: "taken"; n: number } | { t: "not" } | { t: "unknown"; why: UnknownWhy };
 
@@ -84,6 +81,16 @@ export interface PathFn {
   blocks: boolean;
   ranges: PathRange[];
   truncated?: boolean;
+  /**
+   * Hops of this function that threw or rejected, and for every distinct error recorded under one of
+   * its hops (its own, its callees') the line of its innermost frame in this function: where the
+   * exception passed through it. The truth model's throw cut.
+   */
+  errors?: { hops: number; lines: number[] };
+  /** The file was modified after the app started: V8 may have compiled an older text. */
+  stale?: boolean;
+  /** Decisions, loops, exits and the flowchart graph (built lazily: analyze.ts). */
+  analysis?: FnAnalysis;
 }
 
 export interface Lane {
@@ -134,6 +141,8 @@ export interface PathPayload {
   window: PathWindow;
   lanes: Lane[];
   functions: Record<string, PathFn>;
+  /** The request's verdict line and the analysis cost (built lazily on POST / first GET). */
+  analysis?: PayloadAnalysis;
 }
 
 /* ----------------------------------------------------------------- tunables */
@@ -531,6 +540,8 @@ async function attempt(
 
   const built = buildPayload(trace, final.scripts, deps.root, deps.readSource ?? readFile, {
     droppedHops: droppedHops(trace),
+    mtime: deps.readSource ? undefined : mtimeOf,
+    processStart: PROCESS_START,
   });
   const contamination: string[] = [];
   if (taint.length) contamination.push(`other requests ran during the capture: ${taint.slice(0, 5).join(", ")}`);
@@ -667,6 +678,32 @@ function readFile(abs: string): string | undefined {
   }
 }
 
+function mtimeOf(abs: string): number | undefined {
+  try {
+    return fs.statSync(abs).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+/** When this process started (epoch ms): a file modified later may not be the text V8 compiled. */
+const PROCESS_START = Date.now() - process.uptime() * 1000;
+/** Slack for coarse file-system timestamps. */
+const MTIME_SLACK_MS = 2000;
+
+/** Frames of a captured stack: `at fn (file:line:col)` or `at file:line:col`. */
+const FRAME = /^\s*at\s+(?:.*?\()?([^()\s][^()]*?):(\d+):\d+\)?\s*(?:\[framework\])?\s*$/;
+
+/** Lines of `file` in a stack, innermost first. */
+export function stackLines(stack: string, file: string): number[] {
+  const out: number[] = [];
+  for (const l of stack.split("\n")) {
+    const m = FRAME.exec(l);
+    if (m && m[1]!.replace(/\\/g, "/") === file) out.push(Number(m[2]));
+  }
+  return out;
+}
+
 /* --------------------------------------------------------------- the join */
 
 interface SourceText {
@@ -750,7 +787,12 @@ export function buildPayload(
   scripts: readonly ScriptCoverage[],
   root: string,
   read: (abs: string) => string | undefined,
-  opts: { droppedHops?: number } = {},
+  opts: {
+    droppedHops?: number;
+    /** File mtime (ms) for the staleness check; omitted: no check. */
+    mtime?: (abs: string) => number | undefined;
+    processStart?: number;
+  } = {},
 ): Built {
   const droppedHopsN = opts.droppedHops ?? 0;
   const byFile = new Map<string, ScriptCoverage>();
@@ -778,6 +820,27 @@ export function buildPayload(
   for (const s of laneSpans) {
     const k = keyOf(s);
     if (k) hops.set(k, (hops.get(k) ?? 0) + 1);
+  }
+  // Exceptions per function: its own hops that threw, and every error stack (its own, its callees')
+  // recorded under one of its hops: the frames there say which statement the exception left from.
+  const thrown = new Map<string, { hops: number; stacks: string[] }>();
+  const bucket = (k: string) => {
+    let b = thrown.get(k);
+    if (!b) thrown.set(k, (b = { hops: 0, stacks: [] }));
+    return b;
+  };
+  for (const s of trace.spans) {
+    if (!s.error) continue;
+    const own = LANE_KINDS.has(s.kind) ? keyOf(s) : undefined;
+    if (own) bucket(own).hops++;
+    const seen = new Set<string>();
+    for (let a: SpanRecord | undefined = s; a; a = a.parentId ? byId.get(a.parentId) : undefined) {
+      const k = LANE_KINDS.has(a.kind) ? keyOf(a) : undefined;
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      const b = bucket(k);
+      if (b.stacks.length < 50 && s.error.stack) b.stacks.push(s.error.stack);
+    }
   }
 
   const functions: Record<string, PathFn> = {};
@@ -817,6 +880,9 @@ export function buildPayload(
       return base;
     }
     base.sourceHash = src.hash;
+    const mt = opts.mtime?.(abs);
+    if (mt !== undefined && opts.processStart !== undefined && mt > opts.processStart + MTIME_SLACK_MS)
+      base.stale = true;
     if (!script) return base;
     const joined = join(s, script, src);
     if (joined === "ambiguous") {
@@ -843,6 +909,15 @@ export function buildPayload(
       line: lineAt(src, r.startOffset),
       endLine: lineAt(src, Math.max(r.startOffset, r.endOffset - 1)),
     }));
+    const t = thrown.get(key);
+    if (t) {
+      const lines: number[] = [];
+      for (const st of new Set(t.stacks)) {
+        const l = stackLines(st, loc.file).find((x) => x >= base.startLine! && x <= base.endLine!);
+        if (l !== undefined) lines.push(l);
+      }
+      base.errors = { hops: t.hops, lines: lines.sort((a, b) => a - b) };
+    }
     if (K < H) {
       // Fewer calls than hops: the join picked the wrong function (or the hop is not this code).
       base.truth = { t: "unknown", why: "join-mismatch" };

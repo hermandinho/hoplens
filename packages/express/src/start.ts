@@ -4,9 +4,11 @@
 import http from "node:http";
 import https from "node:https";
 import type { HoplensOptions, Runtime } from "@hoplens/core";
+import { cfgAnalyzer } from "./analyzer";
 import { bindFnShim } from "./autotrace";
 import { appListening, uiReady } from "./banner";
 import { ExpressDiscoverySource } from "./discovery";
+import { pathRequested } from "./gate";
 import { resolveOptions } from "./options";
 import { resolveExpress } from "./resolve";
 import { adapterState } from "./state";
@@ -180,6 +182,7 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
     }
     const core = require("@hoplens/core") as typeof import("@hoplens/core");
     s.express = resolveExpress(options.root);
+    const analyzer = cfgAnalyzer(options.root);
     rt = new core.Runtime({
       options,
       discovery: new ExpressDiscoverySource(options.root),
@@ -192,8 +195,22 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
       epochs:
         options.persist === false ? { mode: "none" } : { mode: "restart", typescript: () => loadTs(options.root) },
       samePortRetryMs: SAME_PORT_RETRY_MS,
+      // Request path: decisions need the control-flow model (TypeScript), loaded on first use.
+      path: { analyzer },
     });
     rt.start();
+    // With the request path on, load TypeScript once the app has booted, so the first Trace path
+    // does not pay for it (~0.3s, once).
+    if (pathRequested()) {
+      const t = setTimeout(() => {
+        try {
+          analyzer.warm?.();
+        } catch {
+          /* the first analysis reports it */
+        }
+      }, 1000);
+      t.unref?.();
+    }
     G.__hoplens_runtime = rt;
     // Function hops wrapped before boot bind to core's wrap now (a no-op without the register hook's
     // shim). autoTrace: false from code can only stop this: the modules are already loaded.

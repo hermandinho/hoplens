@@ -35,6 +35,7 @@ import {
   writeManifest,
 } from "./manifest";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
+import type { PathAnalyzer } from "./path/analyze";
 import { type PersistRow, Persister, type PersisterOptions, persistDir, rowToTrace, traceRow } from "./persist";
 import { QueryStatsStore } from "./queries";
 import { RegressionTracker } from "./regressions";
@@ -75,6 +76,12 @@ export interface RuntimeConfig {
   samePortRetryMs?: number;
   /** The host framework, reported by GET /api/meta. */
   framework?: { name: string; version?: string };
+  /**
+   * Request path (HOPLENS_PATH=1): `analyzer` builds a file's control-flow model for the per-decision
+   * truth (core has no TypeScript; `@hoplens/express` passes `@hoplens/transform/cfg`). Without one,
+   * path payloads keep function-level truth and every decision is UNKNOWN 'no-analyzer'.
+   */
+  path?: { analyzer?: PathAnalyzer };
 }
 
 /**
@@ -94,6 +101,8 @@ export class Runtime {
   readonly discovery: DiscoverySource;
   readonly httpTap?: HttpTap;
   readonly framework?: { name: string; version?: string };
+  /** Builds control-flow models for request-path payloads (RuntimeConfig.path.analyzer). */
+  readonly pathAnalyzer?: PathAnalyzer;
   readonly log: Logger;
   readonly startedAt = Date.now();
   /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
@@ -140,6 +149,7 @@ export class Runtime {
     this.discovery = cfg.discovery;
     this.httpTap = cfg.httpTap;
     this.framework = cfg.framework;
+    this.pathAnalyzer = cfg.path?.analyzer;
     this.banner = cfg.banner;
     this.persistCfg = cfg.persist;
     this.log = createLogger("runtime");

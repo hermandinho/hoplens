@@ -258,6 +258,14 @@ Unset, nothing of it loads.
 - Coverage makes CPU-heavy code slower; under `NODE_V8_COVERAGE` (c8) it stays off
   (`disabled-c8`), and if another inspector session (DevTools' Coverage panel) stops precise
   coverage, Trace path turns off until you restart.
+- Each function's decisions come with it: every `if` / `else if` / `else`, `switch` case, `?:`,
+  `&&` / `||` / `??` that guards a call (or is the value returned), `try` / `catch`, the loops'
+  passes and where the function exited, plus a verdict line for the request (`Exited: return at
+  GET /api/products/:id L21 via if !(await findProduct(id)) -> then`). An arm reads **taken**
+  only when it really ran; anything the counts cannot prove (code after a callee threw, an await
+  still pending at capture, a file edited since the app started, compiled TypeScript) is
+  **unknown** with the reason. A function
+  called more than once shows totals, marked blended.
 
 ## Changes across restarts
 

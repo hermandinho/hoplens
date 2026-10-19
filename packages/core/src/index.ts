@@ -70,6 +70,35 @@ export {
   type TakeResult,
 } from "./path/coverage";
 export {
+  analyzePayload,
+  requestVerdict,
+  MAX_PAYLOAD_BYTES,
+  type AnalyzeDeps,
+  type PathAnalyzer,
+  type PathVerdict,
+  type PayloadAnalysis,
+} from "./path/analyze";
+export {
+  pathTruth,
+  joinCfg,
+  unknownAnalysis,
+  decisionSummary,
+  decisionText,
+  type ArmTaken,
+  type DecisionKind,
+  type FnAnalysis,
+  type JoinInput,
+  type PathArm,
+  type PathDecision,
+  type PathExit,
+  type PathLoop,
+  type PathNode,
+  type RangeIn,
+  type TruthInput,
+  type TruthWhy,
+} from "./path/truth";
+export { CFG_VERSION, type CfgFile, type CfgFunction, type CfgNode, type CfgExpr } from "./path/cfg-model";
+export {
   computeFacts,
   normalizeSql,
   normalizeUrl,

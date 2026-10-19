@@ -48,9 +48,28 @@ products.get("/:id", async (req, res) => {
 products.post("/:id", (req, res) => res.json({ ok: true }));
 `;
 
+// The example app's GET /api/report shape: 16 copies of 600 rows.
+const REPORT = `import { Router } from "express";
+
+export const report = Router();
+
+const ROWS = Array.from({ length: 600 }, (_, i) => ({ id: i, qty: i % 5, price_cents: 100 }));
+
+report.get("/", async (_req, res) => {
+  const lines = [];
+  for (let copy = 0; copy < 16; copy++) {
+    for (const r of ROWS) {
+      lines.push({ ...r, batch: copy, totalCents: r.qty * r.price_cents });
+    }
+  }
+  res.json({ count: lines.length });
+});
+`;
+
 const SERVER = `import express from "express";
 import { createRequire } from "node:module";
 import { products } from "./routes/products.js";
+import { report } from "./routes/report.js";
 
 const require = createRequire(import.meta.url);
 /** What of the request path is loaded in this process. */
@@ -61,6 +80,7 @@ const probe = () => ({
 });
 const app = express();
 app.use("/api/products", products);
+app.use("/api/report", report);
 app.get("/probe", (_req, res) => res.json(probe()));
 const server = app.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ ready: server.address().port, probe: probe() })));
 `;
@@ -124,6 +144,7 @@ beforeAll(() => {
     "package.json": JSON.stringify({ name: "path-fixture", private: true, type: "module" }),
     "src/services/products.js": SERVICE,
     "src/routes/products.js": ROUTES,
+    "src/routes/report.js": REPORT,
     "src/server.js": SERVER,
   });
 });
@@ -154,7 +175,7 @@ describe("request path (HOPLENS_PATH=1)", () => {
     const p = r.body.path;
     expect(r.body.traceId).toBe(p.traceId);
     expect(p.traceId).not.toBe(id);
-    expect(p).toMatchObject({ v: 1, replayOf: id, quality: "exact", contamination: [] });
+    expect(p).toMatchObject({ v: 2, replayOf: id, quality: "exact", contamination: [] });
     expect(p.window.taint).toEqual([]);
 
     expect(p.lanes.map((l: any) => [l.kind, l.name, l.file, l.line, l.depth, l.truth])).toEqual([
@@ -195,6 +216,63 @@ describe("request path (HOPLENS_PATH=1)", () => {
     const list = await json(s.port, "GET", "/__hoplens/api/traces");
     const row = (Array.isArray(list.body) ? list.body : list.body.traces).find((t: any) => t.id === p.traceId);
     expect(row.pathTrace).toEqual({ quality: "exact", replayOf: id });
+  }, 30000);
+
+  /** Trace path of `p` (warmed first): the payload with its analysis. */
+  async function tracePath(p: string): Promise<any> {
+    for (let i = 0; i < 2; i++) await request(s.port, "GET", p);
+    const id = await traceId(s.port, "GET", p);
+    const r = await json(s.port, "POST", `/__hoplens/api/traces/${id}/path`);
+    expect(r.status).toBe(200);
+    return r.body.path;
+  }
+  const analysisMs: Record<string, number> = {};
+
+  test("P2: products/1 skips the 404 arm and ends at the handler's end; findProduct blended over 2 calls", async () => {
+    const p = await tracePath("/api/products/1");
+    expect(p.analysis.text).toBe("Exited: end of GET /api/products/:id L14");
+    const h = p.functions[p.lanes[0].fnKey].analysis;
+    expect(h).toMatchObject({ status: "ok", calls: 1, blended: false });
+    expect(h.decisions.map((d: any) => [d.kind, d.line, d.label, d.summary])).toEqual([
+      ["if", 8, "!(await findProduct(id))", "else"],
+    ]);
+    const find = p.functions["src/services/products.js:10:findProduct"].analysis;
+    expect(find).toMatchObject({ status: "ok", calls: 2, blended: true });
+    expect(find.decisions.map((d: any) => [d.kind, d.label, d.summary])).toEqual([
+      ["logical", "rows[0] ??", "short-circuit"],
+    ]);
+    analysisMs.products1 = p.analysis.ms;
+  }, 30000);
+
+  test("P2: products/99999 takes the 404 arm and exits early, via that arm", async () => {
+    const p = await tracePath("/api/products/99999");
+    expect(p.analysis.text).toBe("Exited: return at GET /api/products/:id L10 via if !(await findProduct(id)) -> then");
+    const h = p.functions[p.lanes[0].fnKey].analysis;
+    expect(h.decisions[0]).toMatchObject({ verdict: "one", summary: "then" });
+    // Nothing after the early return counted as run.
+    const after = h.graph.body.filter((n: any) => n.line >= 12);
+    expect(after.map((n: any) => n.n)).toEqual([0, 0]);
+    const find = p.functions["src/services/products.js:10:findProduct"].analysis;
+    expect(find).toMatchObject({ calls: 1, blended: false });
+    expect(find.decisions[0].summary).toBe("right");
+    analysisMs.products99999 = p.analysis.ms;
+  }, 30000);
+
+  test("P2: report loops 16 / 9600; the analysis stays cheap", async () => {
+    const p = await tracePath("/api/report");
+    const h = p.functions[p.lanes[0].fnKey].analysis;
+    expect(h.loops.map((l: any) => [l.line, l.entries, l.passes])).toEqual([
+      [9, 1, 16],
+      [10, 16, 9600],
+    ]);
+    expect(p.analysis.text).toBe("Exited: end of GET /api/report L15");
+    analysisMs.report = p.analysis.ms;
+    // GET serves the cached analysis.
+    const again = await json(s.port, "GET", `/__hoplens/api/traces/${p.traceId}/path`);
+    expect(again.body.analysis).toEqual(p.analysis);
+    console.log(`path analysis ms: ${JSON.stringify(analysisMs)}`);
+    // TypeScript loads once (warmed after boot); every analysis after that is a few ms.
+    expect(Math.min(analysisMs.products99999!, analysisMs.report!)).toBeLessThan(20);
   }, 30000);
 
   test("a POST source trace is refused with 400 and a reason", async () => {

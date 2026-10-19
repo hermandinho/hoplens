@@ -4,6 +4,10 @@
 //                              `update` event so lists show the stamp).
 // GET  /api/traces/:id/path -> the stored PathPayload of a path trace (the last 20).
 //
+// Both answer the payload with its per-function analysis (decisions, loops, exits, flowchart graph)
+// and the request's verdict line: built once, lazily, on the POST that captured it or else on the
+// first GET, and cached on the stored payload (path/analyze.ts).
+//
 // Every error body is `{ code, error, ...details }`: `code` is stable (PathErrorCode), `error` is a
 // sentence for the user.
 //   400 method          any method but GET / HEAD (replaying it would run its side effects again)
@@ -18,7 +22,8 @@
 //   500 take-failed     reading the counts failed
 //   502 replay-failed   `{ status }`: the replay failed or hit its time limit (30s)
 
-import { type CaptureDeps, PathError, capturePath, pathResults } from "../path/capture";
+import { analyzePayload } from "../path/analyze";
+import { type CaptureDeps, PathError, type PathPayload, capturePath, pathResults } from "../path/capture";
 import { coverageHandle } from "../path/coverage";
 import { batchesRunning, prepareRun, resendHeaders, runOnce } from "../replay";
 import type { Runtime } from "../runtime";
@@ -44,13 +49,19 @@ export function captureDeps(rt: Runtime, source: TraceRecord, waitMs = PATH_TRAC
   };
 }
 
+/** Build the payload's analysis (once; a no-op when it is cached on the payload). */
+export function analyzed(rt: Runtime, p: PathPayload): PathPayload {
+  analyzePayload(p, { analyzer: rt.pathAnalyzer, root: rt.root });
+  return p;
+}
+
 const capture: ApiHandle = async (_req, res, rt, ctx) => {
   const source = rt.store.get(ctx.params.id ?? "");
   if (!source) return sendJson(res, 404, { code: "not-found", error: "Trace not found. It may have rotated out." });
   try {
     const payload = await capturePath(captureDeps(rt, source), source);
     pathResults(rt.store).set(payload.traceId, payload);
-    sendJson(res, 200, { traceId: payload.traceId, path: payload });
+    sendJson(res, 200, { traceId: payload.traceId, path: analyzed(rt, payload) });
   } catch (err) {
     if (err instanceof PathError) return sendJson(res, err.status, err.body);
     throw err;
@@ -60,7 +71,7 @@ const capture: ApiHandle = async (_req, res, rt, ctx) => {
 const read: ApiHandle = (_req, res, rt, ctx) => {
   const id = ctx.params.id ?? "";
   const p = pathResults(rt.store).get(id);
-  if (p) return sendJson(res, 200, p);
+  if (p) return sendJson(res, 200, analyzed(rt, p));
   const stamp = rt.store.get(id)?.pathTrace;
   if (stamp?.supersededBy)
     return sendJson(res, 404, {

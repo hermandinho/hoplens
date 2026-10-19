@@ -14,9 +14,11 @@ import {
   MAX_LANES,
   PathError,
   PathResults,
+  buildPayload,
   capturePath,
   isProjectScript,
   pathMeta,
+  stackLines,
 } from "../src/path/capture";
 import type { CoverageSource, FunctionCoverage, ScriptCoverage, TakeResult } from "../src/path/coverage";
 import { BlockWatch, startCoverage } from "../src/path/coverage";
@@ -268,7 +270,7 @@ describe("capturePath: the window", () => {
     const { d, cov } = deps();
     const p = await capturePath(d, SOURCE);
     expect(cov.log).toEqual(["reset", "fire", "take"]);
-    expect(p).toMatchObject({ v: 1, traceId: "tr_new1", replayOf: "tr_src", quality: "exact", contamination: [] });
+    expect(p).toMatchObject({ v: 2, traceId: "tr_new1", replayOf: "tr_src", quality: "exact", contamination: [] });
     expect(p.window.retries).toBe(0);
     // r.js and s.js: node_modules and node: scripts are dropped.
     expect(p.window.scripts).toBe(2);
@@ -835,5 +837,62 @@ describe("api/path", () => {
       server.closeAllConnections();
       server.close();
     }
+  });
+});
+
+describe("P2 capture fields: errors and staleness", () => {
+  const read = (abs: string) => FILES[abs];
+
+  test("stackLines reads mapped frames of one file", () => {
+    const stack = [
+      "Error: not found",
+      "    at find (src/s.js:2:9)",
+      "    at async <anonymous> (src/r.js:3:10)",
+      "    at src/r.js:4:1",
+      "    at Layer.handle (express/lib/router/layer.js:95:5)  [framework]",
+    ].join("\n");
+    expect(stackLines(stack, "src/r.js")).toEqual([3, 4]);
+    expect(stackLines(stack, "src/s.js")).toEqual([2]);
+    expect(stackLines(stack, "src/x.js")).toEqual([]);
+  });
+
+  test("a hop that threw: its count, and per distinct error the innermost frame inside each function", () => {
+    const t = replayTrace("tr_e");
+    const handler = t.spans.find((x) => x.kind === "handler")!;
+    const find = t.spans.find((x) => x.kind === "function")!;
+    const stack = "Error: gone\n    at find (src/s.js:2:9)\n    at async <anonymous> (src/r.js:3:10)";
+    find.error = { type: "Error", message: "gone", stack };
+    // The same error recorded on the handler's hop too (it passed through): counted once.
+    handler.error = { type: "Error", message: "gone", stack };
+    const b = buildPayload(t, scripts(), ROOT, read);
+    expect(b.functions["src/s.js:1:find"]!.errors).toEqual({ hops: 1, lines: [2] });
+    expect(b.functions["src/r.js:2:GET /x/:id"]!.errors).toEqual({ hops: 1, lines: [3] });
+    // No error anywhere: no field.
+    expect(
+      buildPayload(replayTrace("tr_ok"), scripts(), ROOT, read).functions["src/s.js:1:find"]!.errors,
+    ).toBeUndefined();
+  });
+
+  test("a file modified after the process started is stale", () => {
+    const t = replayTrace("tr_s");
+    const start = 1_000_000;
+    const fresh = buildPayload(t, scripts(), ROOT, read, { mtime: () => start - 5000, processStart: start });
+    expect(fresh.functions["src/s.js:1:find"]!.stale).toBeUndefined();
+    const edited = buildPayload(t, scripts(), ROOT, read, { mtime: () => start + 60_000, processStart: start });
+    expect(edited.functions["src/s.js:1:find"]!.stale).toBe(true);
+  });
+
+  test("GET builds the analysis once, lazily, and caches it on the stored payload", async () => {
+    const { d } = deps();
+    const p = await capturePath(d, SOURCE);
+    expect(p.analysis).toBeUndefined();
+    const store = new TraceStore(10);
+    pathApi.analyzed({ store, root: ROOT, pathAnalyzer: undefined } as any, p);
+    // No analyzer: function-level truth stays, decisions are unknown with the reason.
+    expect(p.functions["src/s.js:1:find"]!.analysis).toMatchObject({ status: "unknown", why: "no-analyzer" });
+    const first = p.analysis;
+    expect(first?.text).toBe("Exit: UNKNOWN (no-analyzer)");
+    pathApi.analyzed({ store, root: ROOT, pathAnalyzer: { cfg: () => undefined } } as any, p);
+    expect(p.analysis).toBe(first);
   });
 });

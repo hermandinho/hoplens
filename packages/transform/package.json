@@ -30,6 +30,10 @@
       "types": "./dist/ts.d.ts",
       "default": "./dist/ts.js"
     },
+    "./cfg": {
+      "types": "./dist/cfg.d.ts",
+      "default": "./dist/cfg.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md"],

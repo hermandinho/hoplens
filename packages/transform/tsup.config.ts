@@ -7,9 +7,11 @@ export default defineConfig([
       loader: "src/loader.ts",
       register: "src/register.ts",
       ts: "src/ts.ts",
+      // Request path: the per-function control-flow model (pure; TypeScript handed in).
+      cfg: "src/cfg.ts",
     },
     format: ["cjs"],
-    dts: { entry: { index: "src/index.ts", register: "src/register.ts", ts: "src/ts.ts" } },
+    dts: { entry: { index: "src/index.ts", register: "src/register.ts", ts: "src/ts.ts", cfg: "src/cfg.ts" } },
     sourcemap: true,
     // The ESM hook below is built by the second config, in parallel: never clean its output here.
     clean: ["!hooks.mjs", "!hooks.mjs.map"],

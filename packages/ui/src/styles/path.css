@@ -45,6 +45,29 @@
   font-weight: 600;
 }
 
+.path-switch-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+output.path-pending {
+  display: block;
+}
+
+.path-badge-pending {
+  color: var(--fg);
+  border-style: dashed;
+}
+
+.path-switch-error {
+  color: var(--err, var(--fg));
+}
+
 .path-note {
   margin: 0;
   font-size: var(--fs-sm);

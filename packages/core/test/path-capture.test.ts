@@ -516,7 +516,7 @@ describe("coverage.ts", () => {
   });
 
   test("pathMeta without a handle says how to turn it on", () => {
-    expect(pathMeta(undefined, {})).toEqual({ state: "off", reason: "restart with HOPLENS_PATH=1" });
+    expect(pathMeta(undefined, {})).toEqual({ state: "off", reason: "restart with HOPLENS_PATH=1", source: "default" });
     expect(pathMeta(undefined, { HOPLENS_PATH: "1" }).reason).toMatch(/did not start at boot/);
   });
 

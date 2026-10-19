@@ -480,6 +480,16 @@ export async function resyncTraces(): Promise<void> {
   const sel = selectedTraceId.peek();
   const selectedGone = sel !== null && !ids.has(sel);
   if (selectedGone) pendingFollow = null;
+  // A restart that applied the Path tab's switch: the request that was open is gone (traces don't
+  // survive a restart), so say the switch took and where to go next instead of leaving a closed pane.
+  const pendingPath = metaState.peek()?.path?.pending;
+  const nowPath = meta?.path?.state;
+  const applied =
+    pendingPath === "on" && nowPath === "on"
+      ? "Request path is now on: open a new request and press x to trace its path."
+      : pendingPath === "off" && nowPath === "off"
+        ? "Request path is now off."
+        : null;
   batch(() => {
     if (meta) metaState.value = meta;
     if (routes) routesState.value = routes;
@@ -490,8 +500,8 @@ export async function resyncTraces(): Promise<void> {
     }
     const older = `${lost} older request${lost === 1 ? " is" : "s are"} no longer available.`;
     if (lost > 0 && isNextApp(metaState.peek())) actionError.value = `Hoplens restarted: ${older}`;
-    else if (lost > 0) infoNote.value = `App restarted: ${older}`;
-    else infoNote.value = null;
+    else if (lost > 0) infoNote.value = applied ? `App restarted. ${applied}` : `App restarted: ${older}`;
+    else infoNote.value = applied;
   });
   noteActivity("bootstrap");
   const v = route.value.view;
@@ -540,6 +550,8 @@ export function startLive(): void {
     (status) => {
       liveStatus.value = status;
     },
+    // A request path toggle waits for the restart: retry every 1.5 s so the pending badge clears soon after.
+    { maxDelay: () => (metaState.peek()?.path?.pending ? 1500 : 30_000) },
   );
 }
 

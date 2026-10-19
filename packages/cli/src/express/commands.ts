@@ -2,8 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { addDevCommand, detectPackageManager, removeCommand, runCommand } from "../framework";
 import { deleteFrom, insertInto } from "../json-edit";
+import { type PromptIO, askYesNo } from "../prompt";
 import { c, fail, ok, skip, warn } from "../style";
 import { projectPackageJson, readJson } from "../util";
+import { appEnv, flagContent, flagPath, insideDir, readFlag, writeFlag } from "./pathflag";
 import {
   DEV_SCRIPTS,
   STATE_DIR,
@@ -25,7 +27,7 @@ const SUPPORTED_EXPRESS = [4, 5];
  * `hoplens init` for Express: adds `--import hoplens/express/register` to the dev script and nothing
  * else (never `start`, never the entry file). package.json keeps every other byte.
  */
-export function initExpress(root: string, pkg: any, dryRun: boolean) {
+export async function initExpress(root: string, pkg: any, dryRun: boolean, pathOpt: PathOption = {}) {
   const pm = detectPackageManager(root, pkg);
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const major = majorOf(readJson(projectPackageJson("express", root))?.version ?? deps.express);
@@ -53,6 +55,7 @@ export function initExpress(root: string, pkg: any, dryRun: boolean) {
     warn(`No dev script in package.json (looked for ${DEV_SCRIPTS.join(", ")}). Add one to "scripts":`);
     console.log(`\n    ${c.bold(`"dev": ${JSON.stringify(suggestion)}`)}\n`);
     installHint(deps, pm);
+    await initPath(root, null, dryRun, { ...pathOpt, ask: false });
     return;
   }
 
@@ -68,6 +71,7 @@ export function initExpress(root: string, pkg: any, dryRun: boolean) {
         : `\n    ${c.bold(result.hint ?? `add ${FLAG} to the node command that starts your app`)}\n`,
     );
     installHint(deps, pm);
+    await initPath(root, { key: dev.key, cmd }, dryRun, { ...pathOpt, ask: false });
     return;
   } else {
     const out = insertInto(src, dev.span, result.at, result.text);
@@ -77,10 +81,96 @@ export function initExpress(root: string, pkg: any, dryRun: boolean) {
   }
 
   installHint(deps, pm);
+  await initPath(root, { key: dev.key, cmd }, dryRun, pathOpt);
   const port = guessPort(root, cmd, pkg) ?? "<your port>";
   console.log(
     `\n${c.green("Done.")} Run ${c.bold(runCommand(pm, dev.key))} and open ${c.bold(`http://localhost:${port}/__hoplens`)}\n`,
   );
+}
+
+export type PathOption = {
+  /** --path (true) / --no-path (false); undefined: ask when interactive, else leave it off. */
+  flag?: boolean;
+  io?: PromptIO;
+  /** false: never ask (the script was not wired). */
+  ask?: boolean;
+};
+
+export const PATH_QUESTION = "Enable request path tracing? (block coverage; slower for CPU-heavy code) [y/N] ";
+
+/**
+ * The request path's sticky flag: --path writes it, --no-path removes it, else ask when interactive
+ * (default no, and no question when it is already on). Same file the UI's Enable button writes, in
+ * the state dir the register hook resolves (HOPLENS_OPTIONS from the dev script too). HOPLENS_PATH
+ * (dev script or environment) wins over the flag at boot: then no question, and --path / --no-path
+ * still write / remove it but say it has no effect while HOPLENS_PATH is set.
+ */
+async function initPath(
+  root: string,
+  dev: { key: string; cmd: string } | null,
+  dryRun: boolean,
+  opt: PathOption,
+): Promise<void> {
+  const { abs, rel } = flagPath(root, appEnv(dev?.cmd));
+  const now = readFlag(abs);
+  const override = pathEnvOverride(dev, process.env);
+  const overrideNote = override
+    ? `request path is set by HOPLENS_PATH=${override.value} in ${override.where}, which wins over ${rel} at boot`
+    : "";
+  let want = opt.flag;
+  if (want === undefined && override) {
+    skip(`The ${overrideNote}; not asking (unset it to use the flag)`);
+    return;
+  }
+  if (want === undefined) {
+    if (now === "on") {
+      skip(`Request path already enabled (${rel}); disable it in the Path tab or with hoplens init --no-path`);
+      return;
+    }
+    if (opt.ask === false || !opt.io?.interactive) return;
+    want = await askYesNo(PATH_QUESTION, opt.io);
+    if (!want) return;
+  }
+  if (want) {
+    if (now === "on") {
+      skip(`Request path already enabled (${rel})`);
+      return;
+    }
+    const content = flagContent("init");
+    if (dryRun) console.log(`${c.dim(`--- ${rel} (create)`)}\n${content}`);
+    else {
+      try {
+        writeFlag(abs, content);
+      } catch (err) {
+        warn(`Couldn't write ${rel}: ${(err as Error).message}`);
+        return;
+      }
+    }
+    if (override)
+      warn(
+        `${dryRun ? "Would write" : "Wrote"} ${rel}, but the ${overrideNote}: the flag has no effect while it is set`,
+      );
+    else
+      ok(
+        `${dryRun ? "Would enable" : "Enabled"} request path tracing (${rel}); block coverage runs from the app's start, so CPU-heavy code runs slower. HOPLENS_PATH=0 overrides it`,
+      );
+    return;
+  }
+  if (!now) return;
+  if (dryRun) console.log(`${c.dim(`--- ${rel} (delete)`)}\n`);
+  else {
+    try {
+      fs.rmSync(abs, { force: true });
+    } catch (err) {
+      warn(`Couldn't delete ${rel}: ${(err as Error).message}`);
+      return;
+    }
+  }
+  if (override)
+    warn(
+      `${dryRun ? "Would delete" : "Deleted"} ${rel}, but the ${overrideNote}: the flag has no effect while it is set`,
+    );
+  else ok(`${dryRun ? "Would disable" : "Disabled"} request path tracing (${rel})`);
 }
 
 function installHint(deps: Record<string, string>, pm: ReturnType<typeof detectPackageManager>) {
@@ -114,8 +204,21 @@ export function removeExpress(root: string, pkg: any, dryRun: boolean) {
     break;
   }
   const data = fs.existsSync(path.join(root, STATE_DIR)) ? STATE_DIR : null;
+  // The request path flag goes with the state dir; one HOPLENS_OPTIONS moved elsewhere (in the dev
+  // script, as the register hook reads it, or in this shell) goes on its own.
+  const wired =
+    DEV_SCRIPTS.map((k) => findDevScript(src, [k])).find((d) => d && REGISTER_RE.test(d.span.value)) ??
+    findDevScript(src);
+  const candidates = [flagPath(root, appEnv(wired?.span.value)), flagPath(root)];
+  const strayFlag =
+    candidates.find(
+      (f, i) =>
+        candidates.findIndex((g) => g.abs === f.abs) === i &&
+        !insideDir(path.join(root, STATE_DIR), f.abs) &&
+        fs.existsSync(f.abs),
+    ) ?? null;
 
-  if (!out && !data) {
+  if (!out && !data && !strayFlag) {
     skip(
       byHand
         ? "Nothing removed automatically — edit the script above by hand."
@@ -142,6 +245,17 @@ export function removeExpress(root: string, pkg: any, dryRun: boolean) {
         ok(`Deleted ${data}`);
       } catch (err) {
         warn(`Couldn't delete ${data}: ${(err as Error).message}`);
+      }
+    }
+  }
+  if (strayFlag) {
+    if (dryRun) console.log(`${c.dim(`--- ${strayFlag.rel} (delete)`)}\n`);
+    else {
+      try {
+        fs.rmSync(strayFlag.abs, { force: true });
+        ok(`Deleted ${strayFlag.rel}`);
+      } catch (err) {
+        warn(`Couldn't delete ${strayFlag.rel}: ${(err as Error).message}`);
       }
     }
   }
@@ -228,32 +342,76 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
       false,
     );
 
-  doctorPath(dev ? { key: dev.key, cmd: devCmd ?? "" } : null, process.env, { nope });
+  doctorPath(dev ? { key: dev.key, cmd: devCmd ?? "" } : null, process.env, { nope }, flagPath(root, appEnv(devCmd)));
 }
 
 const PATH_FLAG_RE = /\bHOPLENS_PATH=["']?(?:1|true)\b/i;
+const PATH_ENV_RE = /\bHOPLENS_PATH=["']?([^\s"';&|]*)/i;
 const V8_COVERAGE_RE = /\bNODE_V8_COVERAGE=|(?:^|[\s;&|])c8(?=$|\s)/;
 
 /**
- * The request path: an info line when HOPLENS_PATH=1 is set in the dev script or the environment,
- * and a warning when NODE_V8_COVERAGE (c8) is set too, which keeps it disabled. Exported for tests.
+ * The request path, as the register hook will decide it: HOPLENS_PATH in the dev script or the
+ * environment wins (1/true on, anything else off), else the sticky flag file (`hoplens init --path`
+ * or the Path tab's Enable), else off. Warns when it would be on with NODE_V8_COVERAGE (c8) set too,
+ * which keeps it disabled, and when the flag file is not valid JSON. Exported for tests.
  */
+/**
+ * HOPLENS_PATH as the register hook will see it: a non-empty value in the dev script, else in the
+ * environment; undefined when neither sets it (the flag decides). Exported for tests.
+ */
+export function pathEnvOverride(
+  dev: { key: string; cmd: string } | null,
+  env: Record<string, string | undefined>,
+): { value: string; where: string; on: boolean } | undefined {
+  const scriptValue = dev ? PATH_ENV_RE.exec(dev.cmd)?.[1] : undefined;
+  if (scriptValue !== undefined && scriptValue !== "")
+    return { value: scriptValue, where: `scripts.${dev!.key}`, on: PATH_FLAG_RE.test(dev!.cmd) };
+  const envValue = env.HOPLENS_PATH?.trim() || undefined;
+  if (envValue === undefined) return undefined;
+  return { value: envValue, where: "the environment", on: envValue === "1" || envValue.toLowerCase() === "true" };
+}
+
 export function doctorPath(
   dev: { key: string; cmd: string } | null,
   env: Record<string, string | undefined>,
   { nope }: Pick<Report, "nope">,
+  flag?: { abs: string; rel: string },
 ): void {
-  const inScript = !!dev && PATH_FLAG_RE.test(dev.cmd);
-  const inEnv = env.HOPLENS_PATH === "1" || env.HOPLENS_PATH?.toLowerCase() === "true";
-  if (!inScript && !inEnv) return;
-  const where = inScript ? `scripts.${dev!.key}` : "the environment";
-  skip(
-    `request path is on (HOPLENS_PATH=1 in ${where}): V8 block coverage runs from boot, so CPU-heavy code runs slower; Trace path replays a GET once to show which branches ran`,
-  );
-  const c8 = (!!dev && V8_COVERAGE_RE.test(dev.cmd)) || !!env.NODE_V8_COVERAGE;
-  if (c8)
+  const override = pathEnvOverride(dev, env);
+  const value = override?.value;
+  const where = override?.where;
+  const flagState = flag ? readFlag(flag.abs) : undefined;
+  let on: boolean;
+  if (override) {
+    on = override.on;
+    if (on)
+      skip(
+        `request path: on (HOPLENS_PATH) — HOPLENS_PATH=${value} in ${where}: V8 block coverage runs from boot, so CPU-heavy code runs slower; Trace path replays a GET once to show which branches ran`,
+      );
+    else
+      skip(
+        `request path: off (HOPLENS_PATH=${value} in ${where}${flagState === "on" ? `; it wins over ${flag!.rel}` : ""})`,
+      );
+  } else if (flagState === "on") {
+    on = true;
+    skip(
+      `request path: on (flag) — ${flag!.rel}: V8 block coverage runs from boot, so CPU-heavy code runs slower; disable it in the Path tab`,
+    );
+  } else {
+    on = false;
+    skip("request path: off — enable it in the Path tab or with hoplens init --path");
+  }
+  if (flagState === "corrupt")
     nope(
-      `HOPLENS_PATH=1 is set with NODE_V8_COVERAGE (c8) — the request path stays disabled so c8's coverage is not reset; drop one of them`,
+      `${flag!.rel} is not a valid request path flag (ignored, so the path stays off) — delete it or enable again`,
+      false,
+    );
+  const c8 = (!!dev && V8_COVERAGE_RE.test(dev.cmd)) || !!env.NODE_V8_COVERAGE;
+  if (on && c8)
+    nope(
+      value !== undefined
+        ? "HOPLENS_PATH=1 is set with NODE_V8_COVERAGE (c8) — the request path stays disabled so c8's coverage is not reset; drop one of them"
+        : `the request path flag (${flag!.rel}) is set with NODE_V8_COVERAGE (c8) — the request path stays disabled so c8's coverage is not reset; disable one of them`,
       false,
     );
 }

@@ -2,6 +2,7 @@
 // its own copy of every module: anything that must happen once lives here, on globalThis.
 
 import type { HoplensOptions, Runtime } from "@hoplens/core";
+import type { PathDecision } from "./pathflag";
 import type { ExpressInfo } from "./resolve";
 import type { RoutesState } from "./routes";
 
@@ -24,6 +25,8 @@ export interface AdapterState {
   pendingOpts?: HoplensOptions;
   /** Function hops (autotrace.ts + the transform's ESM hook): what the register hook set up and saw. */
   autoTrace?: AutoTraceStats;
+  /** The request path's boot decision (pathflag.ts), made by the register hook before anything loads. */
+  path?: PathDecision;
   /** The code-level autoTrace hint was printed. */
   autoTraceHinted?: boolean;
   /** hoplens() with no app listen ahead of it: boot anyway after a while. */

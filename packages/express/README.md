@@ -239,16 +239,37 @@ runtime starts right before your app's first `listen()`; a script that never lis
 | `HOPLENS_OPTIONS` | JSON `HoplensOptions`, applied before code options |
 | `HOPLENS_IGNORE` | Comma-separated path prefixes never traced, e.g. `/health,/metrics` |
 | `HOPLENS_AUTOTRACE` | `0` turns function hops off (read when the register hook loads) |
-| `HOPLENS_PATH` | `1` starts V8 block coverage at boot for Trace path (read by the register hook only; restart to change it; refused under `NODE_V8_COVERAGE`) |
+| `HOPLENS_PATH` | `1` starts V8 block coverage at boot for Trace path, `0` keeps it off; either wins over the sticky flag (read by the register hook only; restart to change it; refused under `NODE_V8_COVERAGE`) |
 
 `persist` is on by default here and writes route stats to `node_modules/.cache/hoplens`.
 
 ## Trace path (request path)
 
-With `HOPLENS_PATH=1` the register hook starts V8 block coverage before your app loads, and the
-banner says `request path: on`. `POST /__hoplens/api/traces/:id/path` then replays that trace once,
-alone, as a **new** trace, and reports which handler and function code it ran, block by block.
-Unset, nothing of it loads.
+The request path is off by default. Turn it on once and it stays on across restarts:
+
+- **From the UI:** the Path tab's **Enable request path** button. It writes a small flag file,
+  `node_modules/.cache/hoplens/path.json` (`{"enabled":true,"since":"<ISO time>","by":"ui"}`, in the
+  `stateDir` from `HOPLENS_OPTIONS` when you set one), and shows *Restart your dev server to apply*:
+  coverage must start before your app loads, so the flag is read at the next start (saving a file
+  restarts `node --watch`). Once it is on, the Path pane's footer has a **Disable** link that removes
+  the flag, again for the next start.
+- **From the CLI:** `npx hoplens init` asks (`--path` / `--no-path` answer without asking).
+- **From the environment:** `HOPLENS_PATH=1` turns it on and `HOPLENS_PATH=0` off, and the env var
+  always wins over the flag (the UI then says "set by HOPLENS_PATH" and offers no toggle).
+
+At boot the register hook decides in that order: `HOPLENS_PATH`, else the flag, else off. Reading the
+flag is the only thing it does with the path off: nothing of it loads. The gate is unchanged (off
+under `NODE_ENV=production` / `test`). With it on, the hook starts V8 block coverage before your app
+loads, and the banner says `request path: on (flag; disable in the Path tab)` or `request path: on
+(HOPLENS_PATH)`. `/__hoplens/api/meta` reports `path.source` (`env`, `flag` or `default`) and
+`path.pending` (`on` / `off`) after a toggle that waits for the restart.
+
+The switch is `POST /__hoplens/api/path/enable` and `POST /__hoplens/api/path/disable`, answered only
+for callers on this machine (even with `allowRemote`); both answer 409 `env` when `HOPLENS_PATH` is
+set. Next.js apps answer 409 `unsupported`: the request path is Express only for now.
+
+`POST /__hoplens/api/traces/:id/path` then replays a trace once, alone, as a **new** trace, and
+reports which handler and function code it ran, block by block.
 
 - GET and HEAD only: replaying anything else would run its side effects again (400 `method`).
 - It waits for the app to be idle first. A request still in flight after 3s gives 409 `not-quiet`

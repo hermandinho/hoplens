@@ -1,4 +1,5 @@
 import type { Runtime } from "@hoplens/core";
+import type { PathSource } from "./pathflag";
 import { type AutoTraceStats, adapterState } from "./state";
 
 /** Banner note with `persist: false`: no manifest, so a restart is never matched to the files it changed. */
@@ -59,19 +60,31 @@ function print(): void {
 /** The request path's coverage handle (@hoplens/core/coverage), read off its global: no import. */
 const COVERAGE = Symbol.for("hoplens.coverage");
 
-export const PATH_ON_LINE = "request path: on (block coverage; CPU-heavy code runs slower)";
+/** `request path: on (HOPLENS_PATH)` / `request path: on (flag; disable in the Path tab)`. */
+export function pathOnLine(source: PathSource | undefined): string {
+  return source === "flag" ? "request path: on (flag; disable in the Path tab)" : "request path: on (HOPLENS_PATH)";
+}
 
-/** Banner lines for the request path, or undefined when HOPLENS_PATH was not set. Exported for tests. */
+/** Set by HOPLENS_PATH. Kept for callers of the P1 name. */
+export const PATH_ON_LINE = pathOnLine("env");
+
+/**
+ * Banner lines for the request path, or undefined when it was not asked for at boot (no coverage
+ * handle). `source` says who asked: HOPLENS_PATH or the sticky flag. Exported for tests.
+ */
 export function pathBanner(
   cov: { state?: string; reason?: string } | undefined = (globalThis as any)[COVERAGE],
+  source: PathSource | undefined = adapterState().path?.source,
 ): { info?: string; note?: string } | undefined {
   if (!cov) return undefined;
-  if (cov.state === "on") return { info: PATH_ON_LINE };
+  if (cov.state === "on") return { info: pathOnLine(source) };
   if (cov.state === "disabled-c8")
     return { note: "request path disabled: NODE_V8_COVERAGE is set (c8 owns V8 coverage); unset it to use Trace path" };
+  const silence =
+    source === "flag" ? "disable it in the Path tab to silence this" : "unset HOPLENS_PATH to silence this";
   if (cov.state === "error")
     return {
-      note: `request path failed to start: ${cov.reason ?? "coverage did not start"}; the app runs without it (unset HOPLENS_PATH to silence this)`,
+      note: `request path failed to start: ${cov.reason ?? "coverage did not start"}; the app runs without it (${silence})`,
     };
   return { note: `request path off: ${cov.reason ?? cov.state ?? "coverage did not start"}` };
 }

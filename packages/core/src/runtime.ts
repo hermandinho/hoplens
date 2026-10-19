@@ -36,6 +36,7 @@ import {
 } from "./manifest";
 import { DEFAULT_REDACT, type ResolvedOptions } from "./options";
 import type { PathAnalyzer } from "./path/analyze";
+import type { PathControl } from "./path/capture";
 import { type PersistRow, Persister, type PersisterOptions, persistDir, rowToTrace, traceRow } from "./persist";
 import { QueryStatsStore } from "./queries";
 import { RegressionTracker } from "./regressions";
@@ -79,9 +80,10 @@ export interface RuntimeConfig {
   /**
    * Request path (HOPLENS_PATH=1): `analyzer` builds a file's control-flow model for the per-decision
    * truth (core has no TypeScript; `@hoplens/express` passes `@hoplens/transform/cfg`). Without one,
-   * path payloads keep function-level truth and every decision is UNKNOWN 'no-analyzer'.
+   * path payloads keep function-level truth and every decision is UNKNOWN 'no-analyzer'. `control`
+   * is the adapter's sticky on/off switch (PathControl), behind POST /api/path/enable|disable.
    */
-  path?: { analyzer?: PathAnalyzer };
+  path?: { analyzer?: PathAnalyzer; control?: PathControl };
 }
 
 /**
@@ -103,6 +105,11 @@ export class Runtime {
   readonly framework?: { name: string; version?: string };
   /** Builds control-flow models for request-path payloads (RuntimeConfig.path.analyzer). */
   readonly pathAnalyzer?: PathAnalyzer;
+  /**
+   * The adapter's sticky request-path switch (RuntimeConfig.path.control): behind POST
+   * /api/path/enable|disable and meta.path.source/pending. Absent on adapters without one (Next).
+   */
+  readonly pathControl?: PathControl;
   readonly log: Logger;
   readonly startedAt = Date.now();
   /** Coarse dev-rebuild epochs for the cold/epoch facts. See epoch.ts for the signal. */
@@ -150,6 +157,7 @@ export class Runtime {
     this.httpTap = cfg.httpTap;
     this.framework = cfg.framework;
     this.pathAnalyzer = cfg.path?.analyzer;
+    this.pathControl = cfg.path?.control;
     this.banner = cfg.banner;
     this.persistCfg = cfg.persist;
     this.log = createLogger("runtime");

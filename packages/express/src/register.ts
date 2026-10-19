@@ -8,17 +8,21 @@
 // the core-free shim goes in first and the transform's ESM hook and CommonJS layer wrap the exported
 // functions of the app's own modules as they load (autotrace.ts).
 //
-// Request path (HOPLENS_PATH=1): V8 block coverage starts first, before the shim and the hooks, so
-// every app module compiles with block counters. Only @hoplens/core/coverage loads for it (one small
-// file, node:inspector inside); without the flag nothing of it is loaded.
+// Request path: decided first (pathflag.ts: HOPLENS_PATH=1/0 always wins, else the sticky flag file
+// `<stateDir>/path.json` the UI's Enable button or `hoplens init --path` writes; one small file read,
+// nothing loaded). When on, V8 block coverage starts before the shim and the hooks, so every app
+// module compiles with block counters. Only @hoplens/core/coverage loads for it (one small file,
+// node:inspector inside); with the path off nothing of it is loaded.
 //
 // Main thread only: under `-r` Node also runs this preload inside the module hooks worker.
 
 import { isMainThread } from "node:worker_threads";
 import { installShim, readAutoTrace, startFunctionHops } from "./autotrace";
-import { pathRequested, shouldStart } from "./gate";
+import { shouldStart } from "./gate";
+import { pathDecision } from "./pathflag";
 import { earlyRoot, installRoutes } from "./routes";
 import { install } from "./start";
+import { adapterState } from "./state";
 
 /** Each step on its own: one failing never stops the next, and none breaks the app. */
 function step(fn: () => void): void {
@@ -31,7 +35,13 @@ function step(fn: () => void): void {
 
 try {
   if (isMainThread && shouldStart()) {
-    if (pathRequested()) {
+    let on = false;
+    step(() => {
+      const d = pathDecision();
+      adapterState().path ??= d;
+      on = adapterState().path!.on;
+    });
+    if (on) {
       step(() => {
         (require("@hoplens/core/coverage") as typeof import("@hoplens/core/coverage")).startCoverage();
       });

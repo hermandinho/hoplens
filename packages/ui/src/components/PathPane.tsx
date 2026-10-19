@@ -3,13 +3,17 @@ import type { PathPayload, PathTraceStamp, TraceRecord } from "../api/types";
 import { pathMode } from "../state/canvas";
 import { register } from "../state/keymap";
 import {
+  PATH_COST_NOTE,
+  PATH_RESTART_NOTE,
   PHASES,
   PHASE_TEXT,
   type PathChip,
   type PathErrorView,
+  type PathSwitch,
   QUALITY,
   type TrailRow,
   enterOpensLane,
+  envFootText,
   laneCursor,
   loadPath,
   methodBlock,
@@ -21,8 +25,11 @@ import {
   pathLoad,
   pathPayloads,
   pathReady,
+  pathSwitch,
+  pathSwitchJob,
   retryLoadPath,
   runTracePath,
+  setPathEnabled,
   trailModel,
   trailSummary,
   verdictModel,
@@ -50,6 +57,7 @@ export function PathPane({ trace, stamp }: { trace: TraceRecord; stamp?: PathTra
       ) : (
         <TracePathAction key={trace.id} trace={trace} />
       )}
+      <SwitchFooter />
     </div>
   );
 }
@@ -60,7 +68,10 @@ function TracePathAction({ trace }: { trace: TraceRecord }) {
   const off = offView(metaState.value, frameworkCopy.value.isNext);
   const job = pathJob.value;
   const fail = pathFailure.value?.sourceId === trace.id ? pathFailure.value.view : null;
-  if (off) return <OffState title={off.title} body={off.body} command={off.command} />;
+  if (off) {
+    const sw = metaState.value?.path?.state === "off" ? pathSwitch(metaState.value, frameworkCopy.value.isNext) : null;
+    return <OffState title={off.title} body={off.body} command={off.command} commandNote={off.commandNote} sw={sw} />;
+  }
   const blocked = methodBlock(trace.method);
   const running = job?.sourceId === trace.id;
   const ready = pathReady.value?.sourceId === trace.id ? pathReady.value.traceId : null;
@@ -152,13 +163,110 @@ function ErrorBox({ view, onRetry }: { view: PathErrorView; onRetry?: () => void
   );
 }
 
-function OffState({ title, body, command }: { title: string; body: string; command?: string }) {
+/** The sticky switch: Enable (off) or its pending note. Inline in the off state (HOPLENS_PATH: none). */
+function SwitchControls({ sw }: { sw: PathSwitch }) {
+  const job = pathSwitchJob.value;
+  const error = job.error && (
+    <p class="path-note path-switch-error" role="alert">
+      {job.error}
+    </p>
+  );
+  switch (sw.kind) {
+    case "enable":
+      return (
+        <>
+          <div class="path-action">
+            <button
+              type="button"
+              class="sbtn path-go"
+              disabled={job.busy}
+              onClick={() => void setPathEnabled(true)}
+              title="Writes a flag in Hoplens' state dir; the next start of the dev server reads it"
+            >
+              Enable request path
+            </button>
+            <span class="dim">-- {PATH_COST_NOTE}</span>
+          </div>
+          {error}
+        </>
+      );
+    case "pending-on":
+      return (
+        <>
+          <output class="path-note path-pending">
+            <span class="path-badge path-badge-pending">on at next start</span> {PATH_RESTART_NOTE}.{" "}
+            <button type="button" class="link-btn" disabled={job.busy} onClick={() => void setPathEnabled(false)}>
+              Undo
+            </button>
+          </output>
+          {error}
+        </>
+      );
+    default:
+      // env: the off state's title already says HOPLENS_PATH decides; the footer covers the rest.
+      return null;
+  }
+}
+
+/** Under the pane when the path is not plain off: Disable (on via the flag) or who decided. */
+function SwitchFooter() {
+  const meta = metaState.value;
+  const sw = pathSwitch(meta, frameworkCopy.value.isNext);
+  // Plain off: the off state carries the switch. Enable / pending-on only arise there.
+  if (!sw || meta?.path?.state === "off" || sw.kind === "enable" || sw.kind === "pending-on") return null;
+  const job = pathSwitchJob.value;
+  return (
+    <div class="path-switch-foot">
+      {sw.kind === "env" && <span class="dim">{envFootText(meta?.path?.state)}</span>}
+      {sw.kind === "disable" && (
+        <span class="dim">
+          Request path: on (enabled here).{" "}
+          <button
+            type="button"
+            class="link-btn"
+            disabled={job.busy}
+            title="Removes the flag; the next start runs without block coverage"
+            onClick={() => void setPathEnabled(false)}
+          >
+            Disable
+          </button>
+        </span>
+      )}
+      {sw.kind === "pending-off" && (
+        <output class="path-pending">
+          <span class="path-badge path-badge-pending">off at next start</span>{" "}
+          <span class="dim">{PATH_RESTART_NOTE}.</span>{" "}
+          <button type="button" class="link-btn" disabled={job.busy} onClick={() => void setPathEnabled(true)}>
+            Keep it on
+          </button>
+        </output>
+      )}
+      {job.error && (
+        <p class="path-note path-switch-error" role="alert">
+          {job.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function OffState({
+  title,
+  body,
+  command,
+  commandNote,
+  sw,
+}: { title: string; body: string; command?: string; commandNote?: string; sw?: PathSwitch | null }) {
   const [copied, setCopied] = useState<"" | "ok" | "fail">("");
   return (
     <div class="path-empty">
       <b class="path-off-title">{title}</b>
       <p class="muted">{body}</p>
-      {command && (
+      {sw && <SwitchControls sw={sw} />}
+      {command && (commandNote || sw?.kind === "enable") && (
+        <span class="path-note">{commandNote ?? "Or set it in the dev server's shell:"}</span>
+      )}
+      {command && sw?.kind !== "pending-on" && (
         <div class="path-cmd">
           <code class="mono">{command}</code>
           <button

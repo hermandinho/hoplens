@@ -117,6 +117,24 @@ describe("resyncTraces", () => {
     expect(infoNote.value).toBeNull();
   });
 
+  test("a restart that applied a pending path switch says what changed and what to do next", async () => {
+    const withPath = (path: Meta["path"]) => ({ ...meta({ name: "express", version: "5.3.0" }), path }) as Meta;
+    tracesState.value = [row("old1")];
+    metaState.value = withPath({ state: "off", source: "default", pending: "on" } as Meta["path"]);
+    vi.spyOn(api, "traces").mockResolvedValue([]);
+    vi.spyOn(api, "meta").mockResolvedValue(withPath({ state: "on", source: "flag" } as Meta["path"]));
+    await resyncTraces();
+    // The open request is gone after a restart: point at a new one rather than leave the user waiting.
+    expect(infoNote.value).toMatch(/Request path is now on/);
+    expect(infoNote.value).toMatch(/open a new request/i);
+
+    tracesState.value = [];
+    metaState.value = withPath({ state: "on", source: "flag", pending: "off" } as Meta["path"]);
+    vi.spyOn(api, "meta").mockResolvedValue(withPath({ state: "off", source: "default" } as Meta["path"]));
+    await resyncTraces();
+    expect(infoNote.value).toMatch(/Request path is now off/);
+  });
+
   test("rows that arrive live while meta/routes are fetched are kept, not counted as lost", async () => {
     tracesState.value = [row("a")];
     let finishRoutes!: (d: Discovery) => void;

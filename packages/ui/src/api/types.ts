@@ -921,6 +921,10 @@ export interface StatsResponse {
 export interface PathMeta {
   state: "off" | "on" | "disabled-c8" | "error";
   reason?: string;
+  /** Why it is on / off at this boot: HOPLENS_PATH, the sticky flag (Enable here), or neither. Absent on an older core. */
+  source?: "env" | "flag" | "default";
+  /** The switch was flipped since boot: the state the next start will have. */
+  pending?: "on" | "off";
 }
 
 export interface Meta {

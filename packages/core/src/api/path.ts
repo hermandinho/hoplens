@@ -21,9 +21,18 @@
 //   409 not-quiet       `{ reason, inflight, requests? }`: the app never went idle; nothing was sent
 //   500 take-failed     reading the counts failed
 //   502 replay-failed   `{ status }`: the replay failed or hit its time limit (30s)
+//
+// POST /api/path/enable  -> 200 { path: PathMeta }: the adapter's sticky switch (RuntimeConfig.path.control)
+// POST /api/path/disable    writes / removes its flag; it applies at the next start, so the answer
+//                           carries `pending` until then. Loopback only, even with allowRemote, and a
+//                           browser POST from a non-local Origin is refused.
+//   409 env             HOPLENS_PATH decided this boot: the env var always wins
+//   409 unsupported     the adapter has no switch (Express only for now)
+//   403 forbidden       not from this machine, or from a non-local origin
+//   500 write-failed    the flag file could not be written / removed
 
 import { analyzePayload } from "../path/analyze";
-import { type CaptureDeps, PathError, type PathPayload, capturePath, pathResults } from "../path/capture";
+import { type CaptureDeps, PathError, type PathPayload, capturePath, pathMeta, pathResults } from "../path/capture";
 import { coverageHandle } from "../path/coverage";
 import { batchesRunning, prepareRun, resendHeaders, runOnce } from "../replay";
 import type { Runtime } from "../runtime";
@@ -88,7 +97,69 @@ const read: ApiHandle = (_req, res, rt, ctx) => {
   sendJson(res, 404, { code: "no-path", error: "No request path for this trace. Trace path makes one." });
 };
 
+const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** The hostname of a `host[:port]` (Host header) or an origin URL is localhost / 127.0.0.1 / [::1]. */
+function localHostname(value: unknown, isOrigin: boolean): boolean {
+  if (typeof value !== "string" || !value) return false;
+  try {
+    return LOCAL_HOSTS.has(new URL(isOrigin ? value : `http://${value}`).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A caller on this machine, addressing the server by a local name (Host), whose page (if a browser
+ * sent an Origin) is the UI itself or another local origin (the UI's Vite dev server): the toggle
+ * writes a file, so allowRemote does not widen it, a web page elsewhere cannot flip it with a blind
+ * cross-origin POST, and a DNS-rebound name (Origin == Host == attacker.example) is refused by the
+ * Host check. Exported for tests.
+ */
+export function trustedCaller(req: { socket: { remoteAddress?: string }; headers: Record<string, unknown> }): boolean {
+  if (!LOOPBACK.has(req.socket.remoteAddress ?? "")) return false;
+  if (!localHostname(req.headers.host, false)) return false;
+  const origin = req.headers.origin;
+  return origin === undefined || localHostname(origin, true);
+}
+
+/** POST /api/path/enable|disable: the adapter's sticky switch, applied at the next start. */
+export function toggle(on: boolean): ApiHandle {
+  return (req, res, rt) => {
+    if (!trustedCaller(req))
+      return sendJson(res, 403, {
+        code: "forbidden",
+        error: "The request path switch only answers the Hoplens UI on this machine.",
+      });
+    const control = rt.pathControl;
+    if (!control)
+      return sendJson(res, 409, {
+        code: "unsupported",
+        error: "Express only for now: this adapter has no request path switch.",
+      });
+    if (control.source === "env")
+      return sendJson(res, 409, {
+        code: "env",
+        error: `HOPLENS_PATH=${process.env.HOPLENS_PATH ?? ""} is set in the environment, and it always wins over the switch. Change or unset it, then restart the app.`,
+      });
+    try {
+      if (on) control.enable();
+      else control.disable();
+    } catch (err) {
+      return sendJson(res, 500, {
+        code: "write-failed",
+        error: `Could not ${on ? "write" : "remove"} the request path flag: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+    sendJson(res, 200, { path: pathMeta(undefined, process.env, control) });
+  };
+}
+
 export const endpoints: ApiEndpoint[] = [
   { method: "POST", path: "/api/traces/:id/path", handle: capture },
   { method: "GET", path: "/api/traces/:id/path", handle: read },
+  { method: "POST", path: "/api/path/enable", handle: toggle(true) },
+  { method: "POST", path: "/api/path/disable", handle: toggle(false) },
 ];

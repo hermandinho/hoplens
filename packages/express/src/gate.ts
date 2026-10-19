@@ -15,9 +15,8 @@ export function shouldStart(env: Env = process.env): boolean {
 }
 
 /**
- * HOPLENS_PATH=1 (or true): the request path's block coverage starts in the register hook, before
- * any app module loads. Same rule as @hoplens/core/coverage pathFlag(), read here so a process
- * without the flag never loads that module.
+ * HOPLENS_PATH=1 (or true). Same rule as @hoplens/core/coverage pathFlag(). The register hook's full
+ * decision (HOPLENS_PATH=0 and the sticky flag file too) is pathDecision() in pathflag.ts.
  */
 export function pathRequested(env: Env = process.env): boolean {
   const v = env.HOPLENS_PATH;

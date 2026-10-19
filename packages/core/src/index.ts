@@ -51,6 +51,8 @@ export {
   type Lane,
   type PathFn,
   type PathMeta,
+  type PathControl,
+  type PathSource,
   type PathPayload,
   type PathQuality,
   type PathRange,

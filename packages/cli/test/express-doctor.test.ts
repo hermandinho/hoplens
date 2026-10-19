@@ -231,13 +231,13 @@ describe("hoplens doctor (express)", () => {
   test("request path: an info line when HOPLENS_PATH=1 is in the dev script, a warning with NODE_V8_COVERAGE", async () => {
     healthy();
     await run();
-    expect(out.text()).not.toContain("request path");
+    expect(out.text()).toContain("• request path: off — enable it in the Path tab or with hoplens init --path");
 
     out.restore();
     out = captureConsole();
     healthy({ scripts: { dev: `HOPLENS_PATH=1 node --watch ${F} src/server.js` } });
     await run();
-    expect(out.text()).toContain("• request path is on (HOPLENS_PATH=1 in scripts.dev)");
+    expect(out.text()).toContain("• request path: on (HOPLENS_PATH) — HOPLENS_PATH=1 in scripts.dev");
     expect(out.text()).not.toContain("NODE_V8_COVERAGE");
     expect(process.exitCode).toBe(0);
 
@@ -252,7 +252,7 @@ describe("hoplens doctor (express)", () => {
   test("request path: HOPLENS_PATH=1 in the environment", () => {
     const warnings: string[] = [];
     doctorPath(null, { HOPLENS_PATH: "1" }, { nope: (s) => warnings.push(s) });
-    expect(out.text()).toContain("request path is on (HOPLENS_PATH=1 in the environment)");
+    expect(out.text()).toContain("request path: on (HOPLENS_PATH) — HOPLENS_PATH=1 in the environment");
     expect(warnings).toEqual([]);
     doctorPath(
       { key: "dev", cmd: "c8 node src/server.js" },

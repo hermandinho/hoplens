@@ -8,8 +8,8 @@ import { cfgAnalyzer } from "./analyzer";
 import { bindFnShim } from "./autotrace";
 import { appListening, uiReady } from "./banner";
 import { ExpressDiscoverySource } from "./discovery";
-import { pathRequested } from "./gate";
 import { resolveOptions } from "./options";
+import { pathControl, pathDecision } from "./pathflag";
 import { resolveExpress } from "./resolve";
 import { adapterState } from "./state";
 import { createTap } from "./tap";
@@ -183,6 +183,10 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
     const core = require("@hoplens/core") as typeof import("@hoplens/core");
     s.express = resolveExpress(options.root);
     const analyzer = cfgAnalyzer(options.root);
+    // The register hook decided at its start; without it (hoplens(app) alone) decide now, for meta
+    // and the switch: coverage cannot start this late, and meta says so.
+    s.path ??= pathDecision();
+    const pathOn = s.path.on;
     rt = new core.Runtime({
       options,
       discovery: new ExpressDiscoverySource(options.root),
@@ -196,12 +200,12 @@ export function boot(opts?: HoplensOptions, appPort?: number): Runtime | undefin
         options.persist === false ? { mode: "none" } : { mode: "restart", typescript: () => loadTs(options.root) },
       samePortRetryMs: SAME_PORT_RETRY_MS,
       // Request path: decisions need the control-flow model (TypeScript), loaded on first use.
-      path: { analyzer },
+      path: { analyzer, control: pathControl(s.path) },
     });
     rt.start();
     // With the request path on, load TypeScript once the app has booted, so the first Trace path
     // does not pay for it (~0.3s, once).
-    if (pathRequested()) {
+    if (pathOn) {
       const t = setTimeout(() => {
         try {
           analyzer.warm?.();

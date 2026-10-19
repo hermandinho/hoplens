@@ -159,7 +159,7 @@ addRoute("GET", "/api/meta", ({ rt, res }) => {
     otel: rt.otel,
     configured: rt.options.configured,
     autoTrace: rt.options.autoTrace ?? true,
-    path: pathMeta(),
+    path: pathMeta(undefined, process.env, rt.pathControl),
     profiles: Object.fromEntries(
       Object.entries(rt.options.profiles ?? {}).map(([k, v]) => [
         k,

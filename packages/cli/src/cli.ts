@@ -17,15 +17,19 @@ const commands: Record<string, Command> = {
   init: {
     run: init,
     summary: "wire Hoplens into next.config and instrumentation (or the Express dev script)",
-    help: `Usage: hoplens init [--dry-run] [--framework next|express]
+    help: `Usage: hoplens init [--dry-run] [--framework next|express] [--path | --no-path]
 
   Next.js: patches next.config.* with withHoplens() and adds hoplens/node to
   the instrumentation register() hook.
   Express: adds --import hoplens/express/register to the dev script in
   package.json (scripts.dev, else start:dev or watch). Nothing else changes.
-  Idempotent and safe to re-run.
+  In a terminal it then asks whether to enable request path tracing (default
+  no). Idempotent and safe to re-run.
 
   --dry-run      Print the proposed edits without touching any file.
+  --path         Express: enable request path tracing without asking (writes
+                 node_modules/.cache/hoplens/path.json; HOPLENS_PATH=0 wins).
+  --no-path      Express: don't ask; removes that flag if it is there.
   --framework    next or express. Detected from package.json; needed when
                  the project depends on both.`,
   },
@@ -49,7 +53,7 @@ const commands: Record<string, Command> = {
   block from instrumentation.register(). Deletes files that init created
   when nothing user-authored remains.
   Express: takes init's flag out of the dev script and deletes
-  node_modules/.cache/hoplens. Idempotent.
+  node_modules/.cache/hoplens (the request path flag with it). Idempotent.
 
   --dry-run      Print the proposed edits without touching any file.
   --framework    next or express. Detected from package.json; needed when

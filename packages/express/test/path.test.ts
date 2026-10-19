@@ -163,7 +163,7 @@ describe("request path (HOPLENS_PATH=1)", () => {
     expect(s.probe).toMatchObject({ inspector: true, coverageModule: true, coverage: true });
     await poll(async () => (s.stdout().includes(PATH_ON_LINE) ? true : undefined));
     const meta = await json(s.port, "GET", "/__hoplens/api/meta");
-    expect(meta.body.path).toEqual({ state: "on" });
+    expect(meta.body.path).toEqual({ state: "on", source: "env" });
   });
 
   test("POST path for GET /api/products/1: handler + findProduct lanes with block ranges, EXACT", async () => {

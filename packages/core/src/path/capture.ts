@@ -216,17 +216,59 @@ export class PathError extends Error {
 
 /* ------------------------------------------------------------ state + meta */
 
+/** Where the boot decision came from: HOPLENS_PATH, the adapter's sticky flag file, or neither (off). */
+export type PathSource = "env" | "flag" | "default";
+
 export interface PathMeta {
   state: "off" | "on" | "disabled-c8" | "error";
   reason?: string;
+  /** Why the path is on or off at this boot. Absent on a core that predates the sticky toggle. */
+  source?: PathSource;
+  /**
+   * The flag file now asks for the other state (toggled since boot): it applies at the next start.
+   * Never set when HOPLENS_PATH decided (`source: 'env'`).
+   */
+  pending?: "on" | "off";
+}
+
+/**
+ * The adapter's sticky on/off switch for the request path (`@hoplens/express`: a flag file in its
+ * state dir, read by the register hook at the next start). Core only calls it from the toggle API
+ * (POST /api/path/enable|disable) and /api/meta; without one (Next) the toggle answers 409.
+ */
+export interface PathControl {
+  /** How this boot decided (fixed for the process). */
+  readonly source: PathSource;
+  /** The state the flag file asks for at the next start, when it differs from this boot's. */
+  pending(): "on" | "off" | undefined;
+  /** Write the flag (atomically). Throws on a file-system error. */
+  enable(): void;
+  /** Remove the flag. Throws on a file-system error. */
+  disable(): void;
 }
 
 /** The request path's state for /api/meta, the banner and the routes. */
-export function pathMeta(cov: CoverageSource | undefined = coverageHandle(), env = process.env): PathMeta {
-  if (cov) return cov.reason ? { state: cov.state, reason: cov.reason } : { state: cov.state };
-  return pathFlag(env)
-    ? { state: "off", reason: "HOPLENS_PATH is set but coverage did not start at boot (load the register hook)" }
-    : { state: "off", reason: "restart with HOPLENS_PATH=1" };
+export function pathMeta(
+  cov: CoverageSource | undefined = coverageHandle(),
+  env = process.env,
+  control?: PathControl,
+): PathMeta {
+  const source: PathSource = control?.source ?? (env.HOPLENS_PATH ? "env" : "default");
+  let pending: "on" | "off" | undefined;
+  try {
+    pending = source === "env" ? undefined : control?.pending();
+  } catch {
+    pending = undefined;
+  }
+  const extra = pending ? { source, pending } : { source };
+  if (cov) return cov.reason ? { state: cov.state, reason: cov.reason, ...extra } : { state: cov.state, ...extra };
+  let reason: string;
+  if (source === "flag")
+    reason = "the request path is enabled but coverage did not start at boot (load the register hook)";
+  else if (pathFlag(env)) reason = "HOPLENS_PATH is set but coverage did not start at boot (load the register hook)";
+  else if (source === "env") reason = `HOPLENS_PATH=${env.HOPLENS_PATH} turns it off`;
+  else reason = control ? "enable it here, or restart with HOPLENS_PATH=1" : "restart with HOPLENS_PATH=1";
+  return { state: "off", reason, ...extra };
 }
 
 /* ------------------------------------------------------------------- deps */

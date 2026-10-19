@@ -3,6 +3,7 @@ import type {
   HealthSnapshot,
   HealthTick,
   Meta,
+  PathMeta,
   PathPayload,
   QueriesResponse,
   RunInput,
@@ -82,6 +83,16 @@ export const api = {
     if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
     return (await res.json()) as { traceId: string; path: PathPayload };
   },
+  /**
+   * The request path's sticky switch (Express): writes / removes the flag the next start reads.
+   * 409 when HOPLENS_PATH decides or the adapter has none; answers the new meta.path (with `pending`).
+   */
+  pathSwitch: async (on: boolean): Promise<{ path: PathMeta }> => {
+    const path = `/path/${on ? "enable" : "disable"}`;
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: { accept: "application/json" } });
+    if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
+    return (await res.json()) as { path: PathMeta };
+  },
   /** The stored path of a path trace (the last 20 are kept). */
   path: (id: string) => get<PathPayload>(`/traces/${encodeURIComponent(id)}/path`),
   run: async (input: RunInput): Promise<RunResult> => {
@@ -128,12 +139,15 @@ export interface LiveConnection {
 
 /**
  * Open the live-event SSE stream and invoke `onEvent` for each parsed event.
- * Reconnects with a capped backoff (1s → 30s) on disconnect. The returned
- * handle closes both the EventSource and any pending reconnect timer.
+ * Reconnects with a capped backoff (1s → 30s) on disconnect; `maxDelay`, read at each retry, lowers
+ * the cap (the store uses it while a request path toggle waits for the restart, so the tab notices
+ * the restart within seconds). The returned handle closes both the EventSource and any pending
+ * reconnect timer.
  */
 export function openLive(
   onEventMain: (ev: LiveEvent) => void,
   onStatus?: (status: "live" | "reconnecting") => void,
+  opts: { maxDelay?: () => number } = {},
 ): LiveConnection {
   const onEvent = (ev: LiveEvent) => {
     onEventMain(ev);
@@ -192,7 +206,7 @@ export function openLive(
       source?.close();
       source = null;
       onStatus?.("reconnecting");
-      timer = setTimeout(connect, delay);
+      timer = setTimeout(connect, Math.min(delay, opts.maxDelay?.() ?? 30_000));
       delay = Math.min(delay * 2, 30_000);
     };
   };

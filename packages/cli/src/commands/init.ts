@@ -3,6 +3,7 @@ import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
 import { initExpress } from "../express/commands";
 import { detectFramework, frameworkFlag } from "../framework";
+import { type PromptIO, terminalIO } from "../prompt";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
@@ -18,8 +19,10 @@ const BLOCK = [
  * adds the dynamic import to `instrumentation.*`. Express: adds the register hook to the dev script.
  * Idempotent and safe to re-run.
  */
-export async function init(args: string[]) {
+export async function init(args: string[], io: PromptIO = terminalIO()) {
   const dryRun = args.includes("--dry-run");
+  if (args.includes("--path") && args.includes("--no-path")) return fail("Pass --path or --no-path, not both.");
+  const pathFlag = args.includes("--path") ? true : args.includes("--no-path") ? false : undefined;
   const root = process.cwd();
 
   console.log(`\n${c.magenta("◆ Hoplens")} init\n`);
@@ -31,7 +34,9 @@ export async function init(args: string[]) {
   const fw = detectFramework(pkg, flag);
   if ("error" in fw)
     return fail(fw.neither ? `${fw.error} Hoplens supports Next.js (next) and Express (express).` : fw.error);
-  if (fw.framework === "express") return initExpress(root, pkg, dryRun);
+  if (fw.framework === "express") return initExpress(root, pkg, dryRun, { flag: pathFlag, io });
+  if (pathFlag !== undefined)
+    warn("--path / --no-path apply to Express projects only (the request path is Express only for now).");
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   if (!deps.next) return fail("This project doesn't depend on next.");
   const major = Number(

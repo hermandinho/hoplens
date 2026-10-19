@@ -8,6 +8,7 @@ import type {
   PathExit,
   PathFn,
   PathLoop,
+  PathMeta,
   PathPayload,
   PathPayloadAnalysis,
   PathQuality,
@@ -16,7 +17,7 @@ import type {
 } from "../api/types";
 import { pathMode } from "./canvas";
 import { route } from "./router";
-import { followLive, loadTrace, selectedTraceId } from "./store";
+import { followLive, loadTrace, metaState, selectedTraceId } from "./store";
 
 /*
  * Request path, Path mode of the Journey pane (plan P3): the trail of one replayed request, one lane
@@ -375,13 +376,20 @@ export function verdictModel(p: PathPayload): {
 export interface OffView {
   title: string;
   body: string;
-  /** Shell line to copy (sets the env var). */
+  /** Shell line to copy (sets, or for source env unsets, the env var). */
   command?: string;
+  /** The line above the command, when it needs one. */
+  commandNote?: string;
 }
 
 /** `$env:HOPLENS_PATH = "1"` on a Windows app root, `export HOPLENS_PATH=1` elsewhere. */
 export function envCommand(root: string | undefined): string {
   return root && /^[a-z]:[\\/]/i.test(root) ? `$env:HOPLENS_PATH = "1"` : "export HOPLENS_PATH=1";
+}
+
+/** `Remove-Item Env:HOPLENS_PATH` on a Windows app root, `unset HOPLENS_PATH` elsewhere. */
+export function unsetEnvCommand(root: string | undefined): string {
+  return root && /^[a-z]:[\\/]/i.test(root) ? "Remove-Item Env:HOPLENS_PATH" : "unset HOPLENS_PATH";
 }
 
 /** Why Path mode can't trace here, or null when the request path is on. */
@@ -411,11 +419,103 @@ export function offView(meta: Pick<Meta, "path" | "framework" | "root"> | null, 
         body: `${p.reason ?? "Coverage failed"}. Restart the app to try again.`,
       };
     default:
+      if (p.source === "env")
+        return {
+          title: "Request path is off (set by HOPLENS_PATH)",
+          body: `${p.reason ? `${capital(p.reason)}. ` : ""}The env var always wins over the switch here. It comes from the dev server's shell or an inline HOPLENS_PATH=... in its dev script (hoplens doctor says which): unset it to use the switch, or set it to 1, then restart the dev server.`,
+          command: unsetEnvCommand(meta?.root),
+          commandNote: "Unset it in the dev server's shell (if the dev script sets it, edit the script instead):",
+        };
+      if (p.source === "flag")
+        return {
+          title: "Request path is enabled but did not start",
+          body: `${p.reason ? `${capital(p.reason)}. ` : ""}Coverage has to start before the app loads, from the register hook.`,
+        };
+      if (p.source === "default" && p.pending === "on")
+        return {
+          title: "Request path: on at next start",
+          body: "Enabled here. It is read at boot, so block coverage starts with the next start of the dev server and stays on while it runs (CPU-heavy code runs slower).",
+        };
+      if (p.source === "default")
+        return {
+          title: "Request path is off",
+          body: "It is opt-in and read at boot: enable it here (it sticks across restarts), or set HOPLENS_PATH=1 in the dev server's environment. Coverage stays on while it runs, so CPU-heavy code runs slower.",
+          command: envCommand(meta?.root),
+        };
       return {
         title: "Request path is off",
         body: `${p.reason ? `${capital(p.reason)}. ` : ""}It is opt-in and read at boot: set HOPLENS_PATH=1, then restart the dev server. Coverage stays on while it runs, so CPU-heavy code runs slower.`,
         command: envCommand(meta?.root),
       };
+  }
+}
+
+/* ------------------------------------------------------------------ switch */
+
+/** The Enable button's cost note. */
+export const PATH_COST_NOTE = "block coverage from start; CPU-heavy code runs slower";
+/** After a toggle: the flag is read at the next start. */
+export const PATH_RESTART_NOTE = "Restart your dev server to apply (saving a file restarts node --watch)";
+
+/**
+ * The sticky switch's control for this boot, or null where there is none (Next, an older core):
+ * enable (off by default), pending-on (enabled, not applied yet), disable (on via the flag),
+ * pending-off (disabled, not applied yet), env (HOPLENS_PATH decides: no toggle).
+ */
+export type PathSwitch =
+  | { kind: "enable" }
+  | { kind: "pending-on" }
+  | { kind: "disable" }
+  | { kind: "pending-off" }
+  | { kind: "env" };
+
+export function pathSwitch(meta: Pick<Meta, "path"> | null, isNext: boolean): PathSwitch | null {
+  const p = meta?.path;
+  if (isNext || !p?.source) return null;
+  if (p.source === "env") return { kind: "env" };
+  if (p.source === "flag") return { kind: p.pending === "off" ? "pending-off" : "disable" };
+  return { kind: p.pending === "on" ? "pending-on" : "enable" };
+}
+
+/** The footer line when HOPLENS_PATH decides, worded like the banner and doctor when it is on. */
+export function envFootText(state: PathMeta["state"] | undefined): string {
+  return state === "on" ? "Request path: on (set by HOPLENS_PATH)" : "Request path: set by HOPLENS_PATH";
+}
+
+/** A switch call in flight, and the last one's failure (a sentence). */
+export const pathSwitchJob = signal<{ busy: boolean; error?: string }>({ busy: false });
+
+/** The sentence for a failed switch call. Exported for tests. */
+export function switchErrorText(err: unknown): string {
+  if (err instanceof HoplensApiError) {
+    try {
+      const body = JSON.parse(err.body) as { error?: string };
+      if (body?.error) return body.error;
+    } catch {
+      /* not JSON */
+    }
+    return err.status === 404
+      ? "This Hoplens core has no request path switch. Update @hoplens/core and @hoplens/express."
+      : `The switch failed (HTTP ${err.status})`;
+  }
+  return `The switch failed: ${(err as Error)?.message ?? "network error"}`;
+}
+
+/** Flip the sticky switch (POST), then show the answer's meta.path (its `pending`) right away. */
+export async function setPathEnabled(on: boolean): Promise<boolean> {
+  if (pathSwitchJob.peek().busy) return false;
+  pathSwitchJob.value = { busy: true };
+  try {
+    const res = await api.pathSwitch(on);
+    const meta = metaState.peek();
+    batch(() => {
+      if (meta) metaState.value = { ...meta, path: res.path as PathMeta };
+      pathSwitchJob.value = { busy: false };
+    });
+    return true;
+  } catch (err) {
+    pathSwitchJob.value = { busy: false, error: switchErrorText(err) };
+    return false;
   }
 }
 
@@ -475,7 +575,7 @@ export function pathErrorView(status: number, body: Partial<PathErrorBody> | und
       return {
         code,
         title: "The request path is off",
-        detail: `${error ?? ""} Set HOPLENS_PATH=1 and restart the app.`.trim(),
+        detail: `${error ?? ""} Turn it on (Enable request path, or HOPLENS_PATH=1) and restart the app.`.trim(),
         retry: false,
       };
     case "replay-failed": {

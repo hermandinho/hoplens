@@ -962,6 +962,8 @@ export type PathWhy =
   | "too-large"
   | "source-moved"
   | "compiled"
+  | "unmapped"
+  | "no-generated-text"
   | "after-throw"
   | "arms-inconsistent"
   | "no-analyzer"
@@ -1083,7 +1085,10 @@ export interface PathFn {
   line: number;
   startLine?: number;
   endLine?: number;
-  mapping: "identity" | "none";
+  /** identity: V8 ran the file itself; sourcemap: a loader's output, carried over by its source map. */
+  mapping: "identity" | "sourcemap" | "none";
+  /** The generated text V8 ran (mapping 'sourcemap'). */
+  generated?: { hash: string; length: number; via: "hook" | "debugger" };
   calls: { hops: number; coverage: number | null; checked: boolean };
   truth: PathTruth;
   blocks: boolean;

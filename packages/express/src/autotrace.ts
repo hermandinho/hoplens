@@ -243,9 +243,15 @@ export function raiseStackTraceLimit(): boolean {
 /**
  * Register the transform's ESM hook and CommonJS layer for the app's own modules (the `node` preset:
  * none of the Next.js excludes). Requires @hoplens/transform only now, after the gate and autoTrace passed.
- * False when there is nothing in scope or registration failed; never throws.
+ * False when there is nothing in scope or registration failed; never throws. `retainGenerated` (the
+ * request path is on): keep what another loader (tsx) compiled an app module to, so coverage offsets
+ * into it map back to the file.
  */
-export function startFunctionHops(setting: AutoTraceSetting, root: string | undefined): boolean {
+export function startFunctionHops(
+  setting: AutoTraceSetting,
+  root: string | undefined,
+  more: { retainGenerated?: boolean } = {},
+): boolean {
   if (!setting.on || !root) return false;
   try {
     const include = setting.include ?? defaultInclude(root);
@@ -259,6 +265,7 @@ export function startFunctionHops(setting: AutoTraceSetting, root: string | unde
       exclude: setting.exclude,
       preset: "node",
       framework: "express",
+      retainGenerated: more.retainGenerated === true,
       onReport: (r) => {
         if (r.type === "wrapped") {
           stats.files++;

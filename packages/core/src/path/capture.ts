@@ -27,6 +27,13 @@
 //
 // Nothing here loads node:inspector: the coverage handle comes from the boot hook (coverage.ts) via
 // a process global. With HOPLENS_PATH unset there is no handle and every capture answers "path off".
+// (The opt-in Debugger read of generated sources, scriptsource.ts, reads after the final take
+// through its own session, opened on first use and kept enabled; only with HOPLENS_PATH_DEBUGGER=1.)
+//
+// P5: a script V8 ran as a loader's output (tsx) joins through generated.ts + srcmap.ts
+// (scriptJoin): hop lines are matched through its source map's anchors, ranges stay offsets into the
+// generated text, and analyze.ts carries the analysis over (mapped.ts). No text, or one that does
+// not match V8's, is UNKNOWN with the reason.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -36,6 +43,16 @@ import { MAX_FN_SPANS_PER_TRACE, droppedFunctionSpans } from "../capture";
 import type { SpanRecord, TraceRecord } from "../types";
 import type { PayloadAnalysis } from "./analyze";
 import { type CoverageSource, type FunctionCoverage, type ScriptCoverage, coverageHandle, pathFlag } from "./coverage";
+import {
+  type GeneratedLookup,
+  type GeneratedVia,
+  compiledByMap,
+  defaultLookup,
+  retainedText,
+  urlPath,
+} from "./generated";
+import { debuggerFlag, debuggerSources } from "./scriptsource";
+import { MapError, type ReverseIndex, buildIndex } from "./srcmap";
 import type { FnAnalysis, TruthWhy } from "./truth";
 
 /* ------------------------------------------------------------------- model */
@@ -50,12 +67,18 @@ export type UnknownWhy = TruthWhy;
 
 export type Truth = { t: "taken"; n: number } | { t: "not" } | { t: "unknown"; why: UnknownWhy };
 
-/** One raw V8 block range: offsets into the source V8 ran (identity-mapped to the file on disk in P1). */
+/**
+ * One raw V8 block range: offsets into the source V8 ran (the file on disk for an identity mapping,
+ * the loader's generated text for a source-map one).
+ */
 export interface PathRange {
   start: number;
   end: number;
   count: number;
-  /** 1-based lines of `start` and `end` in the file on disk. */
+  /**
+   * 1-based lines of `start` and `end` in the file on disk (source-map mapping: the lines of the first
+   * and last anchor inside the range; display only, the truth model never reads them).
+   */
   line: number;
   endLine: number;
 }
@@ -72,9 +95,21 @@ export interface PathFn {
   /** Lines the joined function spans. */
   startLine?: number;
   endLine?: number;
-  mapping: "identity" | "none";
+  /**
+   * identity: V8 ran the file on disk (plain JavaScript, Node's type stripping). sourcemap: V8 ran a
+   * loader's output (tsx), `ranges` are offsets into it, and the analysis carries the generated
+   * model over to the file only where the source map makes it certain (mapped.ts).
+   */
+  mapping: "identity" | "sourcemap" | "none";
   /** sha1 (12 hex) of the file read at capture time; P2 checks it before trusting offsets. */
   sourceHash?: string;
+  /**
+   * identity on a file that starts with a BOM V8's text did not keep: `ranges` are offsets into the
+   * file without its first character (`sourceHash` is still the whole file's).
+   */
+  bom?: boolean;
+  /** The generated text V8 ran (mapping 'sourcemap'): its hash, length and where it came from. */
+  generated?: { hash: string; length: number; via: GeneratedVia };
   calls: { hops: number; coverage: number | null; checked: boolean };
   truth: Truth;
   /** V8 reported block (not just function) counts for this function. */
@@ -125,6 +160,8 @@ export interface PathWindow {
   control?: { ms: number; clean: boolean; reason?: string };
   /** Duration of the reset take and of the final take, ms. */
   takeMs: [number, number];
+  /** ms the opt-in Debugger read of generated sources took (scriptsource.ts), when it ran. */
+  debuggerMs?: number;
   /** Project scripts kept / scripts V8 reported. */
   scripts: number;
   totalScripts: number;
@@ -299,6 +336,13 @@ export interface CaptureDeps {
   busy?: () => string | undefined;
   /** Read a source file (default fs.readFileSync); undefined when unreadable. */
   readSource?: (abs: string) => string | undefined;
+  /**
+   * The text V8 ran, per script, when it is not the file (default: generated.ts defaultLookup, plus the
+   * Debugger read when `debuggerSource` is on).
+   */
+  generated?: GeneratedLookup;
+  /** Opt-in: read compiled scripts no loader retained through the process's Debugger session (default HOPLENS_PATH_DEBUGGER). */
+  debuggerSource?: boolean;
   timings?: Partial<PathTimings>;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -580,11 +624,35 @@ async function attempt(
   if (!final) throw takeFailed(cov, trace);
   const taint = others.taint();
 
+  let lookup = deps.generated;
+  let debuggerMs: number | undefined;
+  const debuggerWarnings: string[] = [];
+  if (!lookup) {
+    let extra: Map<string, string> | undefined;
+    if (deps.debuggerSource ?? debuggerFlag()) {
+      // After the final take: the Debugger's cost is outside the window.
+      const ids = final.scripts
+        .filter((s) => {
+          const abs = urlPath(s.url);
+          return abs !== undefined && retainedText(abs) === undefined && compiledByMap(abs, s.url);
+        })
+        .map((s) => s.scriptId);
+      if (ids.length) {
+        const d = debuggerSources(ids);
+        extra = d.sources;
+        debuggerMs = r1(d.ms);
+        if (d.error) debuggerWarnings.push(`the Debugger read of generated sources failed: ${d.error}`);
+      }
+    }
+    lookup = defaultLookup(extra);
+  }
   const built = buildPayload(trace, final.scripts, deps.root, deps.readSource ?? readFile, {
     droppedHops: droppedHops(trace),
     mtime: deps.readSource ? undefined : mtimeOf,
     processStart: PROCESS_START,
+    generated: lookup,
   });
+  built.warnings.push(...debuggerWarnings);
   const contamination: string[] = [];
   if (taint.length) contamination.push(`other requests ran during the capture: ${taint.slice(0, 5).join(", ")}`);
   for (const [key, extra] of Object.entries(built.excess))
@@ -610,6 +678,8 @@ async function attempt(
     lanes: built.lanes,
     functions: built.functions,
   };
+  if (debuggerMs !== undefined) payload.window.debuggerMs = debuggerMs;
+  if (built.mapped.size) mappedByPayload.set(payload, built.mapped);
   return {
     trace,
     payload,
@@ -786,7 +856,42 @@ interface JoinedRef {
   start: number;
 }
 
+/** A script V8 ran as a loader's generated text, with its reverse index (analyze.ts reads it). */
+export interface MappedScript {
+  text: string;
+  hash: string;
+  index: ReverseIndex;
+  via: GeneratedVia;
+}
+
+const mappedByPayload = new WeakMap<PathPayload, Map<string, MappedScript>>();
+
+/**
+ * The mapped scripts of a payload, by normalized absolute path. Kept off the payload itself: the
+ * texts can be large, and they are this process's (a payload is analyzed by the process that took it).
+ */
+export function mappedScripts(p: PathPayload): ReadonlyMap<string, MappedScript> | undefined {
+  return mappedByPayload.get(p);
+}
+
+/** Attach mapped scripts to a payload (tests build payloads by hand). */
+export function attachMapped(p: PathPayload, m: Map<string, MappedScript>): void {
+  mappedByPayload.set(p, m);
+}
+
+/** Normalized absolute path, the key of mappedScripts(). */
+export const mappedKey = (abs: string) => norm(abs);
+
+/** How a script's offsets reach the file on disk. */
+type ScriptJoin =
+  /** `text`: the file without its BOM, when V8 ran it so (its offsets are that text's). */
+  | { kind: "identity"; text?: SourceText }
+  | { kind: "mapped"; m: MappedScript; gen: SourceText }
+  | { kind: "unknown"; why: UnknownWhy; detail: string };
+
 interface Built {
+  /** Scripts joined through a source map, by mappedKey(abs). */
+  mapped: Map<string, MappedScript>;
   lanes: Lane[];
   functions: Record<string, PathFn>;
   excess: Record<string, number>;
@@ -816,12 +921,12 @@ function implausibleBlock(
   fn: FunctionCoverage,
   K: number,
   src: SourceText,
-): { count: number; line: number } | undefined {
+): { count: number; line: number; offset: number } | undefined {
   const start = fn.ranges[0]!.startOffset;
   for (const r of fn.ranges.slice(1)) {
     if (r.count <= K) continue;
     if (LOOP_WORD.test(stripComments(src.text.slice(start, r.startOffset)))) continue;
-    return { count: r.count, line: lineAt(src, r.startOffset) };
+    return { count: r.count, line: lineAt(src, r.startOffset), offset: r.startOffset };
   }
   return undefined;
 }
@@ -839,9 +944,25 @@ export function buildPayload(
     /** File mtime (ms) for the staleness check; omitted: no check. */
     mtime?: (abs: string) => number | undefined;
     processStart?: number;
+    /** The text V8 ran per script when it is not the file (generated.ts); omitted: identity. */
+    generated?: GeneratedLookup;
   } = {},
 ): Built {
   const droppedHopsN = opts.droppedHops ?? 0;
+  const mapped = new Map<string, MappedScript>();
+  const joins = new Map<string, ScriptJoin>();
+  const joinOf = (script: ScriptCoverage, abs: string, raw: SourceText): ScriptJoin => {
+    const k = norm(abs);
+    let j = joins.get(k);
+    if (!j) {
+      j = scriptJoin(script, abs, raw, opts.generated);
+      joins.set(k, j);
+      if (j.kind === "mapped") mapped.set(k, j.m);
+      else if (j.kind === "unknown")
+        warnings.push(`${path.relative(root, abs).split(path.sep).join("/")}: ${j.detail}`);
+    }
+    return j;
+  };
   const byFile = new Map<string, ScriptCoverage>();
   for (const s of scripts) {
     try {
@@ -931,7 +1052,23 @@ export function buildPayload(
     if (mt !== undefined && opts.processStart !== undefined && mt > opts.processStart + MTIME_SLACK_MS)
       base.stale = true;
     if (!script) return base;
-    const joined = join(s, script, src);
+    const sj = joinOf(script, abs, src);
+    if (sj.kind === "unknown") {
+      base.truth = { t: "unknown", why: sj.why };
+      return base;
+    }
+    // Lines of generated offsets: through the source map's anchors (display and the hop join only).
+    const m = sj.kind === "mapped" ? sj.m : undefined;
+    // Identity reads V8's offsets in the text V8 ran: the file, or the file without its BOM.
+    const own = sj.kind === "identity" && sj.text ? sj.text : src;
+    const ran = sj.kind === "mapped" ? sj.gen : own;
+    const startLine = (r: { startOffset: number; endOffset: number }) =>
+      m ? m.index.rawLine(r.startOffset, r.endOffset) : lineAt(own, r.startOffset);
+    const endLine = (r: { startOffset: number; endOffset: number }) =>
+      m
+        ? (m.index.rawEndLine(r.startOffset, r.endOffset) ?? startLine(r))
+        : lineAt(own, Math.max(r.startOffset, r.endOffset - 1));
+    const joined = join(s, script, (f) => startLine(f.ranges[0]!));
     if (joined === "ambiguous") {
       base.truth = { t: "unknown", why: "join-ambiguous" };
       return base;
@@ -941,21 +1078,26 @@ export function buildPayload(
     joinedRefs.push({ url: script.url, start: r0.startOffset });
     const K = r0.count;
     const H = base.calls.hops;
-    base.mapping = "identity";
+    base.mapping = m ? "sourcemap" : "identity";
+    if (own !== src) base.bom = true;
+    if (m) base.generated = { hash: m.hash, length: m.text.length, via: m.via };
     base.v8Name = joined.functionName;
-    base.startLine = lineAt(src, r0.startOffset);
-    base.endLine = lineAt(src, Math.max(r0.startOffset, r0.endOffset - 1));
+    base.startLine = startLine(r0);
+    base.endLine = endLine(r0);
     base.blocks = joined.isBlockCoverage;
     base.calls.coverage = K;
     const ranges = joined.ranges.slice(0, MAX_RANGES);
     if (joined.ranges.length > MAX_RANGES) base.truncated = true;
-    base.ranges = ranges.map((r) => ({
-      start: r.startOffset,
-      end: r.endOffset,
-      count: r.count,
-      line: lineAt(src, r.startOffset),
-      endLine: lineAt(src, Math.max(r.startOffset, r.endOffset - 1)),
-    }));
+    base.ranges = ranges.map((r) => {
+      const line = startLine(r) ?? base.startLine ?? loc.line;
+      return {
+        start: r.startOffset,
+        end: r.endOffset,
+        count: r.count,
+        line,
+        endLine: endLine(r) ?? line,
+      };
+    });
     const t = thrown.get(key);
     if (t) {
       const lines: number[] = [];
@@ -985,10 +1127,12 @@ export function buildPayload(
     }
     base.calls.checked = true;
     if (K > H) excess[key] = K - H;
-    const odd = implausibleBlock(joined, K, src);
-    if (odd)
+    const odd = implausibleBlock(joined, K, ran);
+    if (odd) {
+      const at = m ? m.index.rawLine(odd.offset) : odd.line;
       implausible[key] =
-        `${key}: a block ran ${odd.count} times in ${K} call(s) outside any loop (line ${odd.line}): an earlier call resumed inside the window`;
+        `${key}: a block ran ${odd.count} times in ${K} call(s) outside any loop (line ${at ?? "?"}): an earlier call resumed inside the window`;
+    }
     base.truth = K > 0 ? { t: "taken", n: K } : { t: "not" };
     return base;
   };
@@ -1022,7 +1166,118 @@ export function buildPayload(
     if (lane.truth.t === "unknown") partial = true;
     if (lanes.length < MAX_LANES) lanes.push(lane);
   }
-  return { lanes, functions, excess, implausible, joined: joinedRefs, partial, warnings };
+  return { mapped, lanes, functions, excess, implausible, joined: joinedRefs, partial, warnings };
+}
+
+/**
+ * How the offsets of `script` reach the file on disk: identity (V8 ran the file), mapped (V8 ran a
+ * loader's output carrying an inline source map that names this file), or UNKNOWN with the reason.
+ */
+function scriptJoin(
+  script: ScriptCoverage,
+  abs: string,
+  raw: SourceText,
+  lookup: GeneratedLookup | undefined,
+): ScriptJoin {
+  const g = lookup?.(script.url, abs, script.scriptId);
+  if (!g) return bomJoin(script, raw);
+  if ("missing" in g) return { kind: "unknown", why: "no-generated-text", detail: g.missing };
+  // V8 reports the module function over the whole script: its end is the length of the text it ran.
+  const mod = script.functions.find(isModuleFn);
+  const len = mod?.ranges[0]?.endOffset;
+  if (len !== undefined && len !== g.code.length)
+    return {
+      kind: "unknown",
+      why: "unmapped",
+      detail: `the generated text Hoplens holds (${g.code.length} chars) is not the one V8 ran (${len})`,
+    };
+  try {
+    const { index, gen } = indexOf(abs, g.code, raw);
+    return { kind: "mapped", gen, m: { text: g.code, hash: gen.hash, index, via: g.via } };
+  } catch (err) {
+    if (err instanceof MapError) return { kind: "unknown", why: err.why, detail: `not mapped: ${err.message}` };
+    return {
+      kind: "unknown",
+      why: "unmapped",
+      detail: `not mapped: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/** Reverse indexes kept across captures (and a capture's retry): decoding a map is the costly part. */
+const INDEX_CACHE_MAX = 16;
+const indexCache = new Map<string, { index: ReverseIndex; gen: SourceText }>();
+
+/**
+ * The reverse index of a generated text onto `raw`, decoded once per (file, generated text, raw
+ * text): least recently used dropped past INDEX_CACHE_MAX. Payloads share the cached objects.
+ * Throws MapError as buildIndex does (a failure is not cached).
+ */
+function indexOf(abs: string, code: string, raw: SourceText): { index: ReverseIndex; gen: SourceText } {
+  const gen = sourceText(code);
+  const key = `${norm(abs)}\0${gen.hash}:${code.length}\0${raw.hash}`;
+  const hit = indexCache.get(key);
+  if (hit) {
+    indexCache.delete(key);
+    indexCache.set(key, hit);
+    return hit;
+  }
+  const entry = { index: buildIndex({ generated: code, genFile: abs, raw: raw.text, rawFile: abs }), gen };
+  indexCache.set(key, entry);
+  if (indexCache.size > INDEX_CACHE_MAX) indexCache.delete(indexCache.keys().next().value as string);
+  return entry;
+}
+
+/** What Node's type stripping appends to the text it hands V8 (Node 22-24: `\n\n//# sourceURL=<url>`). */
+const stripSuffix = (url: string) => `\n\n//# sourceURL=${url}`.length;
+
+const isSpace = (c: number) => c === 32 || c === 9 || c === 10 || c === 13 || c === 0xfeff;
+
+/** Every function range of `script` starts and ends on a token in `text` (V8's always do). */
+function rangesFit(script: ScriptCoverage, text: string): boolean {
+  let any = false;
+  for (const f of script.functions) {
+    if (isModuleFn(f)) continue;
+    const r = f.ranges[0];
+    if (!r) continue;
+    if (r.endOffset > text.length || r.startOffset >= r.endOffset) return false;
+    if (isSpace(text.charCodeAt(r.startOffset)) || isSpace(text.charCodeAt(r.endOffset - 1))) return false;
+    any = true;
+  }
+  return any;
+}
+
+/**
+ * Identity for a file that starts with a UTF-8 BOM. Whether V8's text kept it depends on the loader
+ * (probed on Node 22.20: `import` drops it, `require` of .cjs and of .mjs keeps it), and every offset
+ * moves by one with it. V8's module function, when the take has it, spans the whole text V8 ran (plus
+ * the suffix type stripping appends), so its length says which. It is usually not in a take (a
+ * function that did not run since the last one is left out); then the function ranges decide: V8's
+ * start and end on a token, and in the text one character off, a multi-line function's range ends on
+ * the indentation before its `}`. Only an alignment that alone fits is used (analyze.ts then checks
+ * each function's start and end against the AST); otherwise nothing is joined.
+ */
+function bomJoin(script: ScriptCoverage, raw: SourceText): ScriptJoin {
+  if (raw.text.charCodeAt(0) !== 0xfeff) return { kind: "identity" };
+  const dropped = raw.text.slice(1);
+  const len = script.functions.find(isModuleFn)?.ranges[0]?.endOffset;
+  let keep: boolean;
+  let drop: boolean;
+  if (len !== undefined) {
+    const sfx = stripSuffix(script.url);
+    keep = len === raw.text.length || len === raw.text.length + sfx;
+    drop = len === dropped.length || len === dropped.length + sfx;
+  } else {
+    keep = rangesFit(script, raw.text);
+    drop = rangesFit(script, dropped);
+  }
+  if (keep && !drop) return { kind: "identity" };
+  if (drop && !keep) return { kind: "identity", text: sourceText(dropped) };
+  return {
+    kind: "unknown",
+    why: "unmapped",
+    detail: `the file starts with a byte-order mark and V8's coverage does not say whether the text it ran kept it${len === undefined ? "" : ` (${len} chars, the file ${raw.text.length})`}, so no offset is certain`,
+  };
 }
 
 /**
@@ -1059,11 +1314,15 @@ function laneOrder(spans: SpanRecord[], byId: Map<string, SpanRecord>): Array<{ 
  * starting there, by V8 name when several do. A handler hop's line is its registration call: the
  * outermost function starting within a few lines of it that ran.
  */
-function join(s: SpanRecord, script: ScriptCoverage, src: SourceText): FunctionCoverage | "ambiguous" | undefined {
+function join(
+  s: SpanRecord,
+  script: ScriptCoverage,
+  lineOf: (f: FunctionCoverage) => number | undefined,
+): FunctionCoverage | "ambiguous" | undefined {
   const line = s.location!.line;
   const fns = script.functions.filter((f) => f.ranges.length && !isModuleFn(f));
   if (s.kind === "function") {
-    const at = fns.filter((f) => lineAt(src, f.ranges[0]!.startOffset) === line);
+    const at = fns.filter((f) => lineOf(f) === line);
     const named = at.filter((f) => f.functionName === s.name);
     if (named.length === 1) return named[0];
     if (named.length > 1) return "ambiguous";
@@ -1071,8 +1330,8 @@ function join(s: SpanRecord, script: ScriptCoverage, src: SourceText): FunctionC
     return at.length > 1 ? "ambiguous" : undefined;
   }
   const near = fns.filter((f) => {
-    const l = lineAt(src, f.ranges[0]!.startOffset);
-    return l >= line && l <= line + HANDLER_LOOKAHEAD && f.ranges[0]!.count > 0;
+    const l = lineOf(f);
+    return l !== undefined && l >= line && l <= line + HANDLER_LOOKAHEAD && f.ranges[0]!.count > 0;
   });
   const outer = near.filter(
     (f) =>

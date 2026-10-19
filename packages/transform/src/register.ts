@@ -9,12 +9,26 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { MessageChannel, isMainThread } from "node:worker_threads";
 import { installCommonJS } from "./cjs";
+import { retainGenerated, retentionOn } from "./generated";
 import type { TransformOptions } from "./index";
 
 export interface RegisterOptions extends TransformOptions {
   framework?: "nest" | "express" | "fastify" | "koa" | string;
   /** Called on the main thread for each report the hook sends (wrapped, refused, failed files). */
   onReport?: (report: HookReport) => void;
+  /**
+   * Keep the output another loader (tsx) compiled an in-scope module to, when it carries an inline
+   * source map, for the request path (src/generated.ts). Set only while the request path is on.
+   */
+  retainGenerated?: boolean;
+}
+
+/** The hook's message carrying a compiled module's text (kept by the main thread, never reported). */
+export interface GeneratedMessage {
+  type: "generated";
+  /** Absolute path. */
+  file: string;
+  code: string;
 }
 
 /**
@@ -43,6 +57,8 @@ export interface HookData {
   preset?: TransformOptions["preset"];
   /** A MessagePort: reports go out on it, `{ type: "disable" }` comes in. */
   port?: unknown;
+  /** Post GeneratedMessage for compiled in-scope modules (RegisterOptions.retainGenerated). */
+  retain?: boolean;
 }
 
 const REGISTERED = Symbol.for("hoplens.transform.register");
@@ -67,9 +83,16 @@ export function register(opts: RegisterOptions = { root: process.cwd() }): () =>
       }
     };
     const disposers: (() => void)[] = [];
+    if (opts.retainGenerated) retentionOn();
     try {
       disposers.push(
-        installCommonJS({ root: opts.root, include: opts.include, exclude: opts.exclude, report: onReport }),
+        installCommonJS({
+          root: opts.root,
+          include: opts.include,
+          exclude: opts.exclude,
+          report: onReport,
+          retainGenerated: opts.retainGenerated,
+        }),
       );
     } catch {
       /* the ESM hook still goes in */
@@ -77,7 +100,10 @@ export function register(opts: RegisterOptions = { root: process.cwd() }): () =>
     try {
       if (typeof (nodeModule as any).register !== "function") throw new Error("no module.register");
       const { port1, port2 } = new MessageChannel();
-      port1.on("message", onReport);
+      port1.on("message", (m: HookReport | GeneratedMessage) => {
+        if (m?.type === "generated") retainGenerated(m.file, m.code);
+        else onReport(m);
+      });
       port1.unref();
       const data: HookData = {
         root: opts.root,
@@ -86,6 +112,7 @@ export function register(opts: RegisterOptions = { root: process.cwd() }): () =>
         preset: opts.preset ?? "node",
         port: port2,
       };
+      if (opts.retainGenerated) data.retain = true;
       (nodeModule as any).register(pathToFileURL(path.join(__dirname, "hooks.mjs")).href, {
         data,
         transferList: [port2],

@@ -15,7 +15,9 @@
 // - Never call Profiler.stopPreciseCoverage and never enable the Debugger: the session lives as long
 //   as the process. (A static test asserts this file never names the stop method.)
 // - Precise mode is global to the isolate: another inspector session (DevTools' Coverage panel under
-//   --inspect, a tool's own Session) that stops precise coverage downgrades ours to best-effort
+//   --inspect, a tool's own Session) that stops precise coverage, or that disables its Debugger
+//   (a detach does too: V8 drops its debug info, block counters included; scriptsource.ts never
+//   disables its own for that reason), downgrades ours to best-effort
 //   function counts that never reset. take() watches for it (BlockWatch) and turns the state to
 //   'error' with a restart hint; it re-posts startPreciseCoverage so call counts reset again.
 // - take() is synchronous: Session.post runs its callback before it returns for Profiler commands
@@ -74,7 +76,7 @@ const KEY = Symbol.for("hoplens.coverage");
 const WATCH_MAX = 512;
 
 export const DOWNGRADED_REASON =
-  "another inspector session stopped precise coverage (DevTools' Coverage panel?); restart the app to use Trace path";
+  "another inspector session stopped precise coverage or detached a debugger (DevTools' Coverage panel, a debugger under --inspect?), which drops V8's block counts; restart the app to use Trace path";
 
 /**
  * Detects precise coverage downgraded to best-effort by another session: a function V8 once reported

@@ -12,7 +12,8 @@
 // `<stateDir>/path.json` the UI's Enable button or `hoplens init --path` writes; one small file read,
 // nothing loaded). When on, V8 block coverage starts before the shim and the hooks, so every app
 // module compiles with block counters. Only @hoplens/core/coverage loads for it (one small file,
-// node:inspector inside); with the path off nothing of it is loaded.
+// node:inspector inside); with the path off nothing of it is loaded. The transform's loaders then
+// also keep what another loader (tsx) compiles an app module to, so its offsets map to the file.
 //
 // Main thread only: under `-r` Node also runs this preload inside the module hooks worker.
 
@@ -50,7 +51,7 @@ try {
     if (auto.on) {
       step(() => {
         installShim();
-        startFunctionHops(auto, earlyRoot());
+        startFunctionHops(auto, earlyRoot(), { retainGenerated: on });
       });
     }
     step(() => installRoutes());

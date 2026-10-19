@@ -81,6 +81,10 @@ export type TruthWhy =
   | "too-large"
   | "source-moved"
   | "compiled"
+  /** A loader's output whose source map does not carry this function over to the file with certainty (P5). */
+  | "unmapped"
+  /** A loader compiled the file, and the text V8 ran is not at hand (P5: generated.ts). */
+  | "no-generated-text"
   | "after-throw"
   | "arms-inconsistent"
   | "no-analyzer"

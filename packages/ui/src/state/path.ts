@@ -38,7 +38,10 @@ const WHY: Record<PathWhy, string> = {
   "source-unreadable": "the source file could not be read",
   "too-large": "too large to map (payload caps)",
   "source-moved": "the file changed after the app loaded it: restart and trace again",
-  compiled: "the app runs compiled output for this file (TypeScript mapping comes later)",
+  compiled: "the app runs compiled output for this file that no source map carries back to it",
+  unmapped: "the compiled code does not line up with this source node for node, so nothing is claimed",
+  "no-generated-text":
+    "a loader compiled this file and Hoplens holds no copy of the text V8 ran (the trace's warnings say why)",
   "after-throw": "an exception was thrown before this point, so counts after it are not reliable",
   "arms-inconsistent": "the branch counts do not add up, so no side is claimed",
   "no-analyzer": "no control-flow analyzer was loaded (TypeScript missing)",

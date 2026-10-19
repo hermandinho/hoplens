@@ -106,18 +106,27 @@ function globBody(glob: string): string {
 const escapeRe = (s: string) => s.replace(/[.+^$()|[\]\\]/g, "\\$&");
 
 export function shouldTrace(file: string, source: string, opts: TransformOptions): boolean {
+  if (!/\.(c|m)?(t|j)s$/.test(file)) return false;
+  if (!inScope(file, opts)) return false;
+  // Directives must stay first and server actions / client modules have their own rules.
+  const head = source.replace(/^(\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*/, "");
+  if (/^["']use (client|server)["']/.test(head)) return false;
+  return true;
+}
+
+/**
+ * Inside the root and the include / exclude / preset scope, by path alone and for any extension
+ * (the request path keeps a loader's .tsx / .jsx output too; only hop targets need shouldTrace's).
+ */
+export function inScope(file: string, opts: TransformOptions): boolean {
   const rel = path.relative(opts.root, file).split(path.sep).join("/");
   if (rel.startsWith("..")) return false;
-  if (!/\.(c|m)?(t|j)s$/.test(rel)) return false;
   const outputOk = outputDirIncluded(rel, opts);
   const builtIn = presetExcludes(opts.preset).filter(
     (g) => !(outputOk && NODE_OUTPUT_DIRS.some((d) => g === `${d}/**`)),
   );
   if ([...builtIn, ...(opts.exclude ?? [])].some((g) => globToRegExp(g).test(rel))) return false;
   if (opts.include?.length && !opts.include.some((g) => globToRegExp(g).test(rel))) return false;
-  // Directives must stay first and server actions / client modules have their own rules.
-  const head = source.replace(/^(\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*/, "");
-  if (/^["']use (client|server)["']/.test(head)) return false;
   return true;
 }
 

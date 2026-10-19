@@ -141,7 +141,7 @@ export function fnCalls(fn: PathFn): number {
 export function evidenceText(payload: PathPayload, fn: PathFn | undefined): string {
   const parts = [
     fn?.blocks === false ? "function counts only" : "block coverage",
-    fn?.mapping === "identity" ? "identity map" : "not mapped",
+    fn?.mapping === "identity" ? "identity map" : fn?.mapping === "sourcemap" ? "source map" : "not mapped",
     payload.quality === "contaminated" || payload.window.taint.length ? "window tainted" : "quiet window",
   ];
   const calls = fn?.analysis?.calls ?? 0;

@@ -52,3 +52,7 @@ closes, and focus returns to the lane.
 - An evidence footer reads e.g. `block coverage . identity map . quiet window . EXACT`. Swipes that
   start in the chart or the source no longer move to the next request on phones. As in the trail,
   every count shown is the server's.
+
+TypeScript (P5): a function mapped through its source map reads `source map` in the evidence footer; the new
+reasons say why one was not (`unmapped`: the compiled code does not line up node for node;
+`no-generated-text`: register Hoplens after the loader).

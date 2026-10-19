@@ -9,12 +9,16 @@
 // appends a trailer (plus same-length `const` -> `let  ` swaps), so the loader's inline source map
 // stays valid. Output it cannot map with certainty, and compiled output of any other file, is
 // refused: it loads untouched and the main thread is told why. Any failure loads the original source.
+//
+// Request path (data.retain): the text V8 will run for an in-scope module another loader compiled
+// (what this hook returns, or the loader's output it left alone) is posted to the main thread when
+// it carries an inline source map, so coverage offsets into it can be mapped (src/generated.ts).
 
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HookData, HookReport } from "./register";
+import type { GeneratedMessage, HookData, HookReport } from "./register";
 
 type Transform = typeof import("./index");
 
@@ -51,6 +55,7 @@ let opts: Opts | undefined;
 let realOpts: Opts | undefined;
 let port: Port | undefined;
 let disabled = false;
+let retain = false;
 let tx: Transform | undefined;
 
 export function initialize(data: HookData | undefined): void {
@@ -68,6 +73,7 @@ export function initialize(data: HookData | undefined): void {
     /* the root as given */
   }
   port = data.port as Port | undefined;
+  retain = data.retain === true;
   try {
     port?.on?.("message", (m) => {
       if ((m as { type?: unknown } | null)?.type === "disable") disabled = true;
@@ -78,7 +84,7 @@ export function initialize(data: HookData | undefined): void {
   }
 }
 
-function report(r: HookReport): void {
+function report(r: HookReport | GeneratedMessage): void {
   try {
     port?.postMessage(r);
   } catch {
@@ -104,7 +110,9 @@ export async function load(url: string, context: unknown, nextLoad: NextLoad): P
   let file = "";
   try {
     file = fileURLToPath(url);
-    const out = rewrite(file, r, optsFor(file));
+    const o = optsFor(file);
+    const out = rewrite(file, r, o);
+    if (retain) retainCompiled(file, r, out, o);
     return out === undefined ? r : { ...r, source: out };
   } catch (err) {
     report({ type: "error", file: relOf(file), message: err instanceof Error ? err.message : String(err) });
@@ -125,6 +133,36 @@ function optsFor(file: string): Opts {
 
 function relOf(file: string): string {
   return opts && file ? path.relative(optsFor(file).root, file).split(path.sep).join("/") : file;
+}
+
+/** Inline source map marker (same test as src/generated.ts retainable()). */
+const INLINE_MAP = /\/\/[#@][ \t]+sourceMappingURL=data:/;
+
+/**
+ * Post the text V8 will run for an in-scope module when another loader compiled it (its source here
+ * is not the file's bytes) and it carries an inline source map. Never throws.
+ */
+function retainCompiled(file: string, r: LoadResult, out: string | undefined, o: Opts): void {
+  try {
+    if (r.source == null || !/^(module|commonjs)(-typescript)?$/.test(String(r.format))) return;
+    // Any extension in scope: a .tsx route's output is mapped like a .ts one's (it has no hop targets).
+    if (!transform().inScope(file, o)) return;
+    const bytes = bytesOf(r.source);
+    if (bytes.length > MAX_SOURCE_BYTES) return;
+    const code = out ?? (typeof r.source === "string" ? r.source : bytes.toString("utf8"));
+    if (!INLINE_MAP.test(code)) return;
+    let disk: Buffer | undefined;
+    try {
+      disk = fs.readFileSync(file);
+    } catch {
+      /* not on disk as such: nothing to map onto */
+      return;
+    }
+    if (disk.equals(bytes)) return; // the file itself (plus Hoplens' own trailer): identity
+    report({ type: "generated", file, code });
+  } catch {
+    /* the request path only loses this file's mapping */
+  }
 }
 
 /** The rewritten source, or undefined to load `r` as it is. */

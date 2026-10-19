@@ -1,6 +1,7 @@
 ---
 "@hoplens/core": minor
 "@hoplens/express": minor
+"@hoplens/transform": minor
 "@hoplens/cli": patch
 ---
 
@@ -80,3 +81,34 @@ Request path, second milestone (P2): which arm of every decision the request too
 - `RuntimeConfig.path.analyzer` supplies the control-flow model; `@hoplens/express` passes
   `@hoplens/transform/cfg` and loads TypeScript once after boot when `HOPLENS_PATH=1`. Without an
   analyzer every decision is `no-analyzer`.
+
+Request path, fifth milestone (P5): TypeScript and other compiled setups, exact where the mapping is
+certain.
+
+- V8's offsets point into the text it ran. For plain JavaScript and Node's own type stripping (Node
+  22.18+ by default, or `--experimental-strip-types`: types become spaces) that is the file on disk
+  (identity, as before). For a loader's output (tsx: ESM or CommonJS, `tsx watch`) the function's
+  analysis now runs on that generated text's own control-flow model (identity on the text V8 ran),
+  and is carried over to the file only when its inline source map pairs the two models node for
+  node: the same tree (kinds, arms, cases, exits, loops, expression decisions, awaits, nested
+  functions) with every executable node's map anchors inside the paired raw node (none of another
+  source). The result shows the file's own lines and labels; the function has `mapping:
+  sourcemap` and `generated: { hash, length, via }`. A compiler that drops, adds or reorders code
+  in a function (a dead statement it removed) leaves it UNKNOWN `unmapped` with the reason in the
+  payload's warnings; nothing is guessed.
+- The generated text comes from Hoplens' own loaders while the request path is on: the ESM hook in
+  COMPILED mode (`tsx --import hoplens/express/register`) posts what V8 will run, and the CommonJS
+  layer keeps what a require hook (tsx's) hands `module._compile`; only output with an inline source
+  map, bounded (1M chars per file, 16M in all, least recent dropped). Checked against V8 (the module
+  function's length) and the map's `sourcesContent` when present (a prefix is fine: Hoplens' trailer).
+- When a source map says the script is compiled but no text was kept (tsx registered after Hoplens,
+  so it ran first), every function is UNKNOWN `no-generated-text` with how to fix the order.
+  `HOPLENS_PATH_DEBUGGER=1` opts in to reading those scripts with `Debugger.getScriptSource` after
+  the capture's final take (about 200ms the first time on the test app; `window.debuggerMs`), through
+  one Debugger session kept enabled for the life of the process (disabling it would drop V8's block
+  counts). The warning says why no text is at hand: Hoplens' loaders off, a size cap, Node's own
+  `--experimental-transform-types`, or the loader order. Retained texts are least recently used out,
+  reads included; decoded maps and generated models are cached across captures.
+- New reasons: `unmapped`, `no-generated-text`. `register({ retainGenerated })` in
+  `@hoplens/transform`; `@hoplens/express` sets it when the request path is on.
+

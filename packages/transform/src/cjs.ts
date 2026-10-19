@@ -14,11 +14,16 @@
 // (a CommonJS file reached through Node's ESM loader: the entry of a process started with --import, or
 // a file imported from ESM) is never parsed, and is reported as `esm-loader`. Module.prototype._compile
 // is never touched.
+//
+// Request path (retainGenerated): when the handler hands module._compile something other than what it
+// read (a require hook compiled it: tsx's esbuild), that text is what V8 runs and its coverage offsets
+// point into; it is kept for the request path when it carries an inline source map (src/generated.ts).
 
 import fs from "node:fs";
 import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { retainGenerated } from "./generated";
 import type { TransformOptions } from "./index";
 import type { HookReport } from "./register";
 
@@ -35,6 +40,8 @@ const MAX_SOURCE_BYTES = 1024 * 1024;
 
 export interface CommonJSLayerOptions extends TransformOptions {
   report: (r: HookReport) => void;
+  /** Keep compiled output for the request path (RegisterOptions.retainGenerated). */
+  retainGenerated?: boolean;
 }
 
 interface Entry {
@@ -43,6 +50,8 @@ interface Entry {
   out?: string | null;
   read: boolean;
   fns: number;
+  /** What the read answered (the file, or its rewrite): compiled output differs from it. */
+  handed?: string;
 }
 
 let tx: Transform | undefined;
@@ -145,6 +154,7 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
     if (src === undefined) return r;
     e.read = true;
     if (e.out === undefined) e.out = rewrite(e, src);
+    if (opts.retainGenerated) e.handed = e.out ?? src;
     if (e.out == null) return r;
     return Buffer.isBuffer(r) ? Buffer.from(e.out, "utf8") : e.out;
   }
@@ -245,7 +255,10 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
       };
       active.set(key, e);
       swapIn();
-      const compile = endAtCompile(mod, end);
+      const compile = endAtCompile(mod, end, (content) => {
+        // Only after a read: a module whose source Node already held was never handed anything.
+        if (opts.retainGenerated && e.handed !== undefined && content !== e.handed) retainGenerated(filename, content);
+      });
       try {
         return inner.apply(this, args);
       } finally {
@@ -264,12 +277,17 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
    * An own property on this one module object, gone before compile runs; Module.prototype is never
    * touched. Undefined when the module already has an own _compile (another loader's, pirates-style).
    */
-  function endAtCompile(mod: unknown, end: () => void): Function | undefined {
+  function endAtCompile(mod: unknown, end: () => void, seen: (content: unknown) => void): Function | undefined {
     if (!mod || typeof mod !== "object" || Object.prototype.hasOwnProperty.call(mod, "_compile")) return undefined;
     const proto = (mod as any)._compile;
     if (typeof proto !== "function") return undefined;
-    const compile = function _compile(this: unknown) {
+    const compile = function _compile(this: unknown, content?: unknown) {
       end();
+      try {
+        seen(content);
+      } catch {
+        /* never in the way of a compile */
+      }
       if ((mod as any)._compile === compile) Reflect.deleteProperty(mod as object, "_compile");
       // biome-ignore lint/style/noArguments: forward exactly what the handler passed
       return proto.apply(this, arguments);

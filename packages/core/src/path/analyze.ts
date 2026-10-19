@@ -15,8 +15,9 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { PathFn, PathPayload } from "./capture";
+import { type MappedScript, type PathFn, type PathPayload, mappedKey, mappedScripts } from "./capture";
 import type { CfgFile } from "./cfg-model";
+import { mapFunction } from "./mapped";
 import {
   type FnAnalysis,
   type PathExit,
@@ -78,12 +79,21 @@ export function analyzePayload(p: PathPayload, deps: AnalyzeDeps): PayloadAnalys
   const t0 = now();
   const read = deps.readSource ?? readFile;
   try {
-    const texts = new Map<string, string | undefined>();
-    const cfgs = new Map<string, CfgFile | undefined | Error>();
+    const ctx: FnCtx = {
+      deps,
+      read,
+      texts: new Map(),
+      cfgs: new Map(),
+      genCfgs: new Map(),
+      mapped: mappedScripts(p),
+      rawStarts: new Map(),
+      warnings: [],
+    };
     for (const f of Object.values(p.functions)) {
-      f.analysis = analyzeFn(f, deps, read, texts, cfgs);
+      f.analysis = analyzeFn(f, ctx);
     }
-    linkGraphs(p, deps.root, cfgs);
+    p.warnings.push(...ctx.warnings);
+    linkGraphs(p, deps.root, ctx.cfgs, ctx.rawStarts);
     let bytes = 0;
     try {
       bytes = JSON.stringify(p).length;
@@ -109,33 +119,81 @@ export function analyzePayload(p: PathPayload, deps: AnalyzeDeps): PayloadAnalys
   return p.analysis;
 }
 
-function analyzeFn(
-  f: PathFn,
-  deps: AnalyzeDeps,
-  read: (abs: string) => string | undefined,
-  texts: Map<string, string | undefined>,
-  cfgs: Map<string, CfgFile | undefined | Error>,
-): FnAnalysis {
+interface FnCtx {
+  deps: AnalyzeDeps;
+  read: (abs: string) => string | undefined;
+  texts: Map<string, string | undefined>;
+  /** Models of the files on disk, by absolute path. */
+  cfgs: Map<string, CfgFile | undefined | Error>;
+  /** Models of generated texts, by absolute path of the file they were compiled from. */
+  genCfgs: Map<string, CfgFile | undefined | Error>;
+  mapped: ReadonlyMap<string, MappedScript> | undefined;
+  /** fnKey -> the raw function's possible range starts (mapped functions, for linkGraphs). */
+  rawStarts: Map<string, number[]>;
+  warnings: string[];
+}
+
+function modelOf(
+  cache: Map<string, CfgFile | undefined | Error>,
+  key: string,
+  build: () => CfgFile | undefined,
+): CfgFile | undefined | Error {
+  if (!cache.has(key)) {
+    try {
+      cache.set(key, build());
+    } catch (err) {
+      cache.set(key, err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  return cache.get(key);
+}
+
+/** A generated text's model gets its own (JavaScript) name: the analyzer caches models by name. */
+const GENERATED_SUFFIX = "#hoplens-generated.mjs";
+
+/** Generated texts' models kept across analyses, per analyzer: least recently used dropped first. */
+const GEN_MODELS_MAX = 16;
+const genModels = new WeakMap<PathAnalyzer, Map<string, CfgFile>>();
+
+/** The model of a generated text, built once per (file, text hash). A failure is not kept. */
+function generatedModel(analyzer: PathAnalyzer, abs: string, text: string, hash: string): CfgFile | undefined {
+  let cache = genModels.get(analyzer);
+  if (!cache) genModels.set(analyzer, (cache = new Map()));
+  const key = `${abs}\0${hash}:${text.length}`;
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
+  const model = analyzer.cfg(abs + GENERATED_SUFFIX, text);
+  if (model) {
+    cache.set(key, model);
+    if (cache.size > GEN_MODELS_MAX) cache.delete(cache.keys().next().value as string);
+  }
+  return model;
+}
+
+function analyzeFn(f: PathFn, c: FnCtx): FnAnalysis {
+  const { deps } = c;
   const calls = f.calls.coverage ?? 0;
   if (f.truth.t === "unknown") return unknownAnalysis(f.truth.why, calls);
   if (f.truncated) return unknownAnalysis("too-large", calls);
   if (!f.ranges.length) return unknownAnalysis("no-blocks", calls);
-  if (f.mapping !== "identity") return unknownAnalysis("join-mismatch", calls);
-  if (!deps.analyzer) return unknownAnalysis("no-analyzer", calls);
+  if (f.mapping === "none") return unknownAnalysis("join-mismatch", calls);
+  const analyzer = deps.analyzer;
+  if (!analyzer) return unknownAnalysis("no-analyzer", calls);
   const abs = path.resolve(deps.root, f.file);
-  if (!texts.has(abs)) texts.set(abs, read(abs));
-  const text = texts.get(abs);
+  if (!c.texts.has(abs)) c.texts.set(abs, c.read(abs));
+  const text = c.texts.get(abs);
   if (text === undefined) return unknownAnalysis("source-unreadable", calls);
-  if (!cfgs.has(abs)) {
-    try {
-      cfgs.set(abs, deps.analyzer.cfg(abs, text));
-    } catch (err) {
-      cfgs.set(abs, err instanceof Error ? err : new Error(String(err)));
-    }
-  }
-  const cfg = cfgs.get(abs);
+  // A BOM V8 did not keep (capture.ts bomJoin): the model is built on the text V8's offsets are
+  // into. One decision per script, so the cached model is that text's for every function of it.
+  const cfgText = f.bom && text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const cfg = modelOf(c.cfgs, abs, () => analyzer.cfg(abs, cfgText));
   if (cfg instanceof Error) return unknownAnalysis("no-analyzer", calls);
   const ranges = f.ranges.map((r) => ({ start: r.start, end: r.end, count: r.count }));
+  if (f.mapping === "sourcemap") return analyzeMapped(f, c, analyzer, abs, text, cfg, ranges, calls);
   const j = joinCfg({
     cfg,
     ranges,
@@ -148,12 +206,56 @@ function analyzeFn(
   return pathTruth({ fn: j.fn, ranges, threw: f.errors?.hops ?? 0, throwLines: f.errors?.lines, file: cfg });
 }
 
+/**
+ * A function V8 ran as a loader's output (P5). The truth model runs on the generated text's own
+ * model (identity: the offsets are V8's), through the hybrid mapped.ts builds only when that model is
+ * the raw function's node for node; the result shows the raw file's lines and labels.
+ */
+function analyzeMapped(
+  f: PathFn,
+  c: FnCtx,
+  analyzer: PathAnalyzer,
+  abs: string,
+  text: string,
+  cfg: CfgFile | undefined,
+  ranges: Array<{ start: number; end: number; count: number }>,
+  calls: number,
+): FnAnalysis {
+  const m = c.mapped?.get(mappedKey(abs));
+  if (!m || !f.generated || m.hash !== f.generated.hash) return unknownAnalysis("no-generated-text", calls);
+  // The raw file must be the one the capture saw, unedited since the app started.
+  if (f.sourceHash === undefined) return unknownAnalysis("source-unreadable", calls);
+  if (f.sourceHash !== sha(text) || f.stale) return unknownAnalysis("source-moved", calls);
+  if (!cfg) return unknownAnalysis("no-analyzer", calls);
+  const gen = modelOf(c.genCfgs, abs, () => generatedModel(analyzer, abs, m.text, m.hash));
+  if (!gen || gen instanceof Error) return unknownAnalysis("no-analyzer", calls);
+  const j = joinCfg({ cfg: gen, ranges, capturedHash: m.hash, currentHash: m.hash });
+  if ("why" in j) return unknownAnalysis(j.why === "no-function" ? "unmapped" : j.why, calls);
+  const hy = mapFunction(j.fn, cfg, m.index);
+  if ("why" in hy) {
+    c.warnings.push(`${f.key}: not mapped to ${f.file} with certainty (${hy.detail})`);
+    return unknownAnalysis("unmapped", calls);
+  }
+  f.startLine = hy.raw.line;
+  f.endLine = hy.raw.endLine;
+  c.rawStarts.set(f.key, hy.raw.starts);
+  return pathTruth({ fn: hy.fn, ranges, threw: f.errors?.hops ?? 0, throwLines: f.errors?.lines, file: cfg });
+}
+
 /** Fill `fns[].fnKey` and `callees` on every graph node (see the header). */
-function linkGraphs(p: PathPayload, root: string, cfgs: Map<string, CfgFile | undefined | Error>): void {
+function linkGraphs(
+  p: PathPayload,
+  root: string,
+  cfgs: Map<string, CfgFile | undefined | Error>,
+  rawStarts: ReadonlyMap<string, number[]>,
+): void {
   const byStart = new Map<string, string>();
-  for (const f of Object.values(p.functions))
-    if (f.mapping === "identity" && f.ranges[0])
-      byStart.set(`${path.resolve(root, f.file)}#${f.ranges[0].start}`, f.key);
+  for (const f of Object.values(p.functions)) {
+    const abs = path.resolve(root, f.file);
+    if (f.mapping === "identity" && f.ranges[0]) byStart.set(`${abs}#${f.ranges[0].start}`, f.key);
+    // A mapped function by its raw starts: the nodes' nested functions name the file's own offsets.
+    else if (f.mapping === "sourcemap") for (const s of rawStarts.get(f.key) ?? []) byStart.set(`${abs}#${s}`, f.key);
+  }
   // Hop children: lanes are in span order, a lane's parent is the nearest earlier lane one level up.
   const children = new Map<string, Set<string>>();
   const stack: Array<string | undefined> = [];

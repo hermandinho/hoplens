@@ -21,7 +21,8 @@ import { analyze, capture, load, startCoverage } from "./path-cov";
 let dir: string;
 beforeAll(() => {
   startCoverage();
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-path-prop-"));
+  // realpath: see path-mapped.test.ts (8.3 short temp paths on Windows runners)
+  dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-path-prop-")));
 });
 afterAll(() => {
   if (dir) fs.rmSync(dir, { recursive: true, force: true });

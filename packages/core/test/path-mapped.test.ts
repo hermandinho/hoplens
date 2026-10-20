@@ -40,7 +40,9 @@ let oracle: Record<string, FnAnalysis> | undefined;
 
 beforeAll(() => {
   startCoverage();
-  tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-p5-"));
+  // realpath: on Windows os.tmpdir() can be an 8.3 short path (C:\Users\RUNNER~1 on GitHub runners)
+  // while V8 reports the coverage script under the long one, so lookups by file URL would miss.
+  tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-p5-")));
 });
 afterAll(() => {
   try {

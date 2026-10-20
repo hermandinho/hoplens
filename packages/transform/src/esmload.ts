@@ -117,6 +117,23 @@ function bytesOf(source: string | ArrayBuffer | ArrayBufferView): Buffer {
   return Buffer.from(source);
 }
 
+/**
+ * The root's real paths other than the root itself: the JS `fs.realpathSync` (what Node's loaders
+ * use, so 8.3 short names stay) and the native one (short names expanded), deduplicated.
+ */
+export function realRoots(root: string): string[] {
+  const out: string[] = [];
+  for (const real of [fs.realpathSync, fs.realpathSync.native]) {
+    try {
+      const r = real(root);
+      if (r !== root && !out.includes(r)) out.push(r);
+    } catch {
+      /* the root as given */
+    }
+  }
+  return out;
+}
+
 const inside = (root: string, file: string) => {
   const rel = path.relative(root, file);
   return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
@@ -134,16 +151,12 @@ export function createEsmLoader(data: HookData | undefined, deps: EsmLoaderDeps)
     preset: data.preset === "next" ? "next" : "node",
   };
   /**
-   * `opts` with the root's real path. Node hands the hook real paths (symlinks and Windows junctions
-   * resolved) while the root comes from process.cwd(), which keeps the path the shell was in.
+   * `opts` with each real path of the root. Node hands the hook real paths (symlinks and Windows
+   * junctions resolved) while the root comes from process.cwd(), which keeps the path the shell was in.
+   * Node's resolver uses the JS `fs.realpathSync`, which keeps Windows 8.3 short names
+   * (`C:\Users\RUNNER~1`); the native one expands them, so both are kept.
    */
-  let realOpts: Opts | undefined;
-  try {
-    const real = fs.realpathSync.native(data.root);
-    if (real !== data.root) realOpts = { ...opts, root: real };
-  } catch {
-    /* the root as given */
-  }
+  const realOpts: Opts[] = realRoots(data.root).map((root) => ({ ...opts, root }));
   const retain = data.retain === true;
   const verbose = data.verbose === true;
   const cache: TransformCache | undefined = openCache(
@@ -162,7 +175,7 @@ export function createEsmLoader(data: HookData | undefined, deps: EsmLoaderDeps)
 
   /** The options whose root contains `file`: the root as given, else its real path. */
   const optsFor = (file: string): Opts =>
-    realOpts && !inside(opts.root, file) && inside(realOpts.root, file) ? realOpts : opts;
+    (!inside(opts.root, file) && realOpts.find((o) => inside(o.root, file))) || opts;
   const relOf = (file: string) => (file ? path.relative(optsFor(file).root, file).split(path.sep).join("/") : file);
 
   /**

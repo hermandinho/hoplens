@@ -28,7 +28,7 @@ import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { cached, openCache } from "./cache";
-import { claimTsLoaded, esmHandledCommonJS } from "./esmload";
+import { claimTsLoaded, esmHandledCommonJS, realRoots } from "./esmload";
 import { retainGenerated } from "./generated";
 import type { TransformOptions } from "./index";
 import type { HookReport, ReportMeta } from "./register";
@@ -101,20 +101,15 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
 
   const o: TransformOptions = { root: opts.root, include: opts.include, exclude: opts.exclude, preset: "node" };
   // Node hands the CommonJS loader real paths (symlinks and Windows junctions resolved); the root comes
-  // from process.cwd(), which keeps the path the shell was in.
-  let real: TransformOptions | undefined;
-  try {
-    const r = fs.realpathSync.native(o.root);
-    if (r !== o.root) real = { ...o, root: r };
-  } catch {
-    /* the root as given */
-  }
+  // from process.cwd(), which keeps the path the shell was in. Node's realpath keeps 8.3 short names
+  // and the native one expands them, so the root's real paths are both (`realRoots`).
+  const real: TransformOptions[] = realRoots(o.root).map((root) => ({ ...o, root }));
   const inside = (root: string, file: string) => {
     const rel = path.relative(root, file);
     return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
   };
   const optsFor = (file: string): TransformOptions =>
-    real && !inside(o.root, file) && inside(real.root, file) ? real : o;
+    (!inside(o.root, file) && real.find((r) => inside(r.root, file))) || o;
   const relOf = (file: string) => path.relative(optsFor(file).root, file).split(path.sep).join("/");
   const report = (r: HookReport) => {
     try {
@@ -266,7 +261,7 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
     // Path checks first: the transform module itself (and anything outside the root) loads through
     // here too, before the transform is there to ask.
     if (!IN_SCOPE_EXT.test(file) || /[\\/]node_modules[\\/]/.test(file)) return false;
-    if (!inside(o.root, file) && !(real && inside(real.root, file))) return false;
+    if (!inside(o.root, file) && !real.some((r) => inside(r.root, file))) return false;
     // Hoplens' own build (a workspace checkout under the app root is not in node_modules).
     if (inside(__dirname, file)) return false;
     try {

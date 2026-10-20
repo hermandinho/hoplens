@@ -4,6 +4,7 @@
 "@hoplens/cli": patch
 "@hoplens/express": patch
 "hoplens": patch
+"@hoplens/transform": patch
 ---
 
 Fixes found while checking a real install and the docs:
@@ -25,3 +26,7 @@ Fixes found while checking a real install and the docs:
   the UI uses 4983, or the first free port up to 4993.
 - The request path UI is called "the Path view (press x on a request)" everywhere.
 - The `hoplens` package description mentions Express.
+- Windows: function hops work for a project whose path contains an 8.3 short name (e.g. a temp dir
+  under `C:\Users\RUNNER~1`). The hooks resolved the scope root with `fs.realpathSync.native`, which
+  expands the short name, while Node's own resolvers keep it, so no file matched and nothing was
+  wrapped.

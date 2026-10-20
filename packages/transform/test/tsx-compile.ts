@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { hookApi } from "../src/register";
 
 export const TSX_FIXTURES = path.join(__dirname, "fixture", "tsx");
 
@@ -75,6 +76,9 @@ export function normalizeMap(compiled: string, name: string): string {
 /**
  * Compiles each case with `tsx <entry> --import <dump hook>`: the hook registers after tsx's loader,
  * so its load sees tsx's output, and writes it out. Returns case name -> normalized compiled source.
+ * The dump hook uses the hook API tsx uses on this Node (hookApi(), the same table register() follows):
+ * where tsx registers in-thread `module.registerHooks()` hooks, an async `module.register()` hook sits
+ * below them and would see the raw file.
  */
 export function compileWithTsx(cli: string, cases = tsxCases()): Record<string, string> {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-tsx-")));
@@ -84,35 +88,44 @@ export function compileWithTsx(cli: string, cases = tsxCases()): Record<string, 
     fs.mkdirSync(out);
     fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "module" }));
     for (const c of tsxCases()) fs.copyFileSync(path.join(TSX_FIXTURES, `${c}.ts`), path.join(dir, "src", `${c}.ts`));
-    fs.writeFileSync(
-      path.join(dir, "dump.mjs"),
-      `import fs from "node:fs";
+    const env = { ...process.env };
+    // NODE_V8_COVERAGE (c8, vitest coverage) makes tsx add sourcesContent to its inline map.
+    for (const k of Object.keys(env))
+      if (k.startsWith("VITEST") || k === "NODE_OPTIONS" || k === "NODE_V8_COVERAGE") delete env[k];
+    const sync = hookApi({ ...env, HOPLENS_LOADER_HOOKS: undefined }) === "sync";
+    const dump = `(url, ctx, next) => {
+  const r = next(url, ctx);
+  const write = (r) => {
+    if (url.startsWith("file:") && url.includes("/src/") && r.source != null) {
+      const name = path.basename(fileURLToPath(url)).replace(/\\.ts$/, "");
+      fs.writeFileSync(path.join(${JSON.stringify(out)}, name + ".mjs"), typeof r.source === "string" ? r.source : Buffer.from(r.source));
+    }
+    return r;
+  };
+  return typeof r?.then === "function" ? r.then(write) : write(r);
+}`;
+    const imports = `import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-export async function load(url, ctx, next) {
-  const r = await next(url, ctx);
-  if (url.startsWith("file:") && url.includes("/src/") && r.source != null) {
-    const name = path.basename(fileURLToPath(url)).replace(/\\.ts$/, "");
-    fs.writeFileSync(path.join(${JSON.stringify(out)}, name + ".mjs"), typeof r.source === "string" ? r.source : Buffer.from(r.source));
-  }
-  return r;
-}
-`,
-    );
-    fs.writeFileSync(
-      path.join(dir, "dump-register.mjs"),
-      `import { register } from "node:module";\nregister("./dump.mjs", import.meta.url);\n`,
-    );
+`;
+    if (sync) {
+      fs.writeFileSync(
+        path.join(dir, "dump-register.mjs"),
+        `${imports}import { registerHooks } from "node:module";\nregisterHooks({ load: ${dump} });\n`,
+      );
+    } else {
+      fs.writeFileSync(path.join(dir, "dump.mjs"), `${imports}export const load = ${dump};\n`);
+      fs.writeFileSync(
+        path.join(dir, "dump-register.mjs"),
+        `import { register } from "node:module";\nregister("./dump.mjs", import.meta.url);\n`,
+      );
+    }
     fs.writeFileSync(
       path.join(dir, "entry.mjs"),
       cases
         .map((c) => `await import(${JSON.stringify(pathToFileURL(path.join(dir, "src", `${c}.ts`)).href)});`)
         .join("\n"),
     );
-    const env = { ...process.env };
-    // NODE_V8_COVERAGE (c8, vitest coverage) makes tsx add sourcesContent to its inline map.
-    for (const k of Object.keys(env))
-      if (k.startsWith("VITEST") || k === "NODE_OPTIONS" || k === "NODE_V8_COVERAGE") delete env[k];
     const r = spawnSync(process.execPath, [cli, "--import", "./dump-register.mjs", "entry.mjs"], {
       cwd: dir,
       env,

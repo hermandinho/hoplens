@@ -429,7 +429,18 @@ describe("transform cache across restarts", () => {
     await poll(async () => (cold.stdout().includes("function hops:") ? true : undefined));
     await cold.kill();
     const warm = await start(fx, args, env);
-    await poll(async () => (warm.stdout().includes("function hops:") ? true : undefined));
+    // The banner waits for the hooks worker's reports, but their debug lines reach us on stderr, a
+    // separate pipe that can trail stdout under load: wait until every hit the banner counts is there
+    // (and as many parsed lines from the cold run, whose misses those hits are).
+    const hits = await poll(async () => {
+      const m = /function hops:.*\(cache: (\d+) hits?\)/.exec(warm.stdout());
+      return m ? Number(m[1]) : undefined;
+    });
+    await poll(async () =>
+      debugLines(warm).filter((l) => l.includes(" cache=hit")).length >= hits && parsed(debugLines(cold)).length >= hits
+        ? true
+        : undefined,
+    ).catch(() => undefined); // expectWarm then says which line is missing
     return { cold, warm };
   }
 

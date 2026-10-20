@@ -39,7 +39,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsup --silent && vitest run --testTimeout=30000",
+    "test": "vitest run --testTimeout=30000",
     "test:runners": "vitest run --testTimeout=30000 test/functionhops.test.ts test/functionhops-cjs.test.ts test/path.test.ts test/path-flag.test.ts test/path-ts.test.ts test/restart.test.ts test/lifecycle.test.ts"
   },
   "engines": {

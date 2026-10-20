@@ -189,11 +189,39 @@ describe("shim wrap", () => {
 });
 
 describe("re-entrant calls", () => {
-  /** What the transform trailer does: the module's own binding becomes the forwarder. */
-  function recursive() {
-    let depth: (n: number) => number = (n) => (n === 0 ? 0 : 1 + depth(n - 1));
-    depth = G.__hoplens.wrap(depth, { ...META, name: "depth" });
+  /**
+   * What the transform trailer does: the module's own binding becomes the forwarder (from `wrap`,
+   * the global one by default). `leaf` runs at the bottom of the recursion.
+   */
+  function recursive(leaf?: () => void, wrap: (fn: any, meta: any) => any = G.__hoplens.wrap) {
+    let depth: (n: number) => number = (n) => {
+      if (n !== 0) return 1 + depth(n - 1);
+      leaf?.();
+      return 0;
+    };
+    depth = wrap(depth, { ...META, name: "depth" });
     return (n: number) => depth(n);
+  }
+
+  /**
+   * JS frames each recursion level adds, from the stack trace at the bottom of depth 10 and 30:
+   * exact, unlike a stack-overflow depth, which moves with frame sizes and the JIT tier.
+   */
+  function framesPerLevel(make: (leaf: () => void) => (n: number) => number): number {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = Number.POSITIVE_INFINITY;
+    try {
+      let frames = 0;
+      const f = make(() => {
+        frames = (new Error().stack ?? "").split("\n").length;
+      });
+      f(10);
+      const at10 = frames;
+      f(30);
+      return (frames - at10) / 20;
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
   }
 
   /** A core-like wrap that puts several frames between the forwarder and the function. */
@@ -239,16 +267,34 @@ describe("re-entrant calls", () => {
   }
 
   test("recursion keeps most of its unwrapped depth, at boot and after (one extra frame per level)", () => {
-    const plain = (n: number): number => (n === 0 ? 0 : 1 + plain(n - 1));
-    const base = maxDepth((n) => plain(n));
+    // Frame counts, not a depth ratio against unwrapped recursion: how deep a stack overflows
+    // depends on each frame's size and on the JIT tier reached mid-search (the same plain
+    // recursion measured 10937 and 12500 levels on one machine), so a ratio bound was flaky.
+    const plain = framesPerLevel((leaf) => recursive(leaf, (fn) => fn));
+    expect(plain).toBe(1);
     installShim();
+    expect(
+      framesPerLevel((leaf) => recursive(leaf)),
+      "at boot",
+    ).toBe(plain + 1);
     const depth = recursive();
     const atBoot = maxDepth(depth);
     heavyBoot();
+    // The wrap a level would pay without the re-entry bypass: core-like, every level opens a span.
+    const unguardedWrap = G.__hoplens.wrap;
+    const unguarded = framesPerLevel((leaf) => recursive(leaf, unguardedWrap));
+    expect(unguarded).toBeGreaterThanOrEqual(10);
+    const unguardedDepth = maxDepth(recursive(undefined, unguardedWrap));
     bindFnShim();
+    expect(
+      framesPerLevel((leaf) => recursive(leaf)),
+      "after boot",
+    ).toBe(plain + 1);
     const after = maxDepth(depth);
-    expect(atBoot / base, `${atBoot} of ${base}`).toBeGreaterThan(0.3);
-    expect(after / base, `${after} of ${base}`).toBeGreaterThan(0.3);
+    // And on a real stack, measured the same way in the same run: the bypass keeps several times
+    // the depth of the unguarded wrap (about 5x by frame count; 2x leaves room for frame sizes).
+    expect(atBoot / unguardedDepth, `${atBoot} vs ${unguardedDepth}`).toBeGreaterThan(2);
+    expect(after / unguardedDepth, `${after} vs ${unguardedDepth}`).toBeGreaterThan(2);
   });
 
   test("mutual recursion and a throw inside it leave later calls traced", () => {

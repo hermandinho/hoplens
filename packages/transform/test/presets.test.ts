@@ -180,7 +180,9 @@ describe("export clauses (node preset)", () => {
       "export const callF = (a) => f(a);",
       "",
     ].join("\n");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-clause-"));
+    // The native realpath expands a Windows 8.3 temp dir (`C:\Users\RUNNER~1` on GitHub runners):
+    // pathToFileURL encodes `~` as `%7E`, and vite's module loader does not find the encoded path.
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-clause-")));
     const file = path.join(dir, "svc.mjs");
     const out = transformSource(src, file, { root: dir, preset: "node" })!;
     fs.writeFileSync(file, out);
@@ -298,7 +300,7 @@ describe("functions whose identity the module already handed out (node preset)",
       "export function plain(a) { return a + 1; }",
       "",
     ].join("\n");
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-ident-"));
+    const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-ident-")));
     const file = path.join(dir, "bus.mjs");
     const out = transformSource(src, file, { root: dir, preset: "node" })!;
     expect(wrapped(out)).toEqual(["stop", "plain"]);

@@ -20,7 +20,7 @@ slower.
 
 ```bash
 npm i -D hoplens
-npx hoplens init     # wraps next.config with withHoplens() and adds hoplens/node to instrumentation register()
+npx hoplens init     # next.config loads withHoplens() in next dev only; adds hoplens/node to instrumentation register()
 npm run dev          # next dev, unchanged
 # open http://localhost:3000/__hoplens
 ```
@@ -357,20 +357,33 @@ All three do nothing when the runtime is not loaded, so they are safe in product
 
 ## Configuration
 
-On Next, `withHoplens()` takes your Next config and, optionally, Hoplens options:
+On Next, `withHoplens()` takes your Next config and, optionally, Hoplens options. `hoplens` is a
+dev dependency, so `next.config` loads it only in `next dev` (what `hoplens init` writes): `next build`
+and `next start` on an install without dev dependencies never resolve it.
 
 ```ts
 // next.config.ts
-import { withHoplens } from "hoplens/next";
+import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
-export default withHoplens(
-  { /* your Next.js config */ },
-  {
+const nextConfig: NextConfig = { /* your Next.js config */ };
+
+export default async (phase: string, ctx: { defaultConfig: NextConfig }) => {
+  if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  // Hoplens is a dev dependency: only `next dev` loads it
+  const { withHoplens } = await import("hoplens/next" as string);
+  return withHoplens(nextConfig, {
     insights: { thresholds: { nPlusOneMin: 10 }, disable: ["logs-on-success"] },
     persist: true,
-  },
-);
+  })(phase, ctx);
+};
 ```
+
+`"hoplens/next" as string` keeps `next build`'s type check from looking the module up (TS2307 once
+dev dependencies are pruned). In `next.config.mjs` import `next/constants.js` and drop the types; in
+CommonJS, `require("next/constants")` at the top and `require("hoplens/next")` inside the function.
+Because the gate returns before `withHoplens` runs, `enabled: true` cannot turn Hoplens on outside
+`next dev`.
 
 On Express, pass the same options as JSON in `HOPLENS_OPTIONS` (read when the register hook loads,
 so it reaches function hops), or to `hoplens(app, options)`.
@@ -420,7 +433,8 @@ hoplens remove   unwire Hoplens from this project (reverse of init)
 All three detect the framework from `package.json` (`--framework next|express` when a project
 depends on both). `init` and `remove` take `--dry-run`; `doctor` never writes.
 
-- `init` on Next patches `next.config.*` with `withHoplens()` and adds `hoplens/node` to the
+- `init` on Next makes `next.config.*` load `withHoplens()` in `next dev` only (and upgrades the
+  top-level `import { withHoplens }` that init wrote before 0.3) and adds `hoplens/node` to the
   `register()` hook in `instrumentation.ts`. On Express it adds `--import hoplens/express/register`
   to `scripts.dev` (else `start:dev`, else `watch`), or `nodemon --exec "node --import
   hoplens/express/register"` for nodemon; for other runners it prints the line to use (`ts-node`,
@@ -430,7 +444,7 @@ depends on both). `init` and `remove` take `--dry-run`; `doctor` never writes.
   on Express (what the dev script's runner supports on this Node, a `.ts` entry on plain `node`, a
   CommonJS entry under `--import`, the transform cache size) and Integrations. It exits 1 when
   Hoplens is not ready to run.
-- `remove` reverses `init`: on Next it unwraps `withHoplens(...)`, strips the instrumentation block
+- `remove` reverses `init`: on Next it gives the exported config back as it was (either form), strips the instrumentation block
   and deletes `.next/cache/hoplens`; on Express it puts the script back byte for byte and deletes
   `node_modules/.cache/hoplens`. The request path flag goes with either folder.
 
@@ -441,8 +455,9 @@ Run `npx hoplens <cmd> --help` for details.
 ## Safety
 
 - **Dev only.** On Next, the instrumentation import is gated by `NODE_ENV === "development"` and the
-  runtime refuses `NODE_ENV=production` without `HOPLENS_FORCE=1`; `withHoplens()` does nothing
-  outside the dev phase. On Express the register hook is on when `NODE_ENV` is unset or
+  runtime refuses `NODE_ENV=production` without `HOPLENS_FORCE=1`; `next.config` loads
+  `hoplens/next` only in the `next dev` phase, so `next build` / `next start` work without dev
+  dependencies (app code that imports `hoplens/trace` still needs `hoplens` installed). On Express the register hook is on when `NODE_ENV` is unset or
   anything but `production` / `test`, and off for those two unless `HOPLENS_FORCE=1`: with the gate
   off it patches nothing and never loads `@hoplens/core`.
 - **Zero production impact.** CI builds the Next example and asserts the production output holds no

@@ -21,18 +21,29 @@ npm i -D @hoplens/next
 
 ## Usage
 
-**`next.config.ts`**
+**`next.config.ts`** (Hoplens is a dev dependency, so load it in `next dev` only: `next build` and
+`next start` then work on an install without dev dependencies)
 ```ts
-import { withHoplens } from "@hoplens/next";
+import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
-export default withHoplens({ /* your Next.js config */ });
+const nextConfig: NextConfig = { /* your Next.js config */ };
+
+export default async (phase: string, ctx: { defaultConfig: NextConfig }) => {
+  if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  const { withHoplens } = await import("@hoplens/next" as string);
+  return withHoplens(nextConfig)(phase, ctx);
+};
 ```
+
+`as string` keeps `next build`'s type check from resolving the module (TS2307 when dev dependencies
+are pruned). In `next.config.mjs` import `next/constants.js`.
 
 **`instrumentation.ts`** (or `src/instrumentation.ts` if your app is under `src/`)
 ```ts
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {
-    await import("@hoplens/next/node");
+    await import("@hoplens/next/node" as string);
   }
 }
 ```
@@ -47,11 +58,12 @@ With the `hoplens` meta-package the same two entries are `hoplens/next` and
 The second argument takes Hoplens options:
 
 ```ts
-export default withHoplens(nextConfig, {
+// inside the dev-only branch above
+return withHoplens(nextConfig, {
   insights: { thresholds: { nPlusOneMin: 10 }, disable: ["logs-on-success"] },
   serverTiming: true, // Server-Timing + x-hoplens-trace on dev responses (default)
   persist: true,      // keep stats, edits and verdicts across dev restarts (default false)
-});
+})(phase, ctx);
 ```
 
 Every option (`enabled`, `port`, `autoTrace`, `redact`, `profiles`, `maxTraces`,
@@ -61,17 +73,16 @@ Two of them matter here:
 
 - `enabled` overrides the gate. By default `withHoplens` turns Hoplens on only in
   the `next dev` phase, and never with `HOPLENS=0`. Off, it returns your config
-  unchanged.
+  unchanged. Behind the `PHASE_DEVELOPMENT_SERVER` branch above it only runs in
+  `next dev`, so `enabled: true` cannot turn it on elsewhere.
 - `stateDir` moves the persisted stats and the request path flag out of
   `.next/cache/hoplens` (relative to the project root, or absolute). The runtime
-  reads it, but it is not declared on the `HoplensOptions` type, so an object
-  literal needs a cast. Write it as a plain string so `hoplens init` and `doctor`
-  find it too:
+  reads it, but it is not declared on the `HoplensOptions` type (a static import
+  of `withHoplens` needs a cast; the lazily loaded one above is untyped). Write it
+  as a plain string so `hoplens init` and `doctor` find it too:
 
   ```ts
-  import { type HoplensOptions, withHoplens } from "@hoplens/next";
-
-  export default withHoplens(nextConfig, { persist: true, stateDir: ".hoplens" } as HoplensOptions);
+  return withHoplens(nextConfig, { persist: true, stateDir: ".hoplens" })(phase, ctx);
   ```
 
 ## What it does

@@ -10,7 +10,7 @@ pnpm --filter example-next16-app dev
 
 Exercises a `proxy.ts`, Zod v4 schemas, outbound `fetch`, a thrown error path, and a `traced()` helper, so every hop kind shows up in the UI.
 
-Wired the way `npx hoplens init` does it in an app: `hoplens` is the only Hoplens package, as a dev dependency (like `npm i -D hoplens`); `next.config.ts` wraps the config with `withHoplens()` from `hoplens/next`, and `src/instrumentation.ts` loads `hoplens/node` in `register()` under `NODE_ENV === "development"`.
+Wired the way `npx hoplens init` does it in an app: `hoplens` is the only Hoplens package, as a dev dependency (like `npm i -D hoplens`); `next.config.ts` loads `withHoplens()` from `hoplens/next` in `next dev` only (a phase-gated function export, so `next build` / `next start` never resolve it), and `src/instrumentation.ts` loads `hoplens/node` in `register()` under `NODE_ENV === "development"`.
 
 ![Next 16 journey for GET /api/db/products: Next.js spans folded, proxy, handler, function and db hops, and the N+1 verdict at route.ts:19](../../docs/images/next-journey.png)
 

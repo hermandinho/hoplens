@@ -3,33 +3,10 @@ import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
 import { removeExpress } from "../express/commands";
 import { detectFramework, frameworkFlag } from "../framework";
+import { CONFIG_FILES, KNOWN_BLOCKS, configState, unguardConfig } from "../next/wiring";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson } from "../util";
 
-/**
- * The exact snippet that `init` inserts into `register()`. We match it verbatim on
- * removal — if the user reformatted it we fall back to a warning instead of guessing.
- */
-/**
- * Both forms of the block init may have written. 0.1.2+ uses the hoplens/node
- * subpath; 0.1.0 / 0.1.1 used @hoplens/next/node directly. remove must undo
- * either, so we try each in order.
- */
-const BLOCK_CURRENT = [
-  "  // Hoplens: request journey visualizer at /__hoplens (dev only)",
-  '  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {',
-  '    await import("hoplens/node");',
-  "  }",
-].join("\n");
-const BLOCK_LEGACY = [
-  "  // Hoplens: request journey visualizer at /__hoplens (dev only)",
-  '  if (process.env.NEXT_RUNTIME === "nodejs" && process.env.NODE_ENV === "development") {',
-  '    await import("@hoplens/next/node");',
-  "  }",
-].join("\n");
-const KNOWN_BLOCKS = [BLOCK_CURRENT, BLOCK_LEGACY];
-
-const CONFIG_FILES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"];
 const INSTRUMENTATION_FILES = [
   "instrumentation.ts",
   "instrumentation.js",
@@ -143,104 +120,22 @@ function unpatchConfig(ts: any, root: string): Edit | null {
   if (!name) return null;
 
   const src = fs.readFileSync(path.join(root, name), "utf8");
-  if (!src.includes("withHoplens")) {
+  if (configState(src) === "none") {
     skip(`${name} has no withHoplens wrap`);
     return null;
   }
-
-  const isCjs =
-    name.endsWith(".cjs") || (name.endsWith(".js") && /module\.exports\s*=/.test(src) && !/export\s+default/.test(src));
-
-  let out: string | null = null;
-  if (ts) {
-    const sf = ts.createSourceFile(
-      name,
-      src,
-      ts.ScriptTarget.Latest,
-      true,
-      name.endsWith("ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS,
-    );
-    for (const st of sf.statements) {
-      if (!isCjs && ts.isExportAssignment(st) && !st.isExportEquals) {
-        const unwrapped = unwrapCall(ts, sf, src, st.expression);
-        if (unwrapped) out = unwrapped;
-      }
-      if (
-        isCjs &&
-        ts.isExpressionStatement(st) &&
-        ts.isBinaryExpression(st.expression) &&
-        st.expression.left.getText(sf) === "module.exports"
-      ) {
-        const unwrapped = unwrapCall(ts, sf, src, st.expression.right);
-        if (unwrapped) out = unwrapped;
-      }
-    }
-  } else {
-    const re = isCjs
-      ? /module\.exports\s*=\s*withHoplens\(([^)]*)\)\s*;?/
-      : /export\s+default\s+withHoplens\(([^)]*)\)\s*;?/;
-    const m = src.match(re);
-    if (m) out = src.replace(re, isCjs ? `module.exports = ${m[1]!.trim()};` : `export default ${m[1]!.trim()};`);
-  }
-
-  if (!out) {
-    warn(`Couldn't find the withHoplens(...) call in ${name}. Remove it by hand.`);
+  const r = ts ? unguardConfig(ts, name, src) : { error: "no-ts" };
+  if ("error" in r) {
+    warn(`Couldn't find the Hoplens wrap init writes in ${name}. Remove withHoplens by hand.`);
     return null;
   }
-
-  out = stripHoplensImport(out, isCjs);
-
-  // If the stripped file is effectively empty (what init creates for a greenfield project),
-  // delete it so `remove` leaves no trace.
-  if (isGreenfieldLeftover(out, isCjs)) {
+  // What is left is the config init created for a greenfield project: delete it so remove leaves no trace.
+  if (r.out === null) {
     ok(`Deleted ${name} (was created by init with no custom config)`);
     return [name, null];
   }
-
   ok(`Unwrapped withHoplens(...) in ${name}`);
-  return [name, out];
-}
-
-function unwrapCall(ts: any, sf: any, src: string, expr: any): string | null {
-  if (!ts.isCallExpression(expr)) return null;
-  if (expr.expression.getText(sf) !== "withHoplens") return null;
-  const inner = expr.arguments[0];
-  const innerText = inner ? inner.getText(sf) : "{}";
-  return `${src.slice(0, expr.getStart(sf))}${innerText}${src.slice(expr.getEnd())}`;
-}
-
-/**
- * Matches both the modern `hoplens/next` subpath (0.1.2+) and the legacy
- * `@hoplens/next` scope (0.1.0 / 0.1.1), so remove undoes an install done
- * with any version of init.
- */
-const HOPLENS_IMPORT_SOURCE = /["'](?:hoplens\/next|@hoplens\/next)["']/;
-
-function stripHoplensImport(src: string, isCjs: boolean): string {
-  if (isCjs) {
-    return src.replace(
-      new RegExp(
-        `^[ \\t]*const\\s*\\{\\s*withHoplens\\s*\\}\\s*=\\s*require\\(\\s*${HOPLENS_IMPORT_SOURCE.source}\\s*\\)\\s*;?[ \\t]*\\r?\\n?`,
-        "m",
-      ),
-      "",
-    );
-  }
-  // Try `import { withHoplens }` first (sole import), then an aliased form inside a named-import list.
-  const soleImport = new RegExp(
-    `^[ \\t]*import\\s*\\{\\s*withHoplens\\s*\\}\\s*from\\s*${HOPLENS_IMPORT_SOURCE.source}\\s*;?[ \\t]*\\r?\\n?`,
-    "m",
-  );
-  let out = src.replace(soleImport, "");
-  if (out === src) {
-    out = src.replace(/\{\s*withHoplens\s*,\s*/g, "{ ").replace(/,\s*withHoplens\s*(?=[},])/g, "");
-  }
-  return out;
-}
-
-function isGreenfieldLeftover(src: string, isCjs: boolean): boolean {
-  const stripped = src.replace(/\s+/g, "");
-  return isCjs ? stripped === "module.exports={};" : stripped === "exportdefault{};";
+  return [name, r.out];
 }
 
 function unpatchInstrumentation(ts: any, root: string): Edit | null {
@@ -253,21 +148,23 @@ function unpatchInstrumentation(ts: any, root: string): Edit | null {
     return null;
   }
 
-  // Try literal block removal for each known form. init writes the block
-  // verbatim with surrounding newlines; later versions changed the import
-  // path but kept the surrounding comment + if-gate.
-  const normalized = src.replace(/\r\n/g, "\n");
+  // Literal block removal for each form any init wrote. init inserts it with \n line endings, so a
+  // CRLF file holds it that way; one converted to CRLF afterwards holds it with \r\n.
   let out: string | null = null;
-  for (const block of KNOWN_BLOCKS) {
-    const marker = `\n${block}\n`;
-    const idx = normalized.indexOf(marker);
-    if (idx >= 0) {
-      out = normalized.slice(0, idx) + normalized.slice(idx + marker.length);
-      break;
-    }
-    if (normalized.includes(block)) {
-      out = normalized.replace(block, "").replace(/\n{3,}/g, "\n\n");
-      break;
+  const eols = src.includes("\r\n") ? ["\n", "\r\n"] : ["\n"];
+  search: for (const known of KNOWN_BLOCKS) {
+    for (const eol of eols) {
+      const block = known.split("\n").join(eol);
+      const marker = `${eol}${block}${eol}`;
+      const idx = src.indexOf(marker);
+      if (idx >= 0) {
+        out = src.slice(0, idx) + src.slice(idx + marker.length);
+        break search;
+      }
+      if (src.includes(block)) {
+        out = src.replace(block, "").replace(new RegExp(`(?:${eol}){3,}`, "g"), `${eol}${eol}`);
+        break search;
+      }
     }
   }
 

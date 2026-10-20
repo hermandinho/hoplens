@@ -152,8 +152,10 @@ const instr = path.join(scratchDir, "instrumentation.ts");
 if (!fs.existsSync(nextCfg)) fail("init didn't create next.config.ts");
 const nextCfgSrc = fs.readFileSync(nextCfg, "utf8");
 if (!nextCfgSrc.includes("withHoplens")) fail("next.config.ts missing withHoplens");
-if (!nextCfgSrc.includes('from "hoplens/next"'))
-  fail("next.config.ts should import from hoplens/next (meta subpath), not @hoplens/next");
+if (!nextCfgSrc.includes('import("hoplens/next" as string)'))
+  fail("next.config.ts should load hoplens/next (meta subpath, not @hoplens/next) inside the dev-only gate");
+if (/^import\s[^;]*["']hoplens\/next["']/m.test(nextCfgSrc))
+  fail("next.config.ts must not import hoplens/next at the top (next build / start fail without dev dependencies)");
 if (!fs.existsSync(instr)) fail("init didn't create instrumentation.ts");
 const instrSrc = fs.readFileSync(instr, "utf8");
 if (!instrSrc.includes('"hoplens/node"'))

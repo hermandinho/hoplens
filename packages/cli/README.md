@@ -46,12 +46,46 @@ The framework is detected from `package.json` (`next` or `express`, devDependenc
 
 ### `hoplens init`
 
-**Next.js:** patches `next.config.*` with `withHoplens()` (from `hoplens/next`) and adds
-the `hoplens/node` dev-only import to the `instrumentation` `register()`
+**Next.js:** makes `next.config.*` load `withHoplens()` (from `hoplens/next`) in `next dev` only
+and adds the `hoplens/node` dev-only import to the `instrumentation` `register()`
 hook — both routed through the `hoplens` meta so a single `npm i -D hoplens`
 is all a user needs. Creates either file if
 missing. Preserves user code in both; adds `async` to a sync `register()`
 only when it needs to.
+
+`hoplens` is a dev dependency, so the config must not import it when Next reads it for `next build`
+or `next start`. init replaces only the exported expression (`export default <expr>` /
+`module.exports = <expr>`) with a function that returns your config unchanged outside
+`PHASE_DEVELOPMENT_SERVER` and loads `hoplens/next` lazily in it:
+
+```ts
+import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+
+const nextConfig: NextConfig = { reactStrictMode: true };
+
+export default async (phase: string, ctx: { defaultConfig: NextConfig }) => {
+  if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  // Hoplens is a dev dependency: only `next dev` loads it
+  const { withHoplens } = await import("hoplens/next" as string);
+  return withHoplens(nextConfig)(phase, ctx);
+};
+```
+
+- `.ts` / `.mts` get `"hoplens/next" as string` (a plain literal fails `next build`'s type check,
+  TS2307, once dev dependencies are pruned); `instrumentation.ts` gets `"hoplens/node" as string` for
+  the same reason. `.mjs`, `.mts` and an ESM `.js` import `next/constants.js` (Node ESM refuses the
+  bare `next/constants`); CommonJS `require`s both, `hoplens/next` inside the function.
+- An exported expression that is not a plain identifier (`{ ... }`, `withBundleAnalyzer(config)`) is
+  kept as a `const config = ...` inside the function. A function config (an arrow, or a top-level
+  function binding) is called with `(phase, ctx)` outside dev and handed to `withHoplens` in it.
+- No try/catch: production never resolves hoplens, and in dev a missing `hoplens` fails loudly.
+  `withHoplens(config, { enabled: true })` no longer turns Hoplens on outside `next dev`.
+- **Upgrade.** A config in the pre-0.3 form (a sole `import { withHoplens } from "hoplens/next"`,
+  or `@hoplens/next`, at the top and `withHoplens(config[, options])` exported) is rewritten to the
+  form above, keeping the specifier and the options; the `.ts` instrumentation block init wrote is
+  switched to `as string`. A top-level import init can't take over (more names, `import type`) is
+  left alone with the snippet to use, and doctor keeps warning. A second init is a no-op.
 
 **Express:** adds `--import hoplens/express/register` to the first of `scripts.dev`,
 `scripts.start:dev` and `scripts.watch` that exists, and changes nothing else in `package.json`,
@@ -124,7 +158,10 @@ npx hoplens doctor
 ```
 
 On a Next.js project, Wiring checks the `withHoplens` wrap, the instrumentation import and its
-`NODE_ENV === "development"` gate, and that `instrumentation.*` sits next to `app/` / `pages/`.
+`NODE_ENV === "development"` gate, and that `instrumentation.*` sits next to `app/` / `pages/`. It
+warns (without failing) when `next.config` imports `hoplens/next` at the top (*next build/start
+without dev dependencies will fail; run npx hoplens init to upgrade*) and when `instrumentation.ts`
+imports `hoplens/node` as a plain string literal.
 
 On an Express project, Install checks that Express is 4 or 5 and that `hoplens` is resolvable from
 the project (with pnpm, use the `hoplens/express/register` form: `@hoplens/express` isn't hoisted).
@@ -178,7 +215,7 @@ On a Next.js project the same run has no Function hops section:
   ✓ hoplens runtime is installed
 
   Wiring
-  ✓ next.config.ts uses withHoplens
+  ✓ next.config.ts uses withHoplens, loaded by next dev only
   ✓ src/instrumentation.ts loads the Hoplens runtime
   • request path: off — enable it in the Path view (press x on a request) or with hoplens init --path
 
@@ -192,7 +229,9 @@ On a Next.js project the same run has no Function hops section:
 
 ### `hoplens remove`
 
-Reverse of `init`. Unwraps the `withHoplens(...)` call in `next.config` and
+Reverse of `init`. Gives the exported config in `next.config` back as it was, from the dev-only
+function or from the pre-0.3 `withHoplens(...)` wrap (dropping the imports init added when nothing
+else uses them), and
 strips the Hoplens block from `instrumentation.register()`. Deletes files
 that `init` created when nothing user-authored remains, so an
 `init → remove` round-trip is byte-identical to the pre-init state.

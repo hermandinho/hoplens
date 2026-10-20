@@ -2,8 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readDistDir } from "../commands/remove";
 import { PATH_FLAG_FILE } from "../express/pathflag";
-
-const CONFIG_FILES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"];
+import { CONFIG_FILES } from "./wiring";
 
 /**
  * Where @hoplens/next reads the request path flag at the first request (packages/next/src/path.ts):

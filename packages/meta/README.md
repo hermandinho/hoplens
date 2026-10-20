@@ -32,7 +32,7 @@ keyboard map and the JSON API are documented in the
 
 ```bash
 npm i -D hoplens
-npx hoplens init     # Next.js: withHoplens() + instrumentation.register(); Express: the dev script
+npx hoplens init     # Next.js: withHoplens() in next dev only + instrumentation.register(); Express: the dev script
 npm run dev
 # open http://localhost:<your dev port>/__hoplens
 ```
@@ -40,7 +40,8 @@ npm run dev
 `init` detects the framework from `package.json` (`--framework next|express`
 when you depend on both):
 
-- **Next.js:** wraps `next.config.*` in `withHoplens()` from `hoplens/next` and
+- **Next.js:** makes `next.config.*` load `withHoplens()` from `hoplens/next` in
+  `next dev` only (so `next build` / `next start` work without dev dependencies) and
   adds the dev-only `hoplens/node` import to `instrumentation.ts`'s
   `register()`, creating either file if missing.
 - **Express:** adds `--import hoplens/express/register` to `scripts.dev` (else

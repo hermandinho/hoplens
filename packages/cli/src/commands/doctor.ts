@@ -4,10 +4,10 @@ import { loadTypeScript } from "@hoplens/transform/ts";
 import { doctorExpress, doctorPath } from "../express/commands";
 import { detectFramework, frameworkFlag } from "../framework";
 import { nextFlagPath } from "../next/pathflag";
+import { CONFIG_FILES, LITERAL_NODE_IMPORT, configState } from "../next/wiring";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
-const CONFIG_FILES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"];
 const INSTRUMENTATION_FILES = [
   "instrumentation.ts",
   "instrumentation.js",
@@ -112,10 +112,15 @@ export async function doctor(args: string[]) {
   const cfg = CONFIG_FILES.find((f) => fs.existsSync(path.join(root, f)));
   if (!cfg) nope("No next.config.* in this directory — run npx hoplens init", true);
   else {
-    const src = fs.readFileSync(path.join(root, cfg), "utf8");
-    src.includes("withHoplens")
-      ? good(`${cfg} uses withHoplens`)
-      : nope(`${cfg} doesn't wrap config in withHoplens — run npx hoplens init`, true);
+    const state = configState(fs.readFileSync(path.join(root, cfg), "utf8"));
+    if (state === "none") nope(`${cfg} doesn't wrap config in withHoplens — run npx hoplens init`, true);
+    else if (state === "guarded") good(`${cfg} uses withHoplens, loaded by next dev only`);
+    else good(`${cfg} uses withHoplens`);
+    if (state === "unguarded")
+      nope(
+        `${cfg} imports hoplens/next at the top: next build/start without dev dependencies will fail; run npx hoplens init to upgrade`,
+        false,
+      );
   }
 
   const ins = INSTRUMENTATION_FILES.find((f) => fs.existsSync(path.join(root, f)));
@@ -128,6 +133,12 @@ export async function doctor(args: string[]) {
       nope(`${ins} doesn't load hoplens/node — run npx hoplens init`, true);
     } else {
       good(`${ins} loads the Hoplens runtime`);
+      if (ins.endsWith(".ts") && LITERAL_NODE_IMPORT.test(src)) {
+        nope(
+          `${ins} imports hoplens/node as a plain string: next build's type check fails without dev dependencies; run npx hoplens init to upgrade`,
+          false,
+        );
+      }
       if (!src.includes('NODE_ENV === "development"') && !src.includes("NODE_ENV==='development'")) {
         nope('Hoplens isn\'t gated by NODE_ENV === "development" — it will attach in production too', false);
       }

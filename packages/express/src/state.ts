@@ -39,6 +39,8 @@ export interface AdapterState {
     noAppListen?: boolean;
     rt?: Runtime;
     timer?: NodeJS.Timeout;
+    /** Waiting for the transform's reports to arrive before printing (banner.ts print()). */
+    flushing?: boolean;
   };
 }
 
@@ -52,6 +54,10 @@ export interface AutoTraceStats {
   firstRefused?: Record<string, { file: string; detail?: string }>;
   /** Files whose transform failed (loaded untouched); the first one is logged. */
   errors: number;
+  /** The transform cache's directory, when it is on (`<stateDir>/transform`). */
+  cacheDir?: string;
+  /** Files the transform cache answered (counted only while HOPLENS_DEBUG is set: reports carry it then). */
+  cacheHits?: number;
 }
 
 const KEY = Symbol.for("hoplens.express.state");

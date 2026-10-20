@@ -18,14 +18,19 @@
 // Request path (retainGenerated): when the handler hands module._compile something other than what it
 // read (a require hook compiled it: tsx's esbuild), that text is what V8 runs and its coverage offsets
 // point into; it is kept for the request path when it carries an inline source map (src/generated.ts).
+//
+// Transform cache (opts.cacheDir, src/cache.ts): transformCommonJS is looked up by a hash of the source
+// first, so a warm restart loads no TypeScript in the main thread. What is retained is still what the
+// handler hands module._compile, whatever answered the read.
 
 import fs from "node:fs";
 import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { cached, openCache } from "./cache";
 import { retainGenerated } from "./generated";
 import type { TransformOptions } from "./index";
-import type { HookReport } from "./register";
+import type { HookReport, ReportMeta } from "./register";
 
 type Transform = typeof import("./index");
 
@@ -42,6 +47,10 @@ export interface CommonJSLayerOptions extends TransformOptions {
   report: (r: HookReport) => void;
   /** Keep compiled output for the request path (RegisterOptions.retainGenerated). */
   retainGenerated?: boolean;
+  /** The transform cache's directory (RegisterOptions.cacheDir); unset: no cache. */
+  cacheDir?: string;
+  /** Report files with nothing to wrap too (`type: "none"`). */
+  verbose?: boolean;
 }
 
 interface Entry {
@@ -50,6 +59,10 @@ interface Entry {
   out?: string | null;
   read: boolean;
   fns: number;
+  /** Debug log facts: cache outcome, ms spent in rewrite(), and whether this file loaded TypeScript. */
+  meta?: ReportMeta;
+  /** Parsed (or answered by the cache) with nothing to wrap. */
+  none?: boolean;
   /** What the read answered (the file, or its rewrite): compiled output differs from it. */
   handed?: string;
 }
@@ -111,6 +124,17 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
   };
 
   let disabled = false;
+  // Opened on the first in-scope file (not at install: the transform's own files load first).
+  let cache: ReturnType<typeof openCache>;
+  let cacheOpened = false;
+  const theCache = () => {
+    if (!cacheOpened) {
+      cacheOpened = true;
+      cache = openCache(opts.cacheDir, __dirname, o.root);
+    }
+    return cache;
+  };
+  let tsSeen = false;
   /** Files whose handler is running now, by keyOf(filename). */
   const active = new Map<string, Entry>();
   /** Our wrappers, each with the handler it wraps. */
@@ -185,20 +209,57 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
   /** The rewritten source of an in-scope file, or null to load it as it is. Never throws. */
   function rewrite(e: Entry, src: string): string | null {
     const file = e.file;
+    const t0 = performance.now();
+    // Only with `verbose`: reports stay as they were without it.
+    const meta = (hit: boolean | undefined): ReportMeta => {
+      if (!opts.verbose) return {};
+      const m: ReportMeta = { mode: "cjs", ms: performance.now() - t0 };
+      if (hit !== undefined) m.cache = hit ? "hit" : "miss";
+      if (!tsSeen && tx?.typescriptLoaded()) {
+        tsSeen = true;
+        m.ts = "main";
+      }
+      return m;
+    };
     try {
       const t = transform();
       const fo = optsFor(file);
       if (Buffer.byteLength(src, "utf8") > MAX_SOURCE_BYTES) {
-        if (t.shouldTrace(file, "", fo)) report({ type: "refused", file: relOf(file), reason: "large" });
+        if (t.shouldTrace(file, "", fo))
+          report({ type: "refused", file: relOf(file), reason: "large", ...meta(undefined) });
         return null;
       }
       if (!t.shouldTrace(file, src, fo)) return null;
-      const res = t.transformCommonJS(src, file, fo);
-      if (!res) return null;
+      // The prescan before the cache: a file with no export shape costs neither a hash nor a read.
+      if (!t.mayHaveCommonJSTargets(src)) return null;
+      const { result: res, hit } = cached(
+        theCache(),
+        "cjs",
+        file,
+        src,
+        fo,
+        () => {
+          const x = t.transformCommonJS(src, file, fo);
+          return x ? { kind: "wrapped", code: x.code, fns: x.fns } : { kind: "none" };
+        },
+        undefined,
+        // A none is kept only when TypeScript loaded: one that failed to load must not outlive this start.
+        () => t.typescriptLoaded(),
+      );
+      e.meta = meta(hit);
+      if (res.kind !== "wrapped") {
+        e.none = true;
+        return null;
+      }
       e.fns = res.fns;
       return res.code;
     } catch (err) {
-      report({ type: "error", file: relOf(file), message: err instanceof Error ? err.message : String(err) });
+      report({
+        type: "error",
+        file: relOf(file),
+        message: err instanceof Error ? err.message : String(err),
+        ...meta(undefined),
+      });
       return null;
     }
   }
@@ -221,7 +282,8 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
   /** After the handler: report what happened to the file. */
   function settle(e: Entry) {
     if (e.read) {
-      if (e.out != null) report({ type: "wrapped", file: relOf(e.file), fns: e.fns });
+      if (e.out != null) report({ type: "wrapped", file: relOf(e.file), fns: e.fns, ...e.meta });
+      else if (e.none && opts.verbose) report({ type: "none", file: relOf(e.file), ...e.meta });
       return;
     }
     // Never read: Node already held the source (its ESM loader read it). Report it only when it looks
@@ -230,7 +292,12 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
       const src = installRead.call(fs, e.file, "utf8") as string;
       const t = transform();
       if (t.mayHaveCommonJSTargets(src) && t.shouldTrace(e.file, src, optsFor(e.file))) {
-        report({ type: "refused", file: relOf(e.file), reason: "esm-loader" });
+        report({
+          type: "refused",
+          file: relOf(e.file),
+          reason: "esm-loader",
+          ...(opts.verbose ? { mode: "cjs" as const } : {}),
+        });
       }
     } catch {
       /* unreadable: nothing to say */

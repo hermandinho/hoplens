@@ -389,3 +389,78 @@ describe.skipIf(!TSX_CLI)("tsx CLI (COMPILED mode)", { timeout: 30_000 }, () => 
     expect(s.stderr()).toBe("");
   });
 });
+
+// The transform cache across a watch restart: the second start of the same unchanged app (what node
+// --watch, tsx watch and nodemon do on a save elsewhere) answers every parsed file from
+// <stateDir>/transform and loads no TypeScript in either thread. Each run has its own stateDir.
+describe("transform cache across restarts", () => {
+  const debugLines = (s: Started) =>
+    s
+      .stderr()
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith("hoplens:transform "));
+  const parsed = (lines: string[]) => lines.filter((l) => / (wrapped=\d+|none) /.test(l));
+
+  async function twice(args: string[], stateDir: string) {
+    const env = { HOPLENS_DEBUG: "transform", HOPLENS_OPTIONS: JSON.stringify({ stateDir }) };
+    fs.rmSync(path.join(fx.root, stateDir), { recursive: true, force: true });
+    const cold = await start(fx, args, env);
+    await poll(async () => (cold.stdout().includes("function hops:") ? true : undefined));
+    await cold.kill();
+    const warm = await start(fx, args, env);
+    await poll(async () => (warm.stdout().includes("function hops:") ? true : undefined));
+    return { cold, warm };
+  }
+
+  function expectWarm(cold: Started, warm: Started, file: string, mode: string) {
+    const c = parsed(debugLines(cold));
+    expect(c.find((l) => l.includes(` ${file} `))).toMatch(
+      new RegExp(`mode=${mode} wrapped=5 cache=miss ts=loaded\\(hooks\\)`),
+    );
+    const w = parsed(debugLines(warm));
+    expect(w.length).toBe(c.length);
+    for (const l of w) {
+      expect(l).toContain("cache=hit");
+      expect(l).not.toContain("ts=loaded");
+    }
+    expect(warm.probe).toMatchObject({ wrapped: true, typescript: false });
+    expect(warm.stdout()).toContain(
+      `function hops: 5 fns in 1 file (cache: ${w.length} hit${w.length === 1 ? "" : "s"})`,
+    );
+    expect(cold.stdout()).toContain("function hops: 5 fns in 1 file (cache: 0 hits)");
+    // The debug log never goes to stdout.
+    expect(warm.stdout()).not.toContain("hoplens:transform");
+  }
+
+  test("ESM JavaScript (RAW): a warm restart parses nothing", async () => {
+    const { cold, warm } = await twice(["--import", REGISTER_URL, "src/server.js"], ".state-raw");
+    expectWarm(cold, warm, "src/svc.js", "raw");
+    // Not parsed either way, so never cached; its reason reads the same as in the banner.
+    expect(debugLines(warm)).toContain(
+      "hoplens:transform src/legacy.cjs mode=cjs refused=esm-loader (CommonJS Node read through its ESM loader)",
+    );
+    await get(warm.port, "/thing/9");
+    const t = await traceFor(warm.port, "/thing/9");
+    expect(fnSpans(t).map((x: any) => x.name)).toEqual(["getThing", "label"]);
+    expect(fnSpans(t)[0].location).toMatchObject({ file: "src/svc.js", line: 1 });
+  });
+
+  test.skipIf(!TSX)("tsx first (COMPILED): a warm restart parses nothing, same hops and lines", async () => {
+    const { cold, warm } = await twice(["--import", TSX!, "--import", REGISTER_URL, "src/server-ts.js"], ".state-ts");
+    expectWarm(cold, warm, "src/tsvc.ts", "compiled");
+    await expectTsHops(warm, 10);
+  });
+
+  test("HOPLENS_TRANSFORM_CACHE=0: nothing stored, every start parses", async () => {
+    const env = {
+      HOPLENS_DEBUG: "transform",
+      HOPLENS_TRANSFORM_CACHE: "0",
+      HOPLENS_OPTIONS: JSON.stringify({ stateDir: ".state-off" }),
+    };
+    const s = await start(fx, ["--import", REGISTER_URL, "src/server.js"], env);
+    await poll(async () => (s.stdout().includes("function hops:") ? true : undefined));
+    expect(s.stdout()).toContain("function hops: 5 fns in 1 file (cache: off)");
+    for (const l of parsed(debugLines(s))) expect(l).not.toContain("cache=");
+    expect(fs.existsSync(path.join(fx.root, ".state-off", "transform"))).toBe(false);
+  });
+});

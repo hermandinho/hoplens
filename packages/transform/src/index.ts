@@ -1014,4 +1014,4 @@ export function transformCompiled(compiled: string, raw: string, file: string, o
   return { kind: "wrapped", code: out + trailer(rebinds, file, o), fns: rebinds.length };
 }
 
-export { loadTypeScript } from "./ts";
+export { loadTypeScript, typescriptLoaded } from "./ts";

@@ -31,7 +31,33 @@ export function appListening(port: number): void {
   if (b.uiReady) print();
 }
 
+/** @hoplens/transform/register's flushReports(), read off its global: the banner never loads the transform. */
+const FLUSH = Symbol.for("hoplens.transform.flush");
+
+/**
+ * Print once. With function hops on, first wait until the hooks worker's reports so far arrived (they
+ * come on the event loop, and a file the transform cache answers costs the hook no time, so its report
+ * can trail the app's listen): the count is then the files loaded before the app listened.
+ */
 function print(): void {
+  const s = adapterState();
+  const b = s.banner;
+  if (b.printed || b.flushing || !b.rt) return;
+  const flush = (globalThis as any)[FLUSH];
+  if (s.autoTrace && typeof flush === "function") {
+    b.flushing = true;
+    if (b.timer) clearTimeout(b.timer);
+    try {
+      flush(printNow);
+      return;
+    } catch {
+      /* print now */
+    }
+  }
+  printNow();
+}
+
+function printNow(): void {
   const s = adapterState();
   const b = s.banner;
   if (b.printed || !b.rt) return;
@@ -91,14 +117,37 @@ export function pathBanner(
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** `function hops: 5 fns in 3 files`, or undefined when nothing was wrapped. Exported for tests. */
-export function functionHopsLine(st: AutoTraceStats): string | undefined {
+/** HOPLENS_DEBUG is set (any value but empty or 0). Same test as autotrace.ts debugSet(). */
+const debugSet = (env: Record<string, string | undefined>) => {
+  const v = env.HOPLENS_DEBUG?.trim();
+  return !!v && v !== "0";
+};
+
+/**
+ * `function hops: 5 fns in 3 files`, or undefined when nothing was wrapped. With HOPLENS_DEBUG set,
+ * ` (cache: K hits)` (or ` (cache: off)`) follows. Exported for tests.
+ */
+export function functionHopsLine(
+  st: AutoTraceStats,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
   if (!st.fns) return undefined;
-  return `function hops: ${plural(st.fns, "fn")} in ${plural(st.files, "file")}`;
+  const cache = debugSet(env) ? (st.cacheDir ? ` (cache: ${plural(st.cacheHits ?? 0, "hit")})` : " (cache: off)") : "";
+  return `function hops: ${plural(st.fns, "fn")} in ${plural(st.files, "file")}${cache}`;
 }
 
-/** One line for every file loaded untouched, with the fix where there is one. Exported for tests. */
-export function refusedNote(st: AutoTraceStats): string | undefined {
+/** Where the debug log that lists each refused file is turned on. */
+export const DEBUG_HINT = "HOPLENS_DEBUG=transform lists each file and why";
+
+/**
+ * One line for every file loaded untouched, with the fix where there is one, by the reason names the
+ * transform reports (compiled, unmapped, commonjs, esm-loader, large: the debug log's `refused=` and
+ * `hoplens doctor` use the same). Ends with DEBUG_HINT unless the log is already on. Exported for tests.
+ */
+export function refusedNote(
+  st: AutoTraceStats,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
   const parts: string[] = [];
   const compiled = st.refused.compiled ?? 0;
   const cjs = st.refused.commonjs ?? 0;
@@ -127,7 +176,13 @@ export function refusedNote(st: AutoTraceStats): string | undefined {
   }
   const large = st.refused.large ?? 0;
   if (large) parts.push(`${plural(large, "file")} over 1 MB (generated code?), not parsed`);
-  return parts.length ? `function hops skipped for ${parts.join("; ")}` : undefined;
+  if (!parts.length) return undefined;
+  // The debug log is on: same test as @hoplens/transform/register transformDebug() (not imported here,
+  // so the banner never loads the transform).
+  const hint = /(?:^|[\s,])(?:transform|1|\*|all|true)(?:$|[\s,])/i.test(env.HOPLENS_DEBUG?.trim() ?? "")
+    ? ""
+    : ` (${DEBUG_HINT})`;
+  return `function hops skipped for ${parts.join("; ")}${hint}`;
 }
 
 /** Exported for tests. `info` lines print under the URL, before the `!` notes. */

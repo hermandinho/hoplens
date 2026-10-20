@@ -69,7 +69,7 @@ const PRELOAD = (retain: boolean) => `
 const { createRequire } = require("node:module");
 const { register } = createRequire(${JSON.stringify(REGISTER)})(${JSON.stringify(REGISTER)});
 globalThis.__hoplens = { wrap(fn) { return fn; } };
-register({ root: process.env.FX_ROOT, include: ["src/**"], retainGenerated: ${retain} });
+register({ root: process.env.FX_ROOT, include: ["src/**"], retainGenerated: ${retain}, cacheDir: process.env.FX_CACHE || undefined });
 `;
 
 /** Prints the registry once the hook's posts arrived (they are async). `req` is a require function. */
@@ -90,8 +90,12 @@ setTimeout(() => {
 }, 300);
 `;
 
-function node(args: string[], cwd: string): { out: any; stderr: string; status: number | null } {
-  const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: cwd };
+function node(
+  args: string[],
+  cwd: string,
+  extra: Record<string, string> = {},
+): { out: any; stderr: string; status: number | null } {
+  const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: cwd, ...extra };
   for (const k of Object.keys(env)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete env[k];
   const r = spawnSync(process.execPath, args, { cwd, env, encoding: "utf8", timeout: 30000 });
   const line = r.stdout.split(/\r?\n/).find((l) => l.startsWith("{"));
@@ -147,6 +151,25 @@ afterAll(() => {
 });
 
 describe("what register()'s loaders keep", () => {
+  test("with the transform cache: a warm start keeps the same text (the loader's output, not the cache)", () => {
+    for (const [dir, args] of [
+      [esm, ["--import", TSX_ESM, "--import", "./on.mjs", "src/main.ts"]],
+      [cjs, ["-r", TSX_CJS, "-r", "./on.cjs", "src/main.ts"]],
+    ] as const) {
+      const cache = path.join(dir, ".cache-t");
+      fs.rmSync(cache, { recursive: true, force: true });
+      const env = { FX_CACHE: cache, HOPLENS_DEBUG: "transform" };
+      const cold = node([...args], dir, env);
+      const warm = node([...args], dir, env);
+      expect(cold.status, cold.stderr).toBe(0);
+      expect(cold.stderr).toContain("cache=miss");
+      expect(warm.stderr).toContain("cache=hit");
+      expect(warm.stderr).not.toContain("cache=miss");
+      expect(warm.out).toEqual(cold.out);
+      expect(Object.values(warm.out).filter((v: any) => v?.map)).toHaveLength(dir === esm ? 2 : 1);
+    }
+  });
+
   test("ESM hook, COMPILED mode (tsx first): tsx's output with its inline map; plain JS is not kept", () => {
     const r = node(["--import", TSX_ESM, "--import", "./on.mjs", "src/main.ts"], esm);
     expect(r.status, r.stderr).toBe(0);

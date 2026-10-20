@@ -22,3 +22,8 @@ export function loadTypeScript(root: string): any | null {
   cached = { root, ts };
   return ts;
 }
+
+/** TypeScript was loaded in this thread (by loadTypeScript). For the debug log and tests. */
+export function typescriptLoaded(): boolean {
+  return Boolean(cached?.ts);
+}

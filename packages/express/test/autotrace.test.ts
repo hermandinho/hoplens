@@ -13,6 +13,7 @@ import {
   isReqResCall,
   raiseStackTraceLimit,
   readAutoTrace,
+  transformCacheDir,
 } from "../src/autotrace";
 import { bannerText, functionHopsLine, refusedNote } from "../src/banner";
 import { resolveOptions } from "../src/options";
@@ -301,6 +302,23 @@ describe("isReqResCall", () => {
   });
 });
 
+describe("transformCacheDir", () => {
+  const root = path.resolve("/app");
+  test.each([
+    [{}, path.join(root, "node_modules", ".cache", "hoplens", "transform")],
+    [{ HOPLENS_OPTIONS: '{"stateDir":".state"}' }, path.join(root, ".state", "transform")],
+    [{ HOPLENS_OPTIONS: '{"root":"sub","stateDir":"s"}' }, path.join(root, "sub", "s", "transform")],
+    [{ HOPLENS_OPTIONS: "{bad" }, path.join(root, "node_modules", ".cache", "hoplens", "transform")],
+    [{ HOPLENS_OPTIONS: '{"transformCache":false}' }, undefined],
+    [{ HOPLENS_OPTIONS: '{"enabled":false}' }, undefined],
+    [{ HOPLENS_TRANSFORM_CACHE: "0" }, undefined],
+    [{ HOPLENS_TRANSFORM_CACHE: "off" }, undefined],
+    [{ HOPLENS_TRANSFORM_CACHE: "1" }, path.join(root, "node_modules", ".cache", "hoplens", "transform")],
+  ])("%j -> %s", (env, want) => {
+    expect(transformCacheDir(env, root)).toBe(want);
+  });
+});
+
 describe("readAutoTrace", () => {
   test.each([
     [{}, { on: true, source: "default" }],
@@ -362,6 +380,28 @@ describe("default scope", () => {
 });
 
 describe("banner lines", () => {
+  test("HOPLENS_DEBUG: the cache count on the hops line, and no debug-log hint on the refusal note", () => {
+    const st = { files: 3, fns: 5, refused: { large: 1 }, errors: 0 };
+    expect(functionHopsLine({ ...st, cacheDir: "/x", cacheHits: 2 }, {})).toBe("function hops: 5 fns in 3 files");
+    expect(functionHopsLine({ ...st, cacheDir: "/x", cacheHits: 2 }, { HOPLENS_DEBUG: "transform" })).toBe(
+      "function hops: 5 fns in 3 files (cache: 2 hits)",
+    );
+    expect(functionHopsLine({ ...st, cacheDir: "/x", cacheHits: 1 }, { HOPLENS_DEBUG: "1" })).toBe(
+      "function hops: 5 fns in 3 files (cache: 1 hit)",
+    );
+    expect(functionHopsLine({ ...st, cacheDir: "/x" }, { HOPLENS_DEBUG: "routes" })).toBe(
+      "function hops: 5 fns in 3 files (cache: 0 hits)",
+    );
+    expect(functionHopsLine(st, { HOPLENS_DEBUG: "transform" })).toBe("function hops: 5 fns in 3 files (cache: off)");
+    expect(functionHopsLine({ ...st, cacheDir: "/x", cacheHits: 2 }, { HOPLENS_DEBUG: "0" })).toBe(
+      "function hops: 5 fns in 3 files",
+    );
+    expect(refusedNote(st, {})).toMatch(/not parsed \(HOPLENS_DEBUG=transform lists each file and why\)$/);
+    expect(refusedNote(st, { HOPLENS_DEBUG: "transform" })).toMatch(/not parsed$/);
+    expect(refusedNote(st, { HOPLENS_DEBUG: "routes,transform" })).toMatch(/not parsed$/);
+    expect(refusedNote(st, { HOPLENS_DEBUG: "routes" })).toMatch(/why\)$/);
+  });
+
   test("function hops count and the refusal note", () => {
     expect(functionHopsLine({ files: 0, fns: 0, refused: {}, errors: 0 })).toBeUndefined();
     expect(functionHopsLine({ files: 1, fns: 1, refused: {}, errors: 0 })).toBe("function hops: 1 fn in 1 file");
@@ -380,10 +420,12 @@ describe("banner lines", () => {
       errors: 0,
     })!;
     expect(viaEsm).toBe(
-      "function hops skipped for 2 CommonJS files Node loaded through its ESM loader (src/legacy.cjs, ...), as it does for the entry under --import and for a CommonJS file imported from ESM; for a CommonJS entry, preload with -r hoplens/express/register instead of --import",
+      "function hops skipped for 2 CommonJS files Node loaded through its ESM loader (src/legacy.cjs, ...), as it does for the entry under --import and for a CommonJS file imported from ESM; for a CommonJS entry, preload with -r hoplens/express/register instead of --import (HOPLENS_DEBUG=transform lists each file and why)",
     );
     const large = refusedNote({ files: 0, fns: 0, refused: { large: 1 }, errors: 0 })!;
-    expect(large).toBe("function hops skipped for 1 file over 1 MB (generated code?), not parsed");
+    expect(large).toBe(
+      "function hops skipped for 1 file over 1 MB (generated code?), not parsed (HOPLENS_DEBUG=transform lists each file and why)",
+    );
     const one = refusedNote({
       files: 0,
       fns: 0,
@@ -392,7 +434,7 @@ describe("banner lines", () => {
       errors: 0,
     })!;
     expect(one).toBe(
-      "function hops skipped for 1 TypeScript file whose compiled output (tsx?) Hoplens could not map back to the source (src/a.ts: f: not a local export of the compiled source); to wrap it, load Hoplens first: node --import hoplens/express/register --import tsx <entry>",
+      "function hops skipped for 1 TypeScript file whose compiled output (tsx?) Hoplens could not map back to the source (src/a.ts: f: not a local export of the compiled source); to wrap it, load Hoplens first: node --import hoplens/express/register --import tsx <entry> (HOPLENS_DEBUG=transform lists each file and why)",
     );
     const two = refusedNote({
       files: 0,

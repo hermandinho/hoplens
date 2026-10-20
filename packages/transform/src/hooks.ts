@@ -13,12 +13,17 @@
 // Request path (data.retain): the text V8 will run for an in-scope module another loader compiled
 // (what this hook returns, or the loader's output it left alone) is posted to the main thread when
 // it carries an inline source map, so coverage offsets into it can be mapped (src/generated.ts).
+//
+// Transform cache (data.cacheDir, src/cache.ts): each transform call is looked up first by a hash of
+// its input, so a warm restart loads no TypeScript in this worker. Retention above still posts the
+// text this hook returns, rebuilt from the loader's own source on a hit.
 
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { GeneratedMessage, HookData, HookReport } from "./register";
+import { type CachedResult, type TransformCache, cached, openCache } from "./cache";
+import type { GeneratedMessage, HookData, HookReport, ReportMeta } from "./register";
 
 type Transform = typeof import("./index");
 
@@ -36,7 +41,7 @@ interface Port {
   unref?(): void;
 }
 
-type Opts = Omit<HookData, "port"> & { preset: "node" | "next" };
+type Opts = Omit<HookData, "port" | "cacheDir" | "verbose" | "retain"> & { preset: "node" | "next" };
 
 /**
  * Sources over this size load untouched (refused "large"): parsing one with TypeScript on the hooks
@@ -57,6 +62,12 @@ let port: Port | undefined;
 let disabled = false;
 let retain = false;
 let tx: Transform | undefined;
+let cache: TransformCache | undefined;
+let verbose = false;
+/** TypeScript was already loaded in this worker when the last file finished. */
+let tsSeen = false;
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export function initialize(data: HookData | undefined): void {
   if (!data || typeof data.root !== "string") return;
@@ -74,9 +85,14 @@ export function initialize(data: HookData | undefined): void {
   }
   port = data.port as Port | undefined;
   retain = data.retain === true;
+  verbose = data.verbose === true;
+  cache = openCache(typeof data.cacheDir === "string" ? data.cacheDir : undefined, HERE, data.root);
   try {
     port?.on?.("message", (m) => {
-      if ((m as { type?: unknown } | null)?.type === "disable") disabled = true;
+      const msg = m as { type?: unknown; id?: unknown } | null;
+      if (msg?.type === "disable") disabled = true;
+      // Every report this worker posted is ahead of the answer on the same port (in order).
+      else if (msg?.type === "flush") port?.postMessage({ type: "flushed", id: msg.id });
     });
     port?.unref?.();
   } catch {
@@ -90,6 +106,34 @@ function report(r: HookReport | GeneratedMessage): void {
   } catch {
     /* the main thread is gone */
   }
+}
+
+/**
+ * The file's timing and cache outcome, and whether it made this worker load TypeScript: only with
+ * `verbose` (reports stay as they were without it).
+ */
+function meta(mode: ReportMeta["mode"], t0: number, hit: boolean | undefined): ReportMeta {
+  if (!verbose) return {};
+  const m: ReportMeta = { mode, ms: performance.now() - t0 };
+  if (hit !== undefined) m.cache = hit ? "hit" : "miss";
+  if (!tsSeen && tx?.typescriptLoaded()) {
+    tsSeen = true;
+    m.ts = "hooks";
+  }
+  return m;
+}
+
+/** A transform call through the cache. */
+function viaCache(
+  mode: NonNullable<ReportMeta["mode"]>,
+  file: string,
+  src: string,
+  o: Opts,
+  compute: () => CachedResult,
+  raw?: string,
+) {
+  // A none is kept only when TypeScript loaded: one that failed to load must not outlive this start.
+  return cached(cache, mode, file, src, o, compute, raw, () => Boolean(tx?.typescriptLoaded()));
 }
 
 /** The pure transform (dist/index.js). It loads TypeScript itself, only when a file gets parsed. */
@@ -168,6 +212,7 @@ function retainCompiled(file: string, r: LoadResult, out: string | undefined, o:
 /** The rewritten source, or undefined to load `r` as it is. */
 function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): string | undefined {
   const t = transform();
+  const t0 = performance.now();
   if (r.format === "commonjs" || r.format === "commonjs-typescript") {
     // No source: Node hands the file to the CommonJS loader, where register()'s CommonJS layer sees it
     // (and reports it). With a source, Node compiles it here, out of that layer's reach: the bytes on
@@ -176,7 +221,7 @@ function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): stri
     if (r.source == null || !t.shouldTrace(file, "", o)) return undefined;
     const cbytes = bytesOf(r.source);
     if (cbytes.length > MAX_SOURCE_BYTES) {
-      report({ type: "refused", file: relOf(file), reason: "large" });
+      report({ type: "refused", file: relOf(file), reason: "large", ...meta("cjs", t0, undefined) });
       return undefined;
     }
     let cdisk: Buffer | undefined;
@@ -186,20 +231,28 @@ function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): stri
       /* not on disk as such */
     }
     if (!cdisk?.equals(cbytes)) {
-      report({ type: "refused", file: relOf(file), reason: "commonjs" });
+      report({ type: "refused", file: relOf(file), reason: "commonjs", ...meta("cjs", t0, undefined) });
       return undefined;
     }
     const csrc = cbytes.toString("utf8");
     if (!t.shouldTrace(file, csrc, o)) return undefined;
-    const c = t.transformCommonJS(csrc, file, o);
-    if (!c) return undefined;
-    report({ type: "wrapped", file: relOf(file), fns: c.fns });
+    const { result: c, hit } = viaCache("cjs", file, csrc, o, () => {
+      const x = t.transformCommonJS(csrc, file, o);
+      return x ? { kind: "wrapped", code: x.code, fns: x.fns } : { kind: "none" };
+    });
+    if (c.kind !== "wrapped") {
+      if (verbose) report({ type: "none", file: relOf(file), ...meta("cjs", t0, hit) });
+      return undefined;
+    }
+    report({ type: "wrapped", file: relOf(file), fns: c.fns, ...meta("cjs", t0, hit) });
     return c.code;
   }
   if ((r.format !== "module" && r.format !== "module-typescript") || r.source == null) return undefined;
   const bytes = bytesOf(r.source);
   if (bytes.length > MAX_SOURCE_BYTES) {
-    if (t.shouldTrace(file, "", o)) report({ type: "refused", file: relOf(file), reason: "large" });
+    if (t.shouldTrace(file, "", o)) {
+      report({ type: "refused", file: relOf(file), reason: "large", ...meta("raw", t0, undefined) });
+    }
     return undefined;
   }
   const src = typeof r.source === "string" ? r.source : bytes.toString("utf8");
@@ -213,24 +266,53 @@ function rewrite(file: string, r: LoadResult, o: NonNullable<typeof opts>): stri
   }
   if (!disk.equals(bytes)) {
     if (!COMPILED_EXT.test(file)) {
-      report({ type: "refused", file: relOf(file), reason: "compiled" });
+      report({ type: "refused", file: relOf(file), reason: "compiled", ...meta("compiled", t0, undefined) });
       return undefined;
     }
     // COMPILED mode. The raw file decides what is in scope ('use client' and the like) and what to wrap.
     const raw = disk.toString("utf8");
     if (!t.shouldTrace(file, raw, o)) return undefined;
-    const c = t.transformCompiled(src, raw, file, o);
-    if (c.kind === "none") return undefined;
-    if (c.kind === "refused") {
-      report({ type: "refused", file: relOf(file), reason: "unmapped", detail: c.reason });
+    const { result: c, hit } = viaCache(
+      "compiled",
+      file,
+      src,
+      o,
+      () => {
+        const x = t.transformCompiled(src, raw, file, o);
+        return x.kind === "wrapped"
+          ? x
+          : x.kind === "refused"
+            ? { kind: "refused", reason: x.reason }
+            : { kind: "none" };
+      },
+      raw,
+    );
+    if (c.kind === "none") {
+      if (verbose) report({ type: "none", file: relOf(file), ...meta("compiled", t0, hit) });
       return undefined;
     }
-    report({ type: "wrapped", file: relOf(file), fns: c.fns });
+    if (c.kind === "refused") {
+      report({
+        type: "refused",
+        file: relOf(file),
+        reason: "unmapped",
+        detail: c.reason,
+        ...meta("compiled", t0, hit),
+      });
+      return undefined;
+    }
+    report({ type: "wrapped", file: relOf(file), fns: c.fns, ...meta("compiled", t0, hit) });
     return c.code;
   }
-  const out = t.transformSource(src, file, o);
-  if (out == null) return undefined;
-  const fns = out.slice(src.length).match(/ = __tpw\(/g)?.length ?? 0;
-  report({ type: "wrapped", file: relOf(file), fns });
-  return out;
+  const { result: out, hit } = viaCache("raw", file, src, o, () => {
+    const code = t.transformSource(src, file, o);
+    if (code == null) return { kind: "none" };
+    return { kind: "wrapped", code, fns: code.slice(src.length).match(/ = __tpw\(/g)?.length ?? 0 };
+  });
+  if (out.kind !== "wrapped") {
+    if (verbose) report({ type: "none", file: relOf(file), ...meta("raw", t0, hit) });
+    return undefined;
+  }
+  report({ type: "wrapped", file: relOf(file), fns: out.fns, ...meta("raw", t0, hit) });
+  return out.code;
 }

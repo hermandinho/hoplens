@@ -12,6 +12,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import type { Env } from "./gate";
+import { earlyStateDir } from "./pathflag";
 import { type AutoTraceStats, adapterState } from "./state";
 
 const G = globalThis as any;
@@ -184,6 +185,33 @@ export function readAutoTrace(env: Env = process.env): AutoTraceSetting {
   return { on: true, source: o.autoTrace === true ? "HOPLENS_OPTIONS" : "default" };
 }
 
+/** The transform cache's subdirectory of the state dir. */
+export const TRANSFORM_CACHE_DIR = "transform";
+
+/**
+ * Where the transform cache lives: `<stateDir>/transform` (the state dir the register hook resolves
+ * before boot, pathflag.ts earlyStateDir). Undefined when it is off: HOPLENS_TRANSFORM_CACHE=0 (or
+ * false / off), HOPLENS_OPTIONS `transformCache: false`, or no state dir (HOPLENS_OPTIONS enabled: false).
+ */
+export function transformCacheDir(env: Env = process.env, cwd = process.cwd()): string | undefined {
+  const flag = env.HOPLENS_TRANSFORM_CACHE?.trim().toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "off") return undefined;
+  try {
+    const o = env.HOPLENS_OPTIONS ? JSON.parse(env.HOPLENS_OPTIONS) : undefined;
+    if (o && typeof o === "object" && o.transformCache === false) return undefined;
+  } catch {
+    /* bad JSON: the defaults (boot reports it) */
+  }
+  const dir = earlyStateDir(env, cwd);
+  return dir ? path.join(dir, TRANSFORM_CACHE_DIR) : undefined;
+}
+
+/** HOPLENS_DEBUG is set (any value but empty or 0): reports carry cache facts, the banner counts hits. */
+export function debugSet(env: Env = process.env): boolean {
+  const v = env.HOPLENS_DEBUG?.trim();
+  return !!v && v !== "0";
+}
+
 /**
  * Directories searched when the app has no `src/`. Mirrors core's FALLBACK_DIRS (sourcewatch.ts),
  * copied so the register hook stays core-free; a unit test keeps the two equal.
@@ -250,7 +278,7 @@ export function raiseStackTraceLimit(): boolean {
 export function startFunctionHops(
   setting: AutoTraceSetting,
   root: string | undefined,
-  more: { retainGenerated?: boolean } = {},
+  more: { retainGenerated?: boolean; cacheDir?: string; env?: Env } = {},
 ): boolean {
   if (!setting.on || !root) return false;
   try {
@@ -258,6 +286,9 @@ export function startFunctionHops(
     if (!include.length) return false;
     const s = adapterState();
     const stats: AutoTraceStats = (s.autoTrace ??= { files: 0, fns: 0, refused: {}, errors: 0 });
+    const env = more.env ?? process.env;
+    const cacheDir = "cacheDir" in more ? more.cacheDir : transformCacheDir(env);
+    if (cacheDir) stats.cacheDir = cacheDir;
     const { register } = require("@hoplens/transform/register") as typeof import("@hoplens/transform/register");
     register({
       root,
@@ -266,7 +297,11 @@ export function startFunctionHops(
       preset: "node",
       framework: "express",
       retainGenerated: more.retainGenerated === true,
+      cacheDir,
+      verbose: debugSet(env),
       onReport: (r) => {
+        if (r.cache === "hit") stats.cacheHits = (stats.cacheHits ?? 0) + 1;
+        if (r.type === "none") return;
         if (r.type === "wrapped") {
           stats.files++;
           stats.fns += r.fns;
@@ -274,7 +309,7 @@ export function startFunctionHops(
           stats.refused[r.reason] = (stats.refused[r.reason] ?? 0) + 1;
           const first = (stats.firstRefused ??= {});
           first[r.reason] ??= { file: r.file, detail: r.reason === "unmapped" ? r.detail : undefined };
-        } else if (stats.errors++ === 0) {
+        } else if (r.type === "error" && stats.errors++ === 0) {
           process.stderr.write(
             `! hoplens:express function hops: could not rewrite ${r.file} (${r.message}); it loaded unchanged\n`,
           );

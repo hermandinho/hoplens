@@ -5,6 +5,7 @@ import { deleteFrom, insertInto } from "../json-edit";
 import { type PromptIO, askYesNo } from "../prompt";
 import { c, fail, ok, skip, warn } from "../style";
 import { projectPackageJson, readJson } from "../util";
+import { doctorFunctionHops } from "./hops";
 import { appEnv, flagContent, flagPath, insideDir, readFlag, writeFlag } from "./pathflag";
 import {
   DEV_SCRIPTS,
@@ -311,11 +312,6 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
     }
     if (/\bNODE_ENV=["']?production\b/.test(devCmd!))
       nope(`scripts.${dev.key} sets NODE_ENV=production — the dev gate is off, so Hoplens won't start`, false);
-    const cjsEntry = commonJSEntryUnderImport(root, devCmd!, pkg);
-    if (cjsEntry)
-      skip(
-        `${cjsEntry} is a CommonJS entry with exports: under --import Node loads it through its ESM loader, so its own functions get no function hops (the modules it requires do) — preload with -r ${REGISTER} to cover it too`,
-      );
   } else if (inCode.length) {
     skip(`hoplens(app) is called in ${inCode.join(", ")} — wired from code, no register hook needed`);
   } else if (dev) {
@@ -346,6 +342,18 @@ export function doctorExpress(root: string, pkg: any, { good, nope }: Report) {
     );
 
   doctorPath(dev ? { key: dev.key, cmd: devCmd ?? "" } : null, process.env, { nope }, flagPath(root, appEnv(devCmd)));
+
+  // ── Function hops ───────────────────────────────────────────────────────
+  const wired = !!(dev && devSpec);
+  doctorFunctionHops(
+    root,
+    dev ? { key: dev.key, cmd: devCmd ?? "" } : null,
+    wired,
+    inCode,
+    wired ? commonJSEntryUnderImport(root, devCmd!, pkg) : null,
+    process.env,
+    { nope },
+  );
 }
 
 const PATH_FLAG_RE = /\bHOPLENS_PATH=["']?(?:1|true)\b/i;

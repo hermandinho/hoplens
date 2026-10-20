@@ -178,15 +178,17 @@ setTimeout(() => console.log(JSON.stringify({
       { name: "ok", file: "src/ok.ts", line: 3 },
       { name: "ok", file: "src/ok.ts", line: 3 },
     ]);
-    expect(out.reports).toEqual([
-      { type: "wrapped", file: "src/ok.ts", fns: 1 },
-      { type: "wrapped", file: "src/ok.ts", fns: 1 },
+    // The three imports load concurrently: their reports come in either order.
+    const byFile = (a: any, b: any) => `${a.file}${a.type}`.localeCompare(`${b.file}${b.type}`);
+    expect([...out.reports].sort(byFile)).toEqual([
       {
         type: "refused",
         file: "src/odd.ts",
         reason: "unmapped",
         detail: "odd: not one top-level function binding in the compiled source",
       },
+      { type: "wrapped", file: "src/ok.ts", fns: 1 },
+      { type: "wrapped", file: "src/ok.ts", fns: 1 },
     ]);
   });
 

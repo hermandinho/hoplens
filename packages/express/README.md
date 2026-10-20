@@ -120,9 +120,9 @@ the handler hop (and under the function that called it). The banner counts them:
   | `node [--watch] --import hoplens/express/register src/server.js` (`.js`, `.mjs`, `.cjs`) | yes | yes, except the entry file itself (see below) |
   | the same with `.ts` / `.cts` that Node strips itself (Node 22.18+, or 22.6+ with `--experimental-strip-types`) | yes | yes, entry included (Node hands the ESM hook the file as it is on disk) |
   | `node -r hoplens/express/register ...` | yes | yes, entry included |
-  | `node --import hoplens/express/register --import tsx src/server.ts` | yes: Hoplens sees the raw `.ts` | yes |
+  | `node --import hoplens/express/register --import tsx src/server.ts`, and any `-r hoplens/express/register` with tsx (`node --import tsx -r ...`, `tsx [watch] -r ...`: Node runs every `-r` before any `--import`, whatever the order on the command line) | yes: Hoplens sees the raw `.ts` | yes |
   | `tsx [watch] --import hoplens/express/register src/server.ts` (what `hoplens init` writes) | yes: tsx's compiled output is mapped back to the `.ts` file | yes |
-  | `node --import tsx --import hoplens/express/register src/server.ts`, `node -r hoplens/express/register --import tsx ...` | yes, as above | yes |
+  | `node --import tsx --import hoplens/express/register src/server.ts` | yes, as above | yes |
   | `node -r ts-node/register -r hoplens/express/register src/server.ts` (either `-r` order) | - | yes (tested with ts-node 10.9.2), type-checking mode included (a `// @ts-ignore` line goes before the appended line) |
   | `node dist/server.js` (tsc output) | with `autoTrace.include: ["dist/**"]` | with `autoTrace.include: ["dist/**"]` |
 
@@ -153,6 +153,20 @@ the handler hop (and under the function that called it). The banner counts them:
   so it only stops function hops from binding (and says so).
 - Findings an exported function owns (an N+1 in a service, a duplicate query) are located at that
   function and fingerprinted under its name, so they differ from a run without function hops.
+- Transform cache: what Hoplens made of each file is kept under `<stateDir>/transform`
+  (`node_modules/.cache/hoplens/transform` by default), keyed by a hash of the file's bytes, its
+  path, the loader mode (as on disk, compiled by tsx, CommonJS), the autoTrace scope and the Hoplens
+  build. A restart where no file changed (node --watch, tsx watch or nodemon after an edit elsewhere)
+  parses nothing and loads no TypeScript; an edited file is parsed again. Entries are `.hlc` files (not
+  `.json`, so a stateDir inside a tree nodemon watches does not restart it). At most 5000 entries /
+  50 MB, least recently used dropped first (checked at most every 10 minutes, off the app's thread). Off with `HOPLENS_TRANSFORM_CACHE=0` or `HOPLENS_OPTIONS='{"transformCache":false}'`.
+- `HOPLENS_DEBUG=transform` prints one line per in-scope file with export syntax to stderr (a file
+  with none, often the entry, is skipped before any parse and not listed): its mode, how many functions were
+  wrapped (or `none`, or `refused=<reason>` with why), the cache hit or miss, the file that made a
+  thread load TypeScript, and the time spent. With `HOPLENS_DEBUG` set the banner adds the cache
+  hits: `function hops: 11 fns in 6 files (cache: 9 hits)`. `hoplens doctor` has a Function hops
+  section: whether they are on and for which files, what the dev script's runner supports, and the
+  cache's size.
 
 ## Route list
 
@@ -239,6 +253,8 @@ runtime starts right before your app's first `listen()`; a script that never lis
 | `HOPLENS_OPTIONS` | JSON `HoplensOptions`, applied before code options |
 | `HOPLENS_IGNORE` | Comma-separated path prefixes never traced, e.g. `/health,/metrics` |
 | `HOPLENS_AUTOTRACE` | `0` turns function hops off (read when the register hook loads) |
+| `HOPLENS_TRANSFORM_CACHE` | `0` turns the function hops transform cache off |
+| `HOPLENS_DEBUG` | `transform`: one line per transformed file on stderr; any value adds the cache hits to the banner |
 | `HOPLENS_PATH` | `1` starts V8 block coverage at boot for Trace path, `0` keeps it off; either wins over the sticky flag (read by the register hook only; restart to change it; refused under `NODE_V8_COVERAGE`) |
 
 `persist` is on by default here and writes route stats to `node_modules/.cache/hoplens`.

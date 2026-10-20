@@ -5,9 +5,9 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
-import util from "node:util";
+import util, { types } from "node:util";
 import zlib from "node:zlib";
-import { type Span, context, trace } from "@opentelemetry/api";
+import { type Context, type Span, context, trace } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { BasicTracerProvider, type ReadableSpan, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { captureCallSite, moveCallSite, noteSpanCallSite, shouldCapture } from "./callsite";
@@ -32,10 +32,19 @@ import type {
 interface Ctx {
   trace: TraceRecord;
   t0: number; // epoch ms
+  /** The incoming request and its response, set by the emit tap (absent on contexts built elsewhere). */
+  req?: http.IncomingMessage;
+  res?: http.ServerResponse;
+  /**
+   * The OTel context of the hop whose run() was entered last. A bound request emit falls back to it
+   * when no span is active, so work continued from a late 'data'/'end' still nests (HttpTap.bindRequestEmitter).
+   */
+  otel?: Context;
 }
 
 export const als = new AsyncLocalStorage<Ctx>();
 const OWN_SERVER = Symbol.for("hoplens.server");
+const BOUND_EMITTER = Symbol.for("hoplens.boundEmitter");
 const MAX_BODY = 512 * 1024;
 const now = () => performance.timeOrigin + performance.now();
 let seq = 0;
@@ -73,7 +82,8 @@ export function installHttpHook(rt: Runtime) {
     const orig = proto.emit;
     proto.__hoplensPatched = true;
     proto.emit = function (this: http.Server, event: string, ...args: any[]) {
-      if (event !== "request") return orig.call(this, event, ...args);
+      // A stopped runtime (process exit, or a boot that failed after this hook went in) is inert.
+      if (event !== "request" || rt.isStopped) return orig.call(this, event, ...args);
       const [req, res] = args as [http.IncomingMessage, http.ServerResponse];
       const url = req.url ?? "/";
       const own = (this as any)[OWN_SERVER];
@@ -85,10 +95,37 @@ export function installHttpHook(rt: Runtime) {
         rt.handleUi(req, res);
         return true;
       }
-      if (isInternal(url)) return orig.call(this, event, ...args);
+      if (isInternal(url)) {
+        // Untraced; the request path's capture window still wants to know it ran (path/capture.ts).
+        rt.store.noteInternal(req.method, url);
+        return orig.call(this, event, ...args);
+      }
       const ctx = startTrace(rt, req, res, classify);
+      if (rt.httpTap?.bindRequestEmitter) bindRequestEmitter(req, ctx);
       return als.run(ctx, () => orig.call(this, event, ...args));
     };
+  }
+}
+
+/**
+ * Run every event this request emits inside the trace's ALS context. Without it the store is
+ * lost in 'data' after the first chunk and in 'end' once the body arrives on later ticks, so a
+ * handler continued from 'end' (body-parser / raw-body) records nothing. The OTel context is lost
+ * the same way, so when no span is active the last hop entered (Ctx.otel) becomes the parent;
+ * otherwise spans started there would land with no parent. Patches the instance's emit, not
+ * on()/addListener, so listener identity for removeListener is untouched.
+ */
+export function bindRequestEmitter(req: http.IncomingMessage, ctx: Ctx) {
+  try {
+    if ((req as any)[BOUND_EMITTER]) return;
+    (req as any)[BOUND_EMITTER] = true;
+    const orig = req.emit;
+    req.emit = function (this: http.IncomingMessage, ...args: any[]) {
+      const call = () => (orig as any).apply(this, args);
+      return als.run(ctx, () => (ctx.otel && !trace.getSpan(context.active()) ? context.with(ctx.otel, call) : call()));
+    } as typeof req.emit;
+  } catch {
+    /* a frozen or exotic request keeps its own emit */
   }
 }
 
@@ -122,23 +159,14 @@ function startTrace(rt: Runtime, req: http.IncomingMessage, res: http.ServerResp
     if (v !== undefined) raw[k] = Array.isArray(v) ? v.join(", ") : String(v);
   rt.store.add(traceRec, { rawHeaders: raw });
   const contentLength = Number(raw["content-length"]);
-  captureResponse(
-    rt,
-    traceRec,
-    res,
-    t0,
-    Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined,
-  );
-  return { trace: traceRec, t0 };
+  const ctx: Ctx = { trace: traceRec, t0, req, res };
+  captureResponse(rt, ctx, Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined);
+  return ctx;
 }
 
-function captureResponse(
-  rt: Runtime,
-  t: TraceRecord,
-  res: http.ServerResponse,
-  t0: number,
-  reqContentLength: number | undefined,
-) {
+function captureResponse(rt: Runtime, ctx: Ctx, reqContentLength: number | undefined) {
+  const { trace: t, t0 } = ctx;
+  const res = ctx.res as http.ServerResponse;
   if (serverTimingEnabled(rt)) hookWriteHead(t, res, t0);
   const chunks: Buffer[] = [];
   let size = 0;
@@ -153,9 +181,15 @@ function captureResponse(
       : typeof chunk === "string"
         ? Buffer.from(chunk, typeof encoding === "string" ? (encoding as BufferEncoding) : "utf8")
         : Buffer.from(chunk.buffer ?? chunk, chunk.byteOffset ?? 0, chunk.byteLength ?? undefined);
+    const room = MAX_BODY - size;
     size += buf.length;
-    if (size <= MAX_BODY) chunks.push(buf);
-    else truncated = true;
+    if (buf.length <= room) chunks.push(buf);
+    else {
+      // Keep what fits: res.json() of a big export is one chunk, and dropping it whole left nothing to
+      // show. A copy, so the app's (possibly huge) buffer isn't held until the trace is final.
+      if (room > 0) chunks.push(Buffer.from(buf.subarray(0, room)));
+      truncated = true;
+    }
   };
   const write = res.write;
   const end = res.end;
@@ -195,8 +229,20 @@ function captureResponse(
         String(res.getHeader("content-encoding") ?? ""),
         rt,
       );
-      finalize(rt, t, { ttfb: firstByteAt, reqBytes: reqContentLength ?? t.request.body?.size ?? 0, resBytes: size });
+      finalize(rt, t, {
+        ttfb: firstByteAt,
+        reqBytes: reqContentLength ?? t.request.body?.size ?? 0,
+        resBytes: size,
+        req: ctx.req,
+        res,
+      });
       rt.store.finish(t);
+      // Async resources created during the request keep this Ctx alive; let req/res (and with
+      // them the socket and the captured body chunks) go once the trace is final.
+      ctx.req = undefined;
+      ctx.res = undefined;
+      ctx.otel = undefined;
+      chunks.length = 0;
     }, grace);
   };
   res.once("finish", finish);
@@ -1244,6 +1290,47 @@ interface WrapMeta {
   line: number;
 }
 
+/**
+ * Function spans one trace may open. Past it a wrapped function runs unwrapped (a hot helper called
+ * in a loop costs a span, an args preview and a record per call otherwise) and is counted in the
+ * trace's facts.droppedSpans.
+ */
+export const MAX_FN_SPANS_PER_TRACE = 1000;
+const fnSpansOpened = new WeakMap<TraceRecord, number>();
+
+/** Function spans the trace skipped past MAX_FN_SPANS_PER_TRACE. */
+export function droppedFunctionSpans(t: TraceRecord): number {
+  return Math.max(0, (fnSpansOpened.get(t) ?? 0) - MAX_FN_SPANS_PER_TRACE);
+}
+
+/** One more function span for this trace, or false when it is over budget (counted either way). */
+function takeFnSpan(t: TraceRecord): boolean {
+  const n = fnSpansOpened.get(t) ?? 0;
+  fnSpansOpened.set(t, n + 1);
+  return n < MAX_FN_SPANS_PER_TRACE;
+}
+
+function argsJson(args: unknown[], rt: Runtime): string {
+  try {
+    return JSON.stringify(preview(args, rt.redactor));
+  } catch {
+    return '"[unreadable]"';
+  }
+}
+
+/**
+ * A native promise with nothing of the app's on it: chaining it hands back an equivalent promise.
+ * Symbol keys are not counted: Node's async_hooks put their own (async_id_symbol, kResourceStore) on
+ * every promise made while an AsyncLocalStorage is active.
+ */
+function isPlainPromise(p: Promise<unknown>): boolean {
+  try {
+    return Object.getPrototypeOf(p) === Promise.prototype && Object.getOwnPropertyNames(p).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function makeWrap(rt: Runtime) {
   const tracer = trace.getTracer("hoplens");
   return function wrap<F extends (...args: any[]) => any>(fn: F, meta: WrapMeta): F {
@@ -1251,7 +1338,9 @@ export function makeWrap(rt: Runtime) {
     const location = resolveMeta(meta, rt);
     const wrapped = function hoplensWrapped(this: any, ...args: any[]) {
       const ctx = als.getStore();
-      if (!ctx) return new.target ? Reflect.construct(fn, args, new.target) : fn.apply(this, args);
+      if (!ctx || !takeFnSpan(ctx.trace)) {
+        return new.target ? Reflect.construct(fn, args, new.target) : fn.apply(this, args);
+      }
       // The caller's frames (the loop line of an N+1), captured unformatted on the first repeat under
       // one parent only; see callsite.ts.
       const site = shouldCapture(trace.getActiveSpan() ?? ctx.trace, hoplensWrapped)
@@ -1264,15 +1353,21 @@ export function makeWrap(rt: Runtime) {
             "hoplens.kind": "function",
             "hoplens.file": location.file,
             "hoplens.line": location.line,
-            "hoplens.args": JSON.stringify(preview(args, rt.redactor)),
+            "hoplens.args": argsJson(args, rt),
           },
         },
         (span) => {
           noteSpanCallSite(span, site);
           const fail = (err: unknown) => {
-            if (err instanceof Error) span.recordException(err);
-            else span.recordException({ name: "Thrown", message: String(err) });
-            span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+            try {
+              const isErr = types.isNativeError(err) || (!types.isProxy(err) && err instanceof Error);
+              const message = isErr ? String((err as Error).message) : String(err);
+              if (isErr) span.recordException(err as Error);
+              else span.recordException({ name: "Thrown", message });
+              span.setStatus({ code: 2, message });
+            } catch {
+              span.setStatus({ code: 2, message: "[unreadable]" });
+            }
             span.end();
           };
           let out: any;
@@ -1282,18 +1377,29 @@ export function makeWrap(rt: Runtime) {
             fail(err);
             throw err;
           }
-          if (out instanceof Promise) {
-            return out.then(
-              (v) => {
-                setResult(span, v, rt);
-                span.end();
-                return v;
-              },
-              (err) => {
-                fail(err);
-                throw err;
-              },
-            );
+          if (types.isPromise(out)) {
+            const done = (v: unknown) => {
+              setResult(span, v, rt);
+              span.end();
+            };
+            if (isPlainPromise(out)) {
+              // A plain promise: the chained one is equivalent, and an un-awaited rejection still
+              // surfaces as unhandled, exactly as it would without Hoplens.
+              return out.then(
+                (v: unknown) => {
+                  done(v);
+                  return v;
+                },
+                (err: unknown) => {
+                  fail(err);
+                  throw err;
+                },
+              );
+            }
+            // A promise the app decorated (p.cancel = ..., a subclass): hand back that very object and
+            // close the span on a side chain that never rejects.
+            out.then(done, fail);
+            return out;
           }
           setResult(span, out, rt);
           span.end();
@@ -1311,6 +1417,70 @@ export function makeWrap(rt: Runtime) {
       /* cosmetic */
     }
     return wrapped;
+  };
+}
+
+/* ---------------------------------------------------------- adapter hops */
+
+export interface HopMeta {
+  name: string;
+  /** Project-relative source file, shown as the hop's location. */
+  file?: string;
+  line?: number;
+}
+
+/** A hop an adapter opened with `Runtime.beginHop()`. */
+export interface HopHandle {
+  /** Run `fn` with this hop as the active parent, so spans started inside nest under it. */
+  run<T>(fn: () => T): T;
+  /** Close the hop; an `err` marks it failed the way a throwing wrapped function is. Idempotent. */
+  end(err?: unknown): void;
+  /**
+   * Run `fn` in the context that was active when this hop began, so work the hop hands off to (an
+   * Express handler's `next()`) is a sibling of the hop, not a child.
+   */
+  exit<T>(fn: () => T): T;
+}
+
+/**
+ * Opens a hop on core's own tracer for an adapter that sees a unit of work start and end (an Express
+ * middleware) but does not own a function to wrap. Undefined outside a request context.
+ */
+export function beginHop(kind: HopKind, meta: HopMeta): HopHandle | undefined {
+  const ctx = als.getStore();
+  if (!ctx) return undefined;
+  const attributes: Record<string, string | number> = { "hoplens.kind": kind };
+  if (meta.file) {
+    attributes["hoplens.file"] = meta.file;
+    attributes["hoplens.line"] = meta.line ?? 1;
+  }
+  const parent = context.active();
+  const parentOtel = ctx.otel;
+  const span = trace.getTracer("hoplens").startSpan(meta.name, { attributes }, parent);
+  const active = trace.setSpan(parent, span);
+  let ended = false;
+  return {
+    exit: (fn) => {
+      // Hand the bound request emitter's fallback back to whatever was entered before this hop.
+      if (ctx.otel === active) ctx.otel = parentOtel;
+      return als.run(ctx, () => context.with(parent, fn));
+    },
+    run: (fn) => {
+      // Not restored on return: a body parser's next() runs from a later 'end', after this returns.
+      ctx.otel = active;
+      return als.run(ctx, () => context.with(active, fn));
+    },
+    end: (err) => {
+      if (ended) return;
+      ended = true;
+      // Same failure record as makeWrap's fail(); null is no error, as in a `next(null)` call.
+      if (err !== undefined && err !== null) {
+        if (err instanceof Error) span.recordException(err);
+        else span.recordException({ name: "Thrown", message: String(err) });
+        span.setStatus({ code: 2, message: err instanceof Error ? err.message : String(err) });
+      }
+      span.end();
+    },
   };
 }
 
@@ -1336,9 +1506,13 @@ interface FinalizeInput {
   ttfb?: number;
   reqBytes: number;
   resBytes: number;
+  /** For the adapter's HttpTap.describe / requestBody. */
+  req?: http.IncomingMessage;
+  res?: http.ServerResponse;
 }
 
-function finalize(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
+/** Exported for tests. */
+export function finalize(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
   // Next's AppRender.fetch + our own fetch span describe the same call: keep one.
   t.spans = foldNestedFetches(t.spans);
   t.spans.sort((a, b) => a.start - b.start);
@@ -1348,6 +1522,29 @@ function finalize(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
   if (route) t.route = String(route).replace(/\/route$/, "") || "/";
   if (t.spans.some((s) => s.kind === "handler")) t.kind = "route";
   else if (t.kind === "route" && t.spans.some((s) => s.kind === "render")) t.kind = "page";
+  const tap = rt.httpTap;
+  if (!route && tap?.describe && input.req && input.res) {
+    try {
+      const d = tap.describe(input.req, input.res);
+      // An adapter's template is used as given: only Next's `next.route` carries the `/route` suffix.
+      if (d?.route) {
+        t.route = d.route;
+        if (d.kind) t.kind = d.kind;
+      }
+    } catch {
+      /* the adapter's describe is best effort */
+    }
+  }
+  if (!t.request.body && tap?.requestBody && input.req) {
+    try {
+      const b = tap.requestBody(input.req);
+      if (b && b.value !== undefined) t.request.body = parsedBody(b.value, b.contentType, rt);
+    } catch {
+      /* capture is best effort */
+    }
+    // No content-length (chunked): the parsed body's size stands in, as for a Fetch-read body.
+    if (!input.reqBytes && t.request.body?.size) input.reqBytes = t.request.body.size;
+  }
 
   const info = t.route ? rt.routeInfo(t.route, t.method) : undefined;
   if (info) t.routeFile = info.file;
@@ -1361,6 +1558,23 @@ function finalize(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
   const origin = pickErrorOrigin(t.spans);
   if (origin) t.error = origin.error;
   explain(rt, t, input);
+}
+
+/**
+ * A body the framework already parsed, captured the way installBodyHooks captures the same value
+ * from `Request.json()` / `.text()` / `.arrayBuffer()`: redacted through preview(), sized as JSON.
+ */
+function parsedBody(value: unknown, contentType: string | undefined, rt: Runtime): BodyCapture {
+  const ct = contentType ?? "";
+  if (typeof value === "string") return toCapture(Buffer.from(value), value.length, false, ct || "text/plain", rt);
+  if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+    return { contentType: ct || undefined, size: value.byteLength, binary: true };
+  }
+  return {
+    contentType: ct || undefined,
+    size: Buffer.byteLength(JSON.stringify(value) ?? ""),
+    json: preview(value, rt.redactor),
+  };
 }
 
 /**
@@ -1403,7 +1617,7 @@ function explain(rt: Runtime, t: TraceRecord, input: FinalizeInput) {
   try {
     const opts = rt.options?.insights;
     const th = resolveThresholds(opts);
-    const facts = computeFacts(t, input);
+    const facts = computeFacts(t, { ...input, droppedSpans: droppedFunctionSpans(t) });
     applyCold(rt.epochs, `${t.method} ${t.route ?? normalizeUrl(t.path)}`, facts, th.coldCompileMs);
     t.facts = facts;
     t.findings = analyze(t, facts, opts);

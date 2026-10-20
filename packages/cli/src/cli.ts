@@ -16,32 +16,50 @@ const VERSION = readJson(path.join(__dirname, "..", "package.json"))?.version ??
 const commands: Record<string, Command> = {
   init: {
     run: init,
-    summary: "wire Hoplens into next.config and instrumentation",
-    help: `Usage: hoplens init [--dry-run]
+    summary: "wire Hoplens into next.config and instrumentation (or the Express dev script)",
+    help: `Usage: hoplens init [--dry-run] [--framework next|express] [--path | --no-path]
 
-  Patches next.config.* with withHoplens() and adds @hoplens/next/node to
-  the instrumentation register() hook. Idempotent and safe to re-run.
+  Next.js: patches next.config.* with withHoplens() and adds hoplens/node to
+  the instrumentation register() hook.
+  Express: adds --import hoplens/express/register to the dev script in
+  package.json (scripts.dev, else start:dev or watch). Nothing else changes.
+  In a terminal it then asks whether to enable request path tracing (default
+  no). Idempotent and safe to re-run.
 
-  --dry-run    Print the proposed edits without touching any file.`,
+  --dry-run      Print the proposed edits without touching any file.
+  --path         Enable request path tracing without asking (writes the flag:
+                 Express node_modules/.cache/hoplens/path.json, Next
+                 .next/cache/hoplens/path.json; HOPLENS_PATH=0 wins).
+  --no-path      Don't ask; removes that flag if it is there.
+  --framework    next or express. Detected from package.json; needed when
+                 the project depends on both.`,
   },
   doctor: {
     run: doctor,
     summary: "check that everything is wired correctly",
-    help: `Usage: hoplens doctor
+    help: `Usage: hoplens doctor [--framework next|express]
 
   Non-destructive health check across Environment / Install / Wiring /
-  Integrations. Exits 1 if Hoplens isn't ready to run; 0 otherwise.`,
+  Integrations. Exits 1 if Hoplens isn't ready to run; 0 otherwise.
+
+  --framework    next or express. Detected from package.json; needed when
+                 the project depends on both.`,
   },
   remove: {
     run: remove,
     summary: "unwire Hoplens from this project (reverse of init)",
-    help: `Usage: hoplens remove [--dry-run]
+    help: `Usage: hoplens remove [--dry-run] [--framework next|express]
 
-  Unwraps withHoplens(...) in next.config and strips the Hoplens block
-  from instrumentation.register(). Deletes files that init created when
-  nothing user-authored remains. Idempotent.
+  Next.js: unwraps withHoplens(...) in next.config and strips the Hoplens
+  block from instrumentation.register(). Deletes files that init created
+  when nothing user-authored remains, and .next/cache/hoplens (the request
+  path flag with it).
+  Express: takes init's flag out of the dev script and deletes
+  node_modules/.cache/hoplens (the request path flag with it). Idempotent.
 
-  --dry-run    Print the proposed edits without touching any file.`,
+  --dry-run      Print the proposed edits without touching any file.
+  --framework    next or express. Detected from package.json; needed when
+                 the project depends on both.`,
   },
 };
 
@@ -61,7 +79,7 @@ Global flags:
   ${c.bold("-h, --help")}      Show this message (or ${c.bold("hoplens <cmd> --help")})
   ${c.bold("-v, --version")}   Print version and exit
 
-Then run ${c.bold("next dev")} and open ${c.bold("/__hoplens")}.
+Then run ${c.bold("next dev")} (or your Express dev script) and open ${c.bold("/__hoplens")}.
 `);
 }
 

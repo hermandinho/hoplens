@@ -1,0 +1,998 @@
+{
+  "/api/products/1": {
+    "v": 2,
+    "traceId": "tr_mu507",
+    "replayOf": "tr_fqfr7",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 153.3,
+      "settleMs": 254,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [27.1, 39.5],
+      "scripts": 5,
+      "totalScripts": 137
+    },
+    "lanes": [
+      {
+        "spanId": "47de921ea20f4667",
+        "kind": "handler",
+        "name": "GET /api/products/:id",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/products.js",
+        "line": 17,
+        "fnKey": "src/routes/products.js:17:GET /api/products/:id"
+      },
+      {
+        "spanId": "6bd8281e1119e4c0",
+        "kind": "function",
+        "name": "findProduct",
+        "depth": 1,
+        "calls": 2,
+        "truth": { "t": "taken", "n": 2 },
+        "file": "src/services/products.js",
+        "line": 9,
+        "fnKey": "src/services/products.js:9:findProduct"
+      },
+      {
+        "spanId": "7adf7ce33895d334",
+        "kind": "function",
+        "name": "findProduct",
+        "depth": 1,
+        "calls": 2,
+        "truth": { "t": "taken", "n": 2 },
+        "file": "src/services/products.js",
+        "line": 9,
+        "fnKey": "src/services/products.js:9:findProduct"
+      }
+    ],
+    "functions": {
+      "src/routes/products.js:17:GET /api/products/:id": {
+        "key": "src/routes/products.js:17:GET /api/products/:id",
+        "name": "GET /api/products/:id",
+        "file": "src/routes/products.js",
+        "line": 17,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "16142235f1e8",
+        "v8Name": "",
+        "startLine": 17,
+        "endLine": 25,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "if#0",
+              "nodeId": 2,
+              "kind": "if",
+              "line": 19,
+              "label": "!(await findProduct(id))",
+              "reach": 1,
+              "arms": [
+                { "label": "then", "line": 19, "count": 0, "taken": "not-taken" },
+                { "label": "else", "line": 22, "count": 1, "taken": "taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "else",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "kind": "end", "line": 25, "count": 1 }],
+          "nodeCount": 8
+        }
+      },
+      "src/services/products.js:9:findProduct": {
+        "key": "src/services/products.js:9:findProduct",
+        "name": "findProduct",
+        "file": "src/services/products.js",
+        "line": 9,
+        "mapping": "identity",
+        "calls": { "hops": 2, "coverage": 2, "checked": true },
+        "truth": { "t": "taken", "n": 2 },
+        "blocks": true,
+        "sourceHash": "1c0f1cd03f47",
+        "v8Name": "findProduct",
+        "startLine": 9,
+        "endLine": 12,
+        "analysis": {
+          "status": "ok",
+          "calls": 2,
+          "blended": true,
+          "decisions": [
+            {
+              "id": "logical#0",
+              "nodeId": 2,
+              "kind": "logical",
+              "line": 11,
+              "label": "rows[0] ??",
+              "reach": 2,
+              "arms": [
+                { "label": "right", "line": 11, "count": 0, "taken": "not-taken" },
+                { "label": "short-circuit", "line": 11, "count": 2, "taken": "taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "short-circuit",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "nodeId": 3, "kind": "return", "line": 11, "count": 2 }],
+          "nodeCount": 4
+        }
+      }
+    },
+    "analysis": {
+      "text": "Exited: end of GET /api/products/:id L25",
+      "exit": { "fnKey": "src/routes/products.js:17:GET /api/products/:id", "kind": "end", "line": 25 },
+      "ms": 4.9
+    }
+  },
+  "/api/products/99999": {
+    "v": 2,
+    "traceId": "tr_nflfe",
+    "replayOf": "tr_gdg1n",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 169.5,
+      "settleMs": 251.6,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [23, 30.5],
+      "scripts": 5,
+      "totalScripts": 133
+    },
+    "lanes": [
+      {
+        "spanId": "8ece1aa72cae0799",
+        "kind": "handler",
+        "name": "GET /api/products/:id",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/products.js",
+        "line": 17,
+        "fnKey": "src/routes/products.js:17:GET /api/products/:id"
+      },
+      {
+        "spanId": "aa399b3f40d1d971",
+        "kind": "function",
+        "name": "findProduct",
+        "depth": 1,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/services/products.js",
+        "line": 9,
+        "fnKey": "src/services/products.js:9:findProduct"
+      }
+    ],
+    "functions": {
+      "src/routes/products.js:17:GET /api/products/:id": {
+        "key": "src/routes/products.js:17:GET /api/products/:id",
+        "name": "GET /api/products/:id",
+        "file": "src/routes/products.js",
+        "line": 17,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "16142235f1e8",
+        "v8Name": "",
+        "startLine": 17,
+        "endLine": 25,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "if#0",
+              "nodeId": 2,
+              "kind": "if",
+              "line": 19,
+              "label": "!(await findProduct(id))",
+              "reach": 1,
+              "arms": [
+                { "label": "then", "line": 19, "count": 1, "taken": "taken" },
+                { "label": "else", "line": 22, "count": 0, "taken": "not-taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "then",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [
+            {
+              "nodeId": 5,
+              "kind": "return",
+              "line": 21,
+              "count": 1,
+              "via": { "decision": "if#0", "label": "if !(await findProduct(id))", "arm": "then", "line": 19 }
+            }
+          ],
+          "nodeCount": 8
+        }
+      },
+      "src/services/products.js:9:findProduct": {
+        "key": "src/services/products.js:9:findProduct",
+        "name": "findProduct",
+        "file": "src/services/products.js",
+        "line": 9,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "1c0f1cd03f47",
+        "v8Name": "findProduct",
+        "startLine": 9,
+        "endLine": 12,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "logical#0",
+              "nodeId": 2,
+              "kind": "logical",
+              "line": 11,
+              "label": "rows[0] ??",
+              "reach": 1,
+              "arms": [
+                { "label": "right", "line": 11, "count": 1, "taken": "taken" },
+                { "label": "short-circuit", "line": 11, "count": 0, "taken": "not-taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "right",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "nodeId": 3, "kind": "return", "line": 11, "count": 1 }],
+          "nodeCount": 4
+        }
+      }
+    },
+    "analysis": {
+      "text": "Exited: return at GET /api/products/:id L21 via if !(await findProduct(id)) -> then",
+      "exit": {
+        "fnKey": "src/routes/products.js:17:GET /api/products/:id",
+        "kind": "return",
+        "line": 21,
+        "nodeId": 5,
+        "via": { "decision": "if#0", "label": "if !(await findProduct(id))", "arm": "then", "line": 19 }
+      },
+      "ms": 0.6
+    }
+  },
+  "/api/report": {
+    "v": 2,
+    "traceId": "tr_qoi7n",
+    "replayOf": "tr_jlmnz",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 159.6,
+      "settleMs": 258.1,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [16.2, 37],
+      "scripts": 4,
+      "totalScripts": 134
+    },
+    "lanes": [
+      {
+        "spanId": "fefc453d84f367a8",
+        "kind": "handler",
+        "name": "GET /api/report",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/report.js",
+        "line": 11,
+        "fnKey": "src/routes/report.js:11:GET /api/report"
+      }
+    ],
+    "functions": {
+      "src/routes/report.js:11:GET /api/report": {
+        "key": "src/routes/report.js:11:GET /api/report",
+        "name": "GET /api/report",
+        "file": "src/routes/report.js",
+        "line": 11,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "47f2b4abcc25",
+        "v8Name": "",
+        "startLine": 11,
+        "endLine": 29,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [],
+          "loops": [
+            {
+              "nodeId": 3,
+              "line": 18,
+              "label": "for (let copy = 0; copy < 16; copy++)",
+              "kind": "for",
+              "entries": 1,
+              "passes": 16
+            },
+            {
+              "nodeId": 5,
+              "line": 19,
+              "label": "for (const r of rows)",
+              "kind": "for-of",
+              "entries": 16,
+              "passes": 9600
+            }
+          ],
+          "exits": [{ "kind": "end", "line": 29, "count": 1 }],
+          "nodeCount": 9
+        }
+      }
+    },
+    "analysis": {
+      "text": "Exited: end of GET /api/report L29",
+      "exit": { "fnKey": "src/routes/report.js:11:GET /api/report", "kind": "end", "line": 29 },
+      "ms": 4.4
+    }
+  },
+  "/api/boom": {
+    "v": 2,
+    "traceId": "tr_rxyd3",
+    "replayOf": "tr_ket3h",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 152.8,
+      "settleMs": 264.4,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [21.2, 23.7],
+      "scripts": 4,
+      "totalScripts": 119
+    },
+    "lanes": [
+      {
+        "spanId": "6c240c3f4c954da3",
+        "kind": "handler",
+        "name": "GET /api/boom",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/failures.js",
+        "line": 18,
+        "threw": true,
+        "fnKey": "src/routes/failures.js:18:GET /api/boom"
+      }
+    ],
+    "functions": {
+      "src/routes/failures.js:18:GET /api/boom": {
+        "key": "src/routes/failures.js:18:GET /api/boom",
+        "name": "GET /api/boom",
+        "file": "src/routes/failures.js",
+        "line": 18,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "23148157f134",
+        "v8Name": "",
+        "startLine": 18,
+        "endLine": 20,
+        "errors": { "hops": 1, "lines": [19] },
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [],
+          "loops": [],
+          "exits": [{ "nodeId": 1, "kind": "throw", "line": 19, "count": 1 }],
+          "nodeCount": 2
+        }
+      }
+    },
+    "analysis": {
+      "text": "Threw: throw at GET /api/boom L19",
+      "exit": { "fnKey": "src/routes/failures.js:18:GET /api/boom", "kind": "throw", "line": 19, "nodeId": 1 },
+      "ms": 2.1
+    }
+  },
+  "/api/users/2/orders/3": {
+    "v": 2,
+    "traceId": "tr_opr50",
+    "replayOf": "tr_hc2oj",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 159.8,
+      "settleMs": 252.5,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [24.9, 23.1],
+      "scripts": 6,
+      "totalScripts": 137
+    },
+    "lanes": [
+      {
+        "spanId": "3030934d6fa911d1",
+        "kind": "handler",
+        "name": "GET /api/users/:uid/orders/:id",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/users.js",
+        "line": 16,
+        "fnKey": "src/routes/users.js:16:GET /api/users/:uid/orders/:id"
+      },
+      {
+        "spanId": "23d0deab57c3f932",
+        "kind": "function",
+        "name": "findOrder",
+        "depth": 1,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/services/orders.js",
+        "line": 11,
+        "fnKey": "src/services/orders.js:11:findOrder"
+      },
+      {
+        "spanId": "d9abe7eda18f0bca",
+        "kind": "function",
+        "name": "orderLines",
+        "depth": 1,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/services/orders.js",
+        "line": 24,
+        "fnKey": "src/services/orders.js:24:orderLines"
+      },
+      {
+        "spanId": "2e642f61c47f8fba",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      },
+      {
+        "spanId": "e7782946270024e3",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      },
+      {
+        "spanId": "4d42950220a33847",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      },
+      {
+        "spanId": "c63a1c3ce0475398",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      },
+      {
+        "spanId": "fdb9096cd76d51e2",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      },
+      {
+        "spanId": "6f387336bbcce1eb",
+        "kind": "function",
+        "name": "productSummary",
+        "depth": 2,
+        "calls": 6,
+        "truth": { "t": "taken", "n": 6 },
+        "file": "src/services/products.js",
+        "line": 15,
+        "fnKey": "src/services/products.js:15:productSummary"
+      }
+    ],
+    "functions": {
+      "src/routes/users.js:16:GET /api/users/:uid/orders/:id": {
+        "key": "src/routes/users.js:16:GET /api/users/:uid/orders/:id",
+        "name": "GET /api/users/:uid/orders/:id",
+        "file": "src/routes/users.js",
+        "line": 16,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "abd79970e6a5",
+        "v8Name": "",
+        "startLine": 16,
+        "endLine": 25,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "if#0",
+              "nodeId": 4,
+              "kind": "if",
+              "line": 20,
+              "label": "!order",
+              "reach": 1,
+              "arms": [
+                { "label": "then", "line": 20, "count": 0, "taken": "not-taken" },
+                { "label": "else", "line": 23, "count": 1, "taken": "taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "else",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "kind": "end", "line": 25, "count": 1 }],
+          "nodeCount": 9
+        }
+      },
+      "src/services/orders.js:11:findOrder": {
+        "key": "src/services/orders.js:11:findOrder",
+        "name": "findOrder",
+        "file": "src/services/orders.js",
+        "line": 11,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "10ecd65bb5fc",
+        "v8Name": "findOrder",
+        "startLine": 11,
+        "endLine": 17,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "logical#0",
+              "nodeId": 2,
+              "kind": "logical",
+              "line": 16,
+              "label": "rows[0] ??",
+              "reach": 1,
+              "arms": [
+                { "label": "right", "line": 16, "count": 0, "taken": "not-taken" },
+                { "label": "short-circuit", "line": 16, "count": 1, "taken": "taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "short-circuit",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "nodeId": 3, "kind": "return", "line": 16, "count": 1 }],
+          "nodeCount": 4
+        }
+      },
+      "src/services/orders.js:24:orderLines": {
+        "key": "src/services/orders.js:24:orderLines",
+        "name": "orderLines",
+        "file": "src/services/orders.js",
+        "line": 24,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "10ecd65bb5fc",
+        "v8Name": "orderLines",
+        "startLine": 24,
+        "endLine": 31,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [],
+          "loops": [
+            {
+              "nodeId": 3,
+              "line": 27,
+              "label": "for (const item of items.rows)",
+              "kind": "for-of",
+              "entries": 1,
+              "passes": 6
+            }
+          ],
+          "exits": [{ "nodeId": 6, "kind": "return", "line": 30, "count": 1 }],
+          "nodeCount": 7
+        }
+      },
+      "src/services/products.js:15:productSummary": {
+        "key": "src/services/products.js:15:productSummary",
+        "name": "productSummary",
+        "file": "src/services/products.js",
+        "line": 15,
+        "mapping": "identity",
+        "calls": { "hops": 6, "coverage": 6, "checked": true },
+        "truth": { "t": "taken", "n": 6 },
+        "blocks": true,
+        "sourceHash": "1c0f1cd03f47",
+        "v8Name": "productSummary",
+        "startLine": 15,
+        "endLine": 18,
+        "analysis": {
+          "status": "ok",
+          "calls": 6,
+          "blended": true,
+          "decisions": [
+            {
+              "id": "logical#0",
+              "nodeId": 2,
+              "kind": "logical",
+              "line": 17,
+              "label": "rows[0] ??",
+              "reach": 6,
+              "arms": [
+                { "label": "right", "line": 17, "count": 0, "taken": "not-taken" },
+                { "label": "short-circuit", "line": 17, "count": 6, "taken": "taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "short-circuit",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [{ "nodeId": 3, "kind": "return", "line": 17, "count": 6 }],
+          "nodeCount": 4
+        }
+      }
+    },
+    "analysis": {
+      "text": "Exited: end of GET /api/users/:uid/orders/:id L25",
+      "exit": { "fnKey": "src/routes/users.js:16:GET /api/users/:uid/orders/:id", "kind": "end", "line": 25 },
+      "ms": 5.5
+    }
+  },
+  "/api/branchy/zz?n=9": {
+    "v": 2,
+    "traceId": "tr_a0c09",
+    "replayOf": "tr_3tk0o",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 164.5,
+      "settleMs": 262.7,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [24.4, 19],
+      "scripts": 3,
+      "totalScripts": 115
+    },
+    "lanes": [
+      {
+        "spanId": "2dc752693c150227",
+        "kind": "handler",
+        "name": "GET /api/branchy/:mode",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/branchy.js",
+        "line": 6,
+        "fnKey": "src/routes/branchy.js:6:GET /api/branchy/:mode"
+      }
+    ],
+    "functions": {
+      "src/routes/branchy.js:6:GET /api/branchy/:mode": {
+        "key": "src/routes/branchy.js:6:GET /api/branchy/:mode",
+        "name": "GET /api/branchy/:mode",
+        "file": "src/routes/branchy.js",
+        "line": 6,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "968eb42148fb",
+        "v8Name": "",
+        "startLine": 6,
+        "endLine": 52,
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "if#0",
+              "nodeId": 6,
+              "kind": "if",
+              "line": 11,
+              "label": "n < 0",
+              "reach": 1,
+              "arms": [
+                { "label": "then", "line": 11, "count": 0, "taken": "not-taken" },
+                { "label": "else if n === 0", "line": 13, "count": 0, "taken": "not-taken" },
+                { "label": "else if n < 5", "line": 15, "count": 0, "taken": "not-taken" },
+                { "label": "else", "line": 17, "count": 1, "taken": "taken" }
+              ],
+              "verdict": "one",
+              "summary": "else",
+              "inLoop": false
+            },
+            {
+              "id": "switch#0",
+              "nodeId": 16,
+              "kind": "switch",
+              "line": 21,
+              "label": "mode",
+              "reach": 1,
+              "arms": [
+                { "label": "case \"a\"", "line": 22, "count": 0, "taken": "not-taken" },
+                { "label": "case \"b\"", "line": 25, "count": 0, "taken": "not-taken" },
+                { "label": "case \"c\"", "line": 28, "count": 0, "taken": "not-taken" },
+                { "label": "default", "line": 31, "count": 1, "taken": "taken" }
+              ],
+              "verdict": "one",
+              "summary": "default",
+              "inLoop": false
+            },
+            {
+              "id": "if#1",
+              "nodeId": 26,
+              "kind": "if",
+              "line": 36,
+              "label": "i % 2 === 1",
+              "reach": 7,
+              "arms": [
+                { "label": "then", "line": 36, "count": 3, "taken": "taken" },
+                { "label": "else", "line": 36, "count": 4, "taken": "taken", "implied": true }
+              ],
+              "verdict": "split-loop",
+              "summary": "then 3/7 . else 4/7",
+              "inLoop": true
+            },
+            {
+              "id": "if#2",
+              "nodeId": 29,
+              "kind": "if",
+              "line": 37,
+              "label": "i >= 6",
+              "reach": 4,
+              "arms": [
+                { "label": "then", "line": 37, "count": 1, "taken": "taken" },
+                { "label": "else", "line": 40, "count": 3, "taken": "taken", "implied": true }
+              ],
+              "verdict": "split-loop",
+              "summary": "then 1/4 . else 3/4",
+              "inLoop": true
+            },
+            {
+              "id": "try#0",
+              "nodeId": 35,
+              "kind": "try",
+              "line": 44,
+              "label": "try",
+              "reach": 0,
+              "arms": [
+                { "label": "no throw", "line": 44, "count": 0, "taken": "not-taken", "implied": true },
+                { "label": "catch", "line": 47, "count": 0, "taken": "not-taken" }
+              ],
+              "verdict": "unreached",
+              "summary": "not reached",
+              "inLoop": false
+            },
+            {
+              "id": "ternary#0",
+              "nodeId": 42,
+              "kind": "ternary",
+              "line": 50,
+              "label": "score > 5",
+              "reach": 0,
+              "arms": [
+                { "label": "true", "line": 50, "count": 0, "taken": "not-taken" },
+                { "label": "false", "line": 50, "count": 0, "taken": "not-taken" }
+              ],
+              "verdict": "unreached",
+              "summary": "not reached",
+              "inLoop": false
+            }
+          ],
+          "loops": [
+            {
+              "nodeId": 24,
+              "line": 35,
+              "label": "for (let i = 0; i < n; i++)",
+              "kind": "for",
+              "entries": 1,
+              "passes": 7
+            }
+          ],
+          "exits": [
+            {
+              "nodeId": 32,
+              "kind": "return",
+              "line": 39,
+              "count": 1,
+              "via": { "decision": "if#2", "label": "if i >= 6", "arm": "then", "line": 37 }
+            }
+          ],
+          "nodeCount": 44
+        }
+      }
+    },
+    "analysis": {
+      "text": "Exited: return at GET /api/branchy/:mode L39 via if i >= 6 -> then",
+      "exit": {
+        "fnKey": "src/routes/branchy.js:6:GET /api/branchy/:mode",
+        "kind": "return",
+        "line": 39,
+        "nodeId": 32,
+        "via": { "decision": "if#2", "label": "if i >= 6", "arm": "then", "line": 37 }
+      },
+      "ms": 0.6
+    }
+  },
+  "/api/branchy/u/c": {
+    "v": 2,
+    "traceId": "tr_54eqn",
+    "replayOf": "tr_2bdhy",
+    "quality": "exact",
+    "contamination": [],
+    "warnings": [],
+    "window": {
+      "quietMs": 164.1,
+      "settleMs": 253.6,
+      "taint": [],
+      "retries": 0,
+      "attempts": [],
+      "takeMs": [19.8, 26.1],
+      "scripts": 5,
+      "totalScripts": 122
+    },
+    "lanes": [
+      {
+        "spanId": "464382c8c9244320",
+        "kind": "handler",
+        "name": "GET /api/branchy/u/:mode",
+        "depth": 0,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/routes/branchy.js",
+        "line": 54,
+        "threw": true,
+        "fnKey": "src/routes/branchy.js:54:GET /api/branchy/u/:mode"
+      },
+      {
+        "spanId": "5c73c88ded93de07",
+        "kind": "function",
+        "name": "risky",
+        "depth": 1,
+        "calls": 1,
+        "truth": { "t": "taken", "n": 1 },
+        "file": "src/services/branchy.js",
+        "line": 1,
+        "threw": true,
+        "fnKey": "src/services/branchy.js:1:risky"
+      }
+    ],
+    "functions": {
+      "src/routes/branchy.js:54:GET /api/branchy/u/:mode": {
+        "key": "src/routes/branchy.js:54:GET /api/branchy/u/:mode",
+        "name": "GET /api/branchy/u/:mode",
+        "file": "src/routes/branchy.js",
+        "line": 54,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "e351cab10a2c",
+        "v8Name": "",
+        "startLine": 54,
+        "endLine": 57,
+        "errors": { "hops": 1, "lines": [55] },
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [],
+          "loops": [],
+          "exits": [
+            { "kind": "end", "line": 57, "count": null, "why": "after-throw" },
+            { "kind": "exception", "line": 55, "count": 1 }
+          ],
+          "nodeCount": 3
+        }
+      },
+      "src/services/branchy.js:1:risky": {
+        "key": "src/services/branchy.js:1:risky",
+        "name": "risky",
+        "file": "src/services/branchy.js",
+        "line": 1,
+        "mapping": "identity",
+        "calls": { "hops": 1, "coverage": 1, "checked": true },
+        "truth": { "t": "taken", "n": 1 },
+        "blocks": true,
+        "sourceHash": "a7dbcae96d52",
+        "v8Name": "risky",
+        "startLine": 1,
+        "endLine": 4,
+        "errors": { "hops": 1, "lines": [2] },
+        "analysis": {
+          "status": "ok",
+          "calls": 1,
+          "blended": false,
+          "decisions": [
+            {
+              "id": "if#0",
+              "nodeId": 1,
+              "kind": "if",
+              "line": 2,
+              "label": "mode === \"c\"",
+              "reach": 1,
+              "arms": [
+                { "label": "then", "line": 2, "count": 1, "taken": "taken" },
+                { "label": "else", "line": 2, "count": 0, "taken": "not-taken", "implied": true }
+              ],
+              "verdict": "one",
+              "summary": "then",
+              "inLoop": false
+            }
+          ],
+          "loops": [],
+          "exits": [
+            {
+              "nodeId": 2,
+              "kind": "throw",
+              "line": 2,
+              "count": 1,
+              "via": { "decision": "if#0", "label": "if mode === \"c\"", "arm": "then", "line": 2 }
+            }
+          ],
+          "nodeCount": 5
+        }
+      }
+    },
+    "analysis": { "text": "Exit: UNKNOWN (after-throw)", "ms": 1.4 }
+  }
+}

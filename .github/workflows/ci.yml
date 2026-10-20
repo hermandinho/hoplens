@@ -57,6 +57,54 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: pnpm --filter @hoplens/next bench
 
+  # Function hops and the request path across the runner setups (packages/express/README.md, runner
+  # table) on the engines floor and the current 22 / 24 lines. vitest, pnpm and the build run on a fixed
+  # Node 22; the spawned app processes run on the matrix Node (HOPLENS_TEST_NODE, see
+  # packages/express/test/test-node.ts), so the floor is tested without the toolchain having to run on it.
+  # Rows a Node cannot run (type stripping on 20.9) skip with the reason in the test title.
+  runner-matrix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20.9.0, 22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - name: Node under test (${{ matrix.node }})
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Remember it as HOPLENS_TEST_NODE
+        shell: bash
+        run: |
+          node -v
+          echo "HOPLENS_TEST_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
+
+      - name: Toolchain Node (22)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build packages
+        run: pnpm -r --filter "./packages/*" run build
+
+      - name: Runner matrix (transform)
+        run: pnpm --filter @hoplens/transform run test:runners
+
+      - name: Runner matrix (express)
+        run: pnpm --filter @hoplens/express run test:runners
+
   integration:
     needs: check
     runs-on: ubuntu-latest

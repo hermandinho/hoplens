@@ -16,7 +16,7 @@ import {
 } from "../state/epochs";
 import { go, route, setSince } from "../state/router";
 import { scopeApplies, scopeLabel, sinceEpoch } from "../state/sinceScope";
-import { mainView, tracesState } from "../state/store";
+import { frameworkCopy, mainView, tracesState } from "../state/store";
 import "../styles/changes.css";
 
 /*
@@ -71,7 +71,7 @@ export function EpochRail() {
 
   return (
     <div class="epoch-rail">
-      <ol class="epoch-ticks" aria-label="Edits (dev rebuilds), oldest first">
+      <ol class="epoch-ticks" aria-label={`${frameworkCopy.value.edits}, oldest first`}>
         {ticks.map((t) => {
           const on = (r.view === "changes" && r.epoch === String(t.id)) || since === t.id;
           const inScope = since !== undefined && t.id >= since;
@@ -112,7 +112,7 @@ export function EpochRail() {
             class="epoch-now mono"
             title={
               epochsState.value === "unavailable"
-                ? "Current dev-rebuild epoch (this core does not attribute edits)"
+                ? `Current ${frameworkCopy.value.epoch} (this core does not attribute edits)`
                 : "No edit yet this session"
             }
           >

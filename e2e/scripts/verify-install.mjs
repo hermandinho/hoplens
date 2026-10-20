@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Install-flow smoke: pack every @hoplens/* workspace into tarballs, install
- * them into a scratch Next 16 project, run `hoplens init`, then run `hoplens
- * doctor` and expect it to pass. This simulates `npm i -D hoplens` end-to-end
+ * Install-flow smoke: pack the hoplens meta package and every workspace package
+ * it depends on (transitively) into tarballs, install them into a scratch Next
+ * 16 project, run `hoplens init`, then run `hoplens doctor` and expect it to
+ * pass. This simulates `npm i -D hoplens` end-to-end
  * for a greenfield user.
  *
  * Writes to two temp dirs: one for the tarballs, one for the scratch project.
@@ -21,9 +22,8 @@ const REPO_ROOT = path.resolve(HERE, "..", "..");
 const KEEP = process.argv.includes("--keep");
 const SHELL = process.platform === "win32";
 
-// Order doesn't matter for packing but reads easily top-down: meta first, then
-// its direct deps, then transitive deps.
-const WORKSPACE_DIRS = ["meta", "cli", "next", "core", "schema", "transform", "ui"];
+const PACKAGES_DIR = path.join(REPO_ROOT, "packages");
+const META_NAME = "hoplens";
 
 function log(line = "") {
   process.stdout.write(`${line}\n`);
@@ -50,8 +50,39 @@ function runCapture(cmd, args, cwd) {
   return res.stdout.toString();
 }
 
-function readWorkspacePkg(dirName) {
-  return JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "packages", dirName, "package.json"), "utf8"));
+/** Every workspace package under packages/, by package name. */
+function workspacePackages() {
+  const byName = new Map();
+  for (const dir of fs.readdirSync(PACKAGES_DIR)) {
+    const file = path.join(PACKAGES_DIR, dir, "package.json");
+    if (!fs.existsSync(file)) continue;
+    const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+    byName.set(pkg.name, { dir: path.join(PACKAGES_DIR, dir), pkg });
+  }
+  return byName;
+}
+
+/**
+ * The meta package plus every workspace package it reaches through `workspace:`
+ * dependencies, so a new adapter the meta package depends on is packed (and
+ * overridden) without editing this script.
+ */
+function packSet() {
+  const byName = workspacePackages();
+  if (!byName.has(META_NAME)) fail(`No workspace package named ${META_NAME}`);
+  const seen = new Map();
+  const queue = [META_NAME];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (seen.has(name)) continue;
+    const entry = byName.get(name);
+    if (!entry) fail(`${name} is a workspace: dependency but no packages/* has that name`);
+    seen.set(name, entry);
+    for (const [dep, range] of Object.entries(entry.pkg.dependencies ?? {})) {
+      if (String(range).startsWith("workspace:")) queue.push(dep);
+    }
+  }
+  return seen;
 }
 
 /** `@hoplens/cli` + `0.1.0` → `hoplens-cli-0.1.0.tgz` (npm's packing convention). */
@@ -69,23 +100,21 @@ ok("All workspaces built");
 const packDir = fs.mkdtempSync(path.join(os.tmpdir(), "hop-pack-"));
 step(`Packing tarballs → ${packDir}`);
 const tarballs = {};
-for (const dir of WORKSPACE_DIRS) {
-  const pkg = readWorkspacePkg(dir);
-  const absDir = path.join(REPO_ROOT, "packages", dir);
+for (const { dir: absDir, pkg } of packSet().values()) {
   runCapture("pnpm", ["pack", "--pack-destination", packDir], absDir);
   const name = tarballName(pkg.name, pkg.version);
   const abs = path.join(packDir, name);
   if (!fs.existsSync(abs)) fail(`Expected tarball not produced: ${abs}`);
   tarballs[pkg.name] = abs;
 }
-ok(`${Object.keys(tarballs).length} tarballs packed`);
+ok(`${Object.keys(tarballs).length} tarballs packed: ${Object.keys(tarballs).join(", ")}`);
 
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), "hop-scratch-"));
 step(`Scratch Next project → ${scratchDir}`);
 // Replicate the real user flow: `hoplens` is the only direct dev-dep they add,
-// and the six @hoplens/* workspaces come in transitively via hoplens → cli/next
-// → core → ui etc. We use npm `overrides` to redirect those transitive refs to
-// the local tarballs instead of hitting the real registry. Installing all seven
+// and the @hoplens/* workspaces come in transitively via hoplens → cli/next/
+// express → core → ui etc. We use npm `overrides` to redirect those transitive refs to
+// the local tarballs instead of hitting the real registry. Installing them all
 // as direct deps (as the earlier version did) hid the ERR_PACKAGE_PATH_NOT_EXPORTED
 // bug because npm hoisted @hoplens/cli's bin into node_modules/.bin, bypassing
 // the meta shim that users actually invoke.
@@ -99,14 +128,11 @@ const scratchPkg = {
     "react-dom": "^19.0.0",
     hoplens: `file:${tarballs.hoplens}`,
   },
-  overrides: {
-    "@hoplens/cli": `file:${tarballs["@hoplens/cli"]}`,
-    "@hoplens/next": `file:${tarballs["@hoplens/next"]}`,
-    "@hoplens/core": `file:${tarballs["@hoplens/core"]}`,
-    "@hoplens/schema": `file:${tarballs["@hoplens/schema"]}`,
-    "@hoplens/transform": `file:${tarballs["@hoplens/transform"]}`,
-    "@hoplens/ui": `file:${tarballs["@hoplens/ui"]}`,
-  },
+  overrides: Object.fromEntries(
+    Object.entries(tarballs)
+      .filter(([name]) => name !== META_NAME)
+      .map(([name, abs]) => [name, `file:${abs}`]),
+  ),
 };
 fs.writeFileSync(path.join(scratchDir, "package.json"), JSON.stringify(scratchPkg, null, 2));
 fs.writeFileSync(path.join(scratchDir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true } }));
@@ -126,8 +152,10 @@ const instr = path.join(scratchDir, "instrumentation.ts");
 if (!fs.existsSync(nextCfg)) fail("init didn't create next.config.ts");
 const nextCfgSrc = fs.readFileSync(nextCfg, "utf8");
 if (!nextCfgSrc.includes("withHoplens")) fail("next.config.ts missing withHoplens");
-if (!nextCfgSrc.includes('from "hoplens/next"'))
-  fail("next.config.ts should import from hoplens/next (meta subpath), not @hoplens/next");
+if (!nextCfgSrc.includes('import("hoplens/next" as string)'))
+  fail("next.config.ts should load hoplens/next (meta subpath, not @hoplens/next) inside the dev-only gate");
+if (/^import\s[^;]*["']hoplens\/next["']/m.test(nextCfgSrc))
+  fail("next.config.ts must not import hoplens/next at the top (next build / start fail without dev dependencies)");
 if (!fs.existsSync(instr)) fail("init didn't create instrumentation.ts");
 const instrSrc = fs.readFileSync(instr, "utf8");
 if (!instrSrc.includes('"hoplens/node"'))

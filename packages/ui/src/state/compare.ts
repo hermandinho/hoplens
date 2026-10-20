@@ -1,5 +1,5 @@
 import { effect, signal } from "@preact/signals";
-import { HoplensApiError, tapLive } from "../api/client";
+import { HoplensApiError, WRITE_HEADERS, tapLive } from "../api/client";
 import type {
   Baseline,
   BaselineKind,
@@ -30,7 +30,8 @@ import { BUCKET_LABELS, fmtMs } from "./stats";
 const API = "/__hoplens/api";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, { ...init, headers: { accept: "application/json" } });
+  const headers = init?.method && init.method !== "GET" ? WRITE_HEADERS : { accept: "application/json" };
+  const res = await fetch(`${API}${path}`, { ...init, headers });
   if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
   return (await res.json()) as T;
 }

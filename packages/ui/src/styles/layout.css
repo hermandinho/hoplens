@@ -242,6 +242,11 @@
   border-left-color: var(--warn);
 }
 
+.top-notice-info {
+  background: var(--info-bg);
+  border-left-color: var(--info);
+}
+
 .pill-live .dot-indicator {
   width: 6px;
   height: 6px;

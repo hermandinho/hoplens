@@ -30,8 +30,96 @@ export {
   serverTimingValue,
   redisReadResult,
   redisWriteSize,
+  type HopHandle,
+  type HopMeta,
 } from "./capture";
 export { recordTarget } from "./server";
+export {
+  capturePath,
+  buildPayload,
+  isProjectScript,
+  pathMeta,
+  PathError,
+  PathResults,
+  PATH_PAYLOAD_VERSION,
+  MAX_LANES,
+  type PathErrorBody,
+  type PathErrorCode,
+  type PathWindow,
+  type CaptureDeps,
+  type FireResult,
+  type Lane,
+  type PathFn,
+  type PathMeta,
+  type PathControl,
+  type PathSource,
+  type PathPayload,
+  type PathQuality,
+  type PathRange,
+  type PathStore,
+  type PathTimings,
+  type Truth,
+  type UnknownWhy,
+} from "./path/capture";
+export {
+  BundledScripts,
+  bundledScripts,
+  type BundledOptions,
+  type BundledFs,
+  type PathScripts,
+  type ResolvedScripts,
+  type ScriptCounts,
+  type ScriptKind,
+} from "./path/bundled";
+export {
+  readPathFlagFile,
+  writePathFlagFile,
+  removePathFlagFile,
+  envPathSetting,
+  flagPathControl,
+  PATH_FLAG_FILE,
+  type PathFlagFile,
+} from "./path/flag";
+export {
+  coverageHandle,
+  startCoverage,
+  pathFlag,
+  type CoverageSource,
+  type CoverageState,
+  type ScriptCoverage,
+  type FunctionCoverage,
+  type CoverageRange,
+  type TakeResult,
+} from "./path/coverage";
+export {
+  analyzePayload,
+  requestVerdict,
+  MAX_PAYLOAD_BYTES,
+  type AnalyzeDeps,
+  type PathAnalyzer,
+  type PathVerdict,
+  type PayloadAnalysis,
+} from "./path/analyze";
+export {
+  pathTruth,
+  joinCfg,
+  unknownAnalysis,
+  decisionSummary,
+  decisionText,
+  type ArmTaken,
+  type DecisionKind,
+  type FnAnalysis,
+  type JoinInput,
+  type PathArm,
+  type PathDecision,
+  type PathExit,
+  type PathLoop,
+  type PathNode,
+  type RangeIn,
+  type TruthInput,
+  type TruthWhy,
+} from "./path/truth";
+export { CFG_VERSION, type CfgFile, type CfgFunction, type CfgNode, type CfgExpr } from "./path/cfg-model";
 export {
   computeFacts,
   normalizeSql,
@@ -48,7 +136,7 @@ export {
   type InsightThresholds,
   type InsightsOptions,
 } from "./insights";
-export { EpochTracker, distMtimeProbe } from "./epoch";
+export { EpochTracker, distMtimeProbe, nullProbe, type MtimeProbe } from "./epoch";
 export {
   RouteStatsStore,
   LogHistogram,
@@ -109,6 +197,7 @@ export type {
   TraceKind,
   TraceRecord,
   TraceSummary,
+  PathTraceStamp,
   TraceFacts,
   TimeBucket,
   Finding,
@@ -122,3 +211,4 @@ export type {
   ProxyInfo,
   SchemaInfo,
 } from "./types";
+export { persistDir } from "./persist";

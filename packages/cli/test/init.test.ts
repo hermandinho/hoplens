@@ -21,7 +21,8 @@ describe("hoplens init", () => {
 
     expect(fx.exists("next.config.ts")).toBe(true);
     expect(fx.read("next.config.ts")).toMatch(/withHoplens/);
-    expect(fx.read("next.config.ts")).toMatch(/import \{ withHoplens \} from "hoplens\/next"/);
+    expect(fx.read("next.config.ts")).toContain(`await import("hoplens/next" as string)`);
+    expect(fx.read("next.config.ts")).not.toMatch(/^import .*hoplens/m);
 
     expect(fx.exists("instrumentation.ts")).toBe(true);
     const ins = fx.read("instrumentation.ts");
@@ -30,7 +31,7 @@ describe("hoplens init", () => {
     expect(ins).toMatch(/NODE_ENV === "development"/);
   });
 
-  test("existing TS next.config — wraps default export, adds import", async () => {
+  test("existing TS next.config — wraps default export in the dev-only gate", async () => {
     seedGreenfield(fx);
     fx.write(
       "next.config.ts",
@@ -39,13 +40,14 @@ describe("hoplens init", () => {
     await withCwd(fx.dir, () => init([]));
 
     const out = fx.read("next.config.ts");
-    expect(out).toContain(`import { withHoplens } from "hoplens/next"`);
-    expect(out).toContain("export default withHoplens(nextConfig)");
+    expect(out).toContain(`import { PHASE_DEVELOPMENT_SERVER } from "next/constants"`);
+    expect(out).toContain("if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;");
+    expect(out).toContain("return withHoplens(nextConfig)(phase, ctx);");
     // user content is preserved
     expect(out).toContain("reactStrictMode: true");
   });
 
-  test("existing CJS next.config — wraps module.exports with require", async () => {
+  test("existing CJS next.config — requires hoplens/next inside the dev-only gate", async () => {
     seedGreenfield(fx);
     fx.write(
       "next.config.js",
@@ -54,8 +56,8 @@ describe("hoplens init", () => {
     await withCwd(fx.dir, () => init([]));
 
     const out = fx.read("next.config.js");
-    expect(out).toContain(`const { withHoplens } = require("hoplens/next")`);
-    expect(out).toContain("module.exports = withHoplens(nextConfig)");
+    expect(out).toContain(`  const { withHoplens } = require("hoplens/next");`);
+    expect(out).toContain("module.exports = async (phase, ctx) => {");
   });
 
   test("existing instrumentation with user register — injects block, keeps user code", async () => {

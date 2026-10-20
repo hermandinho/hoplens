@@ -29,7 +29,11 @@ export interface HoplensOptions {
   redact?: string[];
   /** Number of traces kept in memory. Default 300. */
   maxTraces?: number;
-  /** Serve the UI to non-loopback clients. Default false. */
+  /**
+   * Serve the UI to non-loopback clients, under any Host name (a LAN address, name.local). Default
+   * false. This turns off the DNS rebinding guard (api/guard.ts): only the Origin and content-type
+   * checks remain, so protect that port yourself.
+   */
   allowRemote?: boolean;
   /**
    * Findings engine. Override thresholds (see `DEFAULT_THRESHOLDS`) or switch rules off:
@@ -64,6 +68,11 @@ export interface ResolvedOptions extends HoplensOptions {
   root: string;
   /** True when the host app's config wrapper ran successfully. */
   configured?: boolean;
+  /**
+   * Where `persist` writes its files, for adapters with no build-output dir (absolute, or relative to
+   * root). Default: `<distDir>/cache/hoplens`.
+   */
+  stateDir?: string;
 }
 
 export const DEFAULT_REDACT = [

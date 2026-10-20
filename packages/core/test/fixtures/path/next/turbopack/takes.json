@@ -1,0 +1,860 @@
+{
+ "01-products1": [
+  {
+   "scriptId": "951",
+   "url": "file:///D:/WorkZone/hoplens-agents/p6/app/.next/dev/server/chunks/[root-of-the-server]__1jb02stmberme._.js",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 22188,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 20,
+       "endOffset": 18342,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 137,
+       "endOffset": 2821,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 222,
+       "endOffset": 229,
+       "count": 8
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "GET",
+     "ranges": [
+      {
+       "startOffset": 1363,
+       "endOffset": 2819,
+       "count": 1
+      },
+      {
+       "startOffset": 1660,
+       "endOffset": 2146,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "module.exports.wait",
+     "ranges": [
+      {
+       "startOffset": 2904,
+       "endOffset": 16268,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 2998,
+       "endOffset": 3014,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3039,
+       "endOffset": 3054,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3082,
+       "endOffset": 3100,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3129,
+       "endOffset": 3148,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3175,
+       "endOffset": 3192,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3215,
+       "endOffset": 3228,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3252,
+       "endOffset": 3266,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3292,
+       "endOffset": 3308,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3334,
+       "endOffset": 3350,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3375,
+       "endOffset": 3390,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16349,
+       "endOffset": 18337,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 16442,
+       "endOffset": 16457,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 16479,
+       "endOffset": 16491,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16517,
+       "endOffset": 16533,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16555,
+       "endOffset": 16567,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 16585,
+       "endOffset": 16626,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16603,
+       "endOffset": 16625,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 16870,
+       "endOffset": 17113,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16985,
+       "endOffset": 17109,
+       "count": 10
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "createOrder",
+     "ranges": [
+      {
+       "startOffset": 17114,
+       "endOffset": 17349,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "getOrder",
+     "ranges": [
+      {
+       "startOffset": 17350,
+       "endOffset": 17435,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "payOrder",
+     "ranges": [
+      {
+       "startOffset": 17436,
+       "endOffset": 17680,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 17682,
+       "endOffset": 18331,
+       "count": 1
+      },
+      {
+       "startOffset": 17805,
+       "endOffset": 17812,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 18395,
+       "endOffset": 18536,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 18695,
+       "endOffset": 18944,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 19105,
+       "endOffset": 19356,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 19251,
+       "endOffset": 19329,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 19515,
+       "endOffset": 19764,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 19931,
+       "endOffset": 20188,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 20343,
+       "endOffset": 20588,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 20753,
+       "endOffset": 21008,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 21133,
+       "endOffset": 21348,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 21487,
+       "endOffset": 21716,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 21622,
+       "endOffset": 21689,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 21777,
+       "endOffset": 21928,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "module.exports",
+     "ranges": [
+      {
+       "startOffset": 21975,
+       "endOffset": 22112,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "3",
+   "url": "node:internal/per_context/primordials",
+   "functions": [
+    {
+     "functionName": "SafeIterator",
+     "ranges": [
+      {
+       "startOffset": 9489,
+       "endOffset": 9562,
+       "count": 23
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "next",
+     "ranges": [
+      {
+       "startOffset": 9568,
+       "endOffset": 9619,
+       "count": 36
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 9625,
+       "endOffset": 9672,
+       "count": 15
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "137",
+   "url": "file:///D:/WorkZone/Tracepath/node_modules/.pnpm/next@16.4.0_@opentelemetry+api@1.9.1_@playwright+test@1.64.0_@types+node@22.20.5_react-dom@19_mrll7ndzlvd5cajb3duzft6z7q/node_modules/next/dist/server/lib/start-server.js",
+   "functions": [
+    {
+     "functionName": "startServer",
+     "ranges": [
+      {
+       "startOffset": 6480,
+       "endOffset": 22638,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "handlersReady",
+     "ranges": [
+      {
+       "startOffset": 6769,
+       "endOffset": 6775,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "handlersError",
+     "ranges": [
+      {
+       "startOffset": 6801,
+       "endOffset": 6807,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "888",
+   "url": "file:///D:/WorkZone/hoplens-agents/p6/app/.next/dev/server/chunks/[turbopack]_runtime.js",
+   "functions": [
+    {
+     "functionName": "Context",
+     "ranges": [
+      {
+       "startOffset": 2203,
+       "endOffset": 2775,
+       "count": 567
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "defineProp",
+     "ranges": [
+      {
+       "startOffset": 2949,
+       "endOffset": 3076,
+       "count": 3182
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "createModuleWithDirection",
+     "ranges": [
+      {
+       "startOffset": 3738,
+       "endOffset": 3937,
+       "count": 567
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "957",
+   "url": "",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 28,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 1,
+       "endOffset": 27,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  }
+ ],
+ "02-products2": [
+  {
+   "scriptId": "951",
+   "url": "file:///D:/WorkZone/hoplens-agents/p6/app/.next/dev/server/chunks/[root-of-the-server]__1jb02stmberme._.js",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 222,
+       "endOffset": 229,
+       "count": 8
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "GET",
+     "ranges": [
+      {
+       "startOffset": 1363,
+       "endOffset": 2819,
+       "count": 2
+      },
+      {
+       "startOffset": 1660,
+       "endOffset": 2818,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 3334,
+       "endOffset": 3350,
+       "count": 2
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16517,
+       "endOffset": 16533,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 16585,
+       "endOffset": 16626,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16603,
+       "endOffset": 16625,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 16870,
+       "endOffset": 17113,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16985,
+       "endOffset": 17109,
+       "count": 10
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "3",
+   "url": "node:internal/per_context/primordials",
+   "functions": [
+    {
+     "functionName": "SafeIterator",
+     "ranges": [
+      {
+       "startOffset": 9489,
+       "endOffset": 9562,
+       "count": 25
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "next",
+     "ranges": [
+      {
+       "startOffset": 9568,
+       "endOffset": 9619,
+       "count": 29
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 9625,
+       "endOffset": 9672,
+       "count": 23
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "137",
+   "url": "file:///D:/WorkZone/Tracepath/node_modules/.pnpm/next@16.4.0_@opentelemetry+api@1.9.1_@playwright+test@1.64.0_@types+node@22.20.5_react-dom@19_mrll7ndzlvd5cajb3duzft6z7q/node_modules/next/dist/server/lib/start-server.js",
+   "functions": [
+    {
+     "functionName": "requestListener",
+     "ranges": [
+      {
+       "startOffset": 7700,
+       "endOffset": 8844,
+       "count": 4
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "888",
+   "url": "file:///D:/WorkZone/hoplens-agents/p6/app/.next/dev/server/chunks/[turbopack]_runtime.js",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 16992,
+       "endOffset": 17004,
+       "count": 16
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "commonJsRequire",
+     "ranges": [
+      {
+       "startOffset": 19778,
+       "endOffset": 19875,
+       "count": 6
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "trackModuleImport",
+     "ranges": [
+      {
+       "startOffset": 41170,
+       "endOffset": 41584,
+       "count": 6
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "958",
+   "url": "",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 52,
+       "endOffset": 1239,
+       "count": 2
+      },
+      {
+       "startOffset": 267,
+       "endOffset": 639,
+       "count": 0
+      },
+      {
+       "startOffset": 783,
+       "endOffset": 1159,
+       "count": 1
+      },
+      {
+       "startOffset": 924,
+       "endOffset": 948,
+       "count": 0
+      },
+      {
+       "startOffset": 1093,
+       "endOffset": 1155,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  }
+ ]
+}

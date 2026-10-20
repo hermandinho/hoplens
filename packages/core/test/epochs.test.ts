@@ -30,6 +30,9 @@ function tmpProject(files: Record<string, string>): string {
     const abs = path.join(root, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, text);
+    // An existing project's files are older than the watcher; the pre-hash skips fresh ones.
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(abs, past, past);
   }
   return root;
 }
@@ -314,16 +317,35 @@ describe("watchSources", () => {
     ).toEqual(["change:proxy.ts", "delete:src/a.ts"]);
   });
 
-  test("a save burst (a git checkout) is not lost when the watcher overflows (Windows: no names)", async () => {
+  test(
+    "a save burst (a git checkout) is not lost when the watcher overflows (Windows: no names)",
+    { timeout: 15_000 },
+    async () => {
+      const files: Record<string, string> = {};
+      for (let i = 0; i < 80; i++) files[`src/gen/m${i}.ts`] = `export const v = ${i};\n`;
+      const root = tmpProject(files);
+      w = watchSources(root, { debounceMs: 30 });
+      await wait(200); // pre-hash
+      for (let i = 0; i < 80; i++)
+        fs.writeFileSync(path.join(root, `src/gen/m${i}.ts`), `export const v = ${i + 1};\n`);
+      // Wait for the burst to be accounted for, not a fixed time: under load fs.watch events (or the
+      // overflow event and its rescan) trail the writes by much more than 150ms. A burst that is really
+      // lost never gets there and times out.
+      await until(() => w!.peek().length >= 80, 10_000);
+      expect(w.peek().length).toBe(80);
+    },
+  );
+
+  test("a save racing the startup pre-hash is not swallowed as a same-bytes save", { timeout: 15_000 }, async () => {
+    // The writes land before the pre-hash's first step: without the freshness check it hashed the
+    // new bytes as the baseline and the save's own event then read as a no-op (29 of 30 lost).
     const files: Record<string, string> = {};
-    for (let i = 0; i < 80; i++) files[`src/gen/m${i}.ts`] = `export const v = ${i};\n`;
+    for (let i = 0; i < 30; i++) files[`src/m${i}.ts`] = `export const v = ${i};\n`;
     const root = tmpProject(files);
     w = watchSources(root, { debounceMs: 30 });
-    await wait(200); // pre-hash
-    for (let i = 0; i < 80; i++) fs.writeFileSync(path.join(root, `src/gen/m${i}.ts`), `export const v = ${i + 1};\n`);
-    await until(() => w!.peek().length > 0);
-    await wait(150);
-    expect(w.peek().length).toBe(80);
+    for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(root, `src/m${i}.ts`), `export const v = ${i + 1};\n`);
+    await until(() => w!.peek().length >= 30, 10_000);
+    expect(w.peek().length).toBe(30);
   });
 
   test("without src/, existing fallback dirs are watched", async () => {

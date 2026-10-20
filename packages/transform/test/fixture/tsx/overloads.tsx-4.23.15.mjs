@@ -1,0 +1,3 @@
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});function pick(a){return a}__name(pick,"pick");export{pick};
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6ImtIQUVPLFNBQVMsS0FBSyxFQUFxQyxDQUN4RCxPQUFPLENBQ1QsQ0FGZ0IiLCJuYW1lcyI6W10sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIm92ZXJsb2Fkcy50cyJdLCJzb3VyY2VzQ29udGVudCI6W251bGxdfQ==

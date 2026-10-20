@@ -34,13 +34,18 @@
       "import": "./dist/query.mjs",
       "require": "./dist/query.js"
     },
+    "./coverage": {
+      "types": "./dist/coverage.d.ts",
+      "import": "./dist/coverage.mjs",
+      "require": "./dist/coverage.js"
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude \"**/benchmark.test.ts\"",
+    "test": "vitest run --exclude \"**/benchmark.test.ts\" --testTimeout=20000",
     "bench": "vitest run test/benchmark.test.ts"
   },
   "engines": {

@@ -1,5 +1,5 @@
-import { withHoplens } from "@hoplens/next";
 import type { NextConfig } from "next";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -9,4 +9,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite"],
 };
 
-export default withHoplens(nextConfig);
+export default async (phase: string, ctx: { defaultConfig: NextConfig }) => {
+  if (phase !== PHASE_DEVELOPMENT_SERVER) return nextConfig;
+  // Hoplens is a dev dependency: only `next dev` loads it
+  const { withHoplens } = await import("hoplens/next" as string);
+  return withHoplens(nextConfig)(phase, ctx);
+};

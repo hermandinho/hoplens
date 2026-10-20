@@ -723,3 +723,16 @@ export function fileExists(p: string) {
 }
 
 export const _path = path;
+
+export {
+  type Hit,
+  type ProjectResolver,
+  type SchemaInfo,
+  type SchemaProjectOptions,
+  PARSE_METHODS,
+  SchemaProject,
+  fieldsOf,
+  localBinding,
+  objectMember,
+  scriptKind,
+} from "./project";

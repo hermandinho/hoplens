@@ -1,5 +1,7 @@
 // Trace model — framework-neutral. Field names are part of the SSE/REST contract.
 
+import type { IncomingMessage, ServerResponse } from "node:http";
+
 export type HopKind =
   | "request"
   | "proxy"
@@ -96,6 +98,23 @@ export interface TraceRecord {
   /** Computed in finalize() once the trace is done. Absent while in flight or if analysis failed. */
   facts?: TraceFacts;
   findings?: Finding[];
+  /**
+   * Set on a trace the request path captured ("Trace path", path/capture.ts): it is a replay of
+   * `replayOf`, and its path payload (GET /api/traces/:id/path) has this quality.
+   */
+  pathTrace?: PathTraceStamp;
+}
+
+/**
+ * A request-path replay. `supersededBy`: an attempt discarded for the automatic retry (its path is
+ * on that trace). `failed`: the capture failed after this replay ran (a PathErrorCode). Neither has
+ * a payload of its own.
+ */
+export interface PathTraceStamp {
+  quality: "exact" | "partial" | "contaminated";
+  replayOf: string;
+  supersededBy?: string;
+  failed?: string;
 }
 
 /* ---------------------------------------------------------- facts + findings */
@@ -182,6 +201,8 @@ export interface TraceSummary {
   hops: number;
   facts?: TraceFacts;
   findings?: FindingSummary[];
+  /** A request-path replay (TraceRecord.pathTrace). */
+  pathTrace?: PathTraceStamp;
 }
 
 /* ------------------------------------------------------------- discovery */
@@ -217,7 +238,11 @@ export interface RouteInfo {
   router: "app" | "pages" | string;
   /** Normalised path with `:name` params, e.g. `/api/orders/:id`. */
   path: string;
-  /** Framework-template path, e.g. `/api/orders/[id]`. */
+  /**
+   * The framework's route template, e.g. `/api/orders/[id]` on Next or `/api/orders/:id` on Express.
+   * Must equal the `TraceRecord.route` the adapter's traces carry: `Runtime.routeInfo()` matches on
+   * it to find a trace's route file and handler line. Named for the first adapter; not renamed.
+   */
   nextRoute: string;
   /** Project-relative source file. */
   file: string;
@@ -248,4 +273,21 @@ export interface HttpTap {
   internalPrefixes: string[];
   /** Classify the request kind for the trace. Default handles "action", "rsc", "page", "route". */
   classifyRequest?: (headers: Record<string, string | string[] | undefined>, method: string) => TraceKind;
+  /**
+   * Run every event the request emits ('data', 'end', …) inside the trace's context. Needed when
+   * the framework continues the handler from a request event (Express behind body-parser): Node
+   * otherwise drops the context after the first body chunk. Default false.
+   */
+  bindRequestEmitter?: boolean;
+  /**
+   * The route template and kind of a finished request, for frameworks whose spans carry no
+   * `next.route`. Called from finalize() only when no span named a route; `kind` is applied only
+   * alongside a route. Must equal the matching `RouteInfo.nextRoute` for the route file to resolve.
+   */
+  describe?: (req: IncomingMessage, res: ServerResponse) => { route?: string; kind?: TraceKind } | undefined;
+  /**
+   * The request body the framework already parsed (Express's `req.body`), for traces the Fetch
+   * `Request` hooks saw no body on. Redacted and previewed like a captured JSON body.
+   */
+  requestBody?: (req: IncomingMessage) => { contentType?: string; value: unknown } | undefined;
 }

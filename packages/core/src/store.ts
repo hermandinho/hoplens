@@ -7,7 +7,7 @@ export interface Internal {
   rawBody?: string;
 }
 
-type StoreEvent = "start" | "done" | "update" | "clear";
+type StoreEvent = "start" | "done" | "update" | "clear" | "internal";
 
 /** Minimum gap between two `update` events for the same trace (ms). */
 export const UPDATE_THROTTLE_MS = 250;
@@ -55,6 +55,12 @@ export class TraceStore extends EventEmitter {
    */
   private readonly pins = new Set<string>();
   private readonly manualPins = new Set<string>();
+  /**
+   * Requests currently running: added in add(), removed in finish(), whether or not the trace is
+   * still retained (a request evicted or cleared while in flight is still running). The request
+   * path's quiet gate reads it (path/capture.ts).
+   */
+  private readonly running = new Set<TraceRecord>();
 
   constructor(
     private readonly max: number,
@@ -67,17 +73,20 @@ export class TraceStore extends EventEmitter {
 
   override on(event: "start" | "done" | "update", listener: (trace: TraceRecord) => void): this;
   override on(event: "clear", listener: () => void): this;
+  override on(event: "internal", listener: (what: string) => void): this;
   override on(event: StoreEvent, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 
   override off(event: "start" | "done" | "update", listener: (trace: TraceRecord) => void): this;
   override off(event: "clear", listener: () => void): this;
+  override off(event: "internal", listener: (what: string) => void): this;
   override off(event: StoreEvent, listener: (...args: any[]) => void): this {
     return super.off(event, listener);
   }
 
   add(t: TraceRecord, internal: Internal): void {
+    if (!t.done) this.running.add(t);
     this.traces.set(t.id, t);
     this.internals.set(t, internal);
     while (this.traces.size - this.pins.size - this.manualPins.size > this.max) {
@@ -91,6 +100,7 @@ export class TraceStore extends EventEmitter {
 
   finish(t: TraceRecord): void {
     t.done = true;
+    this.running.delete(t);
     // Cleared or evicted while in flight: announcing it would re-add a row the UI can't open.
     if (this.traces.get(t.id) !== t) return;
     this.emit("done", t);
@@ -177,6 +187,35 @@ export class TraceStore extends EventEmitter {
     }
   }
 
+  /** How many requests are running right now (started, not finished). */
+  inflight(): number {
+    return this.running.size;
+  }
+
+  /** The running requests, oldest first (for a "2 requests in flight" message). */
+  inflightTraces(): TraceRecord[] {
+    return Array.from(this.running);
+  }
+
+  /**
+   * A request the HTTP hook passed through untraced (the framework's internal prefixes: Next's
+   * /_next/*). Only the request path's capture window listens (onInternal); without a listener this
+   * is one listenerCount read.
+   */
+  noteInternal(method: string | undefined, url: string): void {
+    if (this.listenerCount("internal") === 0) return;
+    const path = url.replace(/[?#].*$/, "");
+    this.emit("internal", `${method ?? "GET"} ${path}`);
+  }
+
+  /** Listen to noteInternal (`METHOD path`); the answer unsubscribes. */
+  onInternal(listener: (what: string) => void): () => void {
+    this.on("internal", listener);
+    return () => {
+      this.off("internal", listener);
+    };
+  }
+
   get(id: string): TraceRecord | undefined {
     return this.traces.get(id);
   }
@@ -235,5 +274,6 @@ export function summarize(t: TraceRecord): TraceSummary {
       if (f.estSavedMs !== undefined) out.estSavedMs = f.estSavedMs;
       return out;
     }),
+    ...(t.pathTrace ? { pathTrace: t.pathTrace } : {}),
   };
 }

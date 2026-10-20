@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { doctor } from "../src/commands/doctor";
 import { init } from "../src/commands/init";
 import { makeFixture, muteConsole, seedGreenfield, withCwd } from "./fixture";
@@ -64,5 +64,23 @@ describe("hoplens doctor", () => {
 
     await withCwd(fx.dir, () => doctor([]));
     expect(process.exitCode).toBe(0);
+  });
+  test("HOPLENS_PORT unset -- names the default UI port and the fallback range", async () => {
+    seedGreenfield(fx);
+    const prev = process.env.HOPLENS_PORT;
+    Reflect.deleteProperty(process.env, "HOPLENS_PORT");
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => void lines.push(a.join(" ")));
+    try {
+      await withCwd(fx.dir, () => doctor([]));
+    } finally {
+      spy.mockRestore();
+      if (prev !== undefined) process.env.HOPLENS_PORT = prev;
+    }
+    const line = lines.find((l) => l.includes("HOPLENS_PORT")) ?? "";
+    expect(line).toContain("HOPLENS_PORT not set");
+    expect(line).toContain("4983");
+    expect(line).toContain("4993");
+    expect(line).not.toContain("picks a free port automatically");
   });
 });

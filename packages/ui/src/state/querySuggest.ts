@@ -1,4 +1,5 @@
 import type { FindingRule } from "../api/types";
+import { type FrameworkCopy, NEXT_COPY, ruleLabel } from "./framework";
 import { RULE_LABELS } from "./stats";
 
 /*
@@ -62,7 +63,7 @@ const VALUES: Record<string, ReadonlyArray<{ v: string; hint?: string }>> = {
     { v: "other" },
   ],
   has: [
-    ...RULES.map((r) => ({ v: r, hint: RULE_LABELS[r] })),
+    ...RULES.map((r) => ({ v: r, hint: ruleLabel(r) })),
     { v: "error", hint: "a captured error (thrown or caught)" },
     { v: "findings", hint: "any finding" },
   ],
@@ -74,8 +75,22 @@ const VALUES: Record<string, ReadonlyArray<{ v: string; hint?: string }>> = {
 
 const MAX_ITEMS = 10;
 
+/** The value hints that follow the framework: the cold-compile label and what `cold:true` means. */
+function valuesFor(key: string, fw: FrameworkCopy): ReadonlyArray<{ v: string; hint?: string }> {
+  const list = VALUES[key] ?? [];
+  if (fw.isNext) return list;
+  if (key === "has") return list.map((x) => (x.v === "cold-compile" ? { ...x, hint: ruleLabel(x.v, fw) } : x));
+  if (key === "cold") return list.map((x) => (x.v === "true" ? { ...x, hint: fw.coldQueryHint } : x));
+  return list;
+}
+
 /** Suggestions for the token ending at `caret`. Empty `items` means nothing to offer. */
-export function suggest(input: string, caret: number, routes: readonly string[]): SuggestResult {
+export function suggest(
+  input: string,
+  caret: number,
+  routes: readonly string[],
+  fw: FrameworkCopy = NEXT_COPY,
+): SuggestResult {
   const before = input.slice(0, caret);
   // Inside an open quote: free text, nothing to complete.
   if ((before.match(/"/g)?.length ?? 0) % 2 === 1) return { from: caret, isKey: false, items: [] };
@@ -113,7 +128,7 @@ export function suggest(input: string, caret: number, routes: readonly string[])
     }
     pool = list.filter((r) => r.v.toLowerCase().includes(prefix));
   } else {
-    pool = (VALUES[key] ?? []).filter((x) => x.v.toLowerCase().startsWith(prefix));
+    pool = valuesFor(key, fw).filter((x) => x.v.toLowerCase().startsWith(prefix));
   }
   const items = pool
     .filter((x) => x.v.toLowerCase() !== prefix)

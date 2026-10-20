@@ -3,7 +3,7 @@ import { type SpanGroup, type SpanTree, bucketOf, isMarker, shapeLabel, shapeOf,
 
 /*
  * Pure model for the single-request canvas (Flame and Tree modes): the critical path with idle
- * gaps, the display tree (framework spans folded into one "Next.js" band, same-shape siblings
+ * gaps, the display tree (framework spans folded into one band, "Next.js" or "Express", same-shape siblings
  * folded into "xN" groups), the Tree flattening, the Flame (icicle) layout and the log ticks.
  * No signals, no DOM: everything here is verified by scratchpad/flame-check.ts.
  */
@@ -161,7 +161,7 @@ export function idleGaps(spans: readonly SpanRecord[], minMs = 0.5): Array<[numb
 
 /* ------------------------------------------------------------- display tree */
 
-/** Next.js plumbing folded into the "Next.js" band unless it is expanded. */
+/** Framework plumbing folded into the framework band ("Next.js", "Express") unless it is expanded. */
 export const FRAMEWORK_KINDS: ReadonlySet<HopKind> = new Set<HopKind>([
   "request",
   "router",
@@ -208,7 +208,7 @@ const byStart = (a: SpanRecord, b: SpanRecord) => a.start - b.start || b.end - a
 /**
  * Build the display tree. With framework spans present everything hangs under one band node;
  * folded, the band hides the framework spans and their non-framework descendants are lifted to
- * the nearest shown ancestor, so the user's code reads as one tree under "Next.js".
+ * the nearest shown ancestor, so the user's code reads as one tree under the band.
  */
 export function buildView(tree: SpanTree, opts: ViewOptions): ViewNode[] {
   const fold = !opts.frameworkOpen;
@@ -500,8 +500,7 @@ export function makeScale(start: number, end: number, fold?: Range, share = FOLD
 /** Pre-handler wait over this share of the trace makes it "cold" (verdict rule 1, plan 3.7). */
 export const COLD_WAIT_SHARE = 0.4;
 
-/** Label for the untraced stretch of a cold wait. */
-export const COLD_GAP_LABEL = "Next loading instrumentation / compiling (untraced)";
+/* The untraced stretch's label follows the framework: FrameworkCopy.coldGap (state/framework). */
 
 export interface ColdWait {
   /** Request start (trace time). */

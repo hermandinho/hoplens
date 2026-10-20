@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { NEXT_COPY, frameworkId, frameworkLabel, frameworkPill } from "../state/framework";
 import { IS_MAC, formatKey } from "../state/keymap";
 import { toggleCheatsheet, togglePalette } from "../state/palette";
 import { QUERY_INPUT_MAIN } from "../state/requestLog";
@@ -10,7 +11,9 @@ import {
   clearing,
   findingGroups,
   followLive,
+  frameworkCopy,
   hasRoutes,
+  infoNote,
   liveStatus,
   loadError,
   loadStatus,
@@ -38,7 +41,7 @@ const VIEWS: ReadonlyArray<{ id: MainView; label: string; title: string }> = [
   { id: "overview", label: "Overview", title: "What to fix first: findings, routes, errors" },
   { id: "requests", label: "Requests", title: "The live request log; pick one to open it beside the list" },
   { id: "queries", label: "Queries", title: "Every db, cache and fetch call across requests, and the hosts called" },
-  { id: "changes", label: "Changes", title: "Your edits (dev rebuilds) and what each one changed" },
+  { id: "changes", label: "Changes", title: NEXT_COPY.changesTitle },
 ];
 
 export function TopBar() {
@@ -73,7 +76,7 @@ export function TopBar() {
               class="action view-nav-btn"
               aria-current={view === v.id ? "page" : undefined}
               onClick={() => setMainView(v.id)}
-              title={v.title}
+              title={v.id === "changes" ? frameworkCopy.value.changesTitle : v.title}
             >
               {v.label}
               {v.id === "overview" && findings > 0 && (
@@ -164,20 +167,21 @@ export function TopBar() {
 }
 
 /**
- * Runtime status: app, Next, OTel, port, then the WP6 health strip (loop p99, rss, process errors)
+ * Runtime status: app, framework (Next, Express, ...), OTel, port, then the WP6 health strip (loop p99, rss, process errors)
  * and the live dot with the request rate.
  */
 export function StatusSlot() {
   const meta = metaState.value;
   const live = liveStatus.value;
+  const pill = frameworkPill(meta);
   return (
     // Not <output>: an implicit live region would re-announce the health values every 2s, and the
     // process-errors panel inside needs flow content. Outages are announced by TopNotice.
     <div class="status-slot">
       {meta?.app && <span class="pill-text mono">{meta.app}</span>}
-      {meta?.next && (
-        <span class="pill-text" title="Next.js version detected">
-          Next {meta.next}
+      {pill && (
+        <span class="pill-text" title={`${frameworkLabel(meta)} version detected`}>
+          {pill}
         </span>
       )}
       {meta && (
@@ -212,7 +216,8 @@ export function StatusSlot() {
 /**
  * One notice line for what used to be the full-width StatusBanner, most urgent first:
  * can't reach Hoplens (with Retry), a failed action (dismissible), the live stream reconnecting,
- * no OTel provider, next.config not wrapped. Absent when nothing is wrong.
+ * no OTel provider, next.config not wrapped, then an info note (the app restarted). Absent when
+ * nothing is wrong. Next-only advice (next dev, instrumentation.ts, withHoplens) shows only for Next.
  */
 function TopNotice() {
   const err = loadError.value;
@@ -220,13 +225,27 @@ function TopNotice() {
   const live = liveStatus.value;
   const meta = metaState.value;
   const action = actionError.value;
+  const info = infoNote.value;
+  const fw = frameworkId(meta);
 
   if (err && !hasRoutes.value && status === "error") {
     return (
       <div class="top-notice top-notice-err" role="alert">
         <span>
-          <b>Can't reach Hoplens.</b> {err} Is <code>next dev</code> running, and is <code>@hoplens/next/node</code>{" "}
-          imported from <code>instrumentation.ts</code>?
+          <b>Can't reach Hoplens.</b> {err}{" "}
+          {fw === "next" ? (
+            <>
+              Is <code>next dev</code> running, and is <code>@hoplens/next/node</code> imported from{" "}
+              <code>instrumentation.ts</code>?
+            </>
+          ) : fw === "express" ? (
+            <>
+              Is the app running, started with <code>--import hoplens/express/register</code> (or calling{" "}
+              <code>hoplens(app)</code>)?
+            </>
+          ) : (
+            <>Is the app running with its Hoplens adapter loaded?</>
+          )}
         </span>
         <button type="button" class="link-btn" onClick={() => void bootstrap()}>
           Retry
@@ -256,21 +275,38 @@ function TopNotice() {
   if (meta && meta.otel === "none") {
     return (
       <output class="top-notice top-notice-warn">
-        <span>
-          <b>OpenTelemetry provider missing.</b> Framework hops (router, handler, fetch) won't show. Install{" "}
-          <code>@vercel/otel</code>, or remove the manual OTel setup from <code>instrumentation.ts</code> so Hoplens
-          registers its own.
-        </span>
+        {fw === "next" ? (
+          <span>
+            <b>OpenTelemetry provider missing.</b> Framework hops (router, handler, fetch) won't show. Install{" "}
+            <code>@vercel/otel</code>, or remove the manual OTel setup from <code>instrumentation.ts</code> so Hoplens
+            registers its own.
+          </span>
+        ) : (
+          <span>
+            <b>OpenTelemetry provider missing.</b> Hops recorded through OpenTelemetry spans won't show. Remove the
+            app's manual OTel setup so Hoplens registers its own.
+          </span>
+        )}
       </output>
     );
   }
-  if (meta && meta.configured === false) {
+  if (meta && meta.configured === false && fw === "next") {
     return (
       <output class="top-notice top-notice-warn">
         <span>
           <b>next.config isn't wrapped with withHoplens.</b> Route scanning works; function hops and schema pre-fill are
           off. Run <code>npx hoplens init</code>.
         </span>
+      </output>
+    );
+  }
+  if (info) {
+    return (
+      <output class="top-notice top-notice-info">
+        <span>{info}</span>
+        <button type="button" class="link-btn" onClick={() => (infoNote.value = null)}>
+          Dismiss
+        </button>
       </output>
     );
   }

@@ -8,6 +8,8 @@ import {
   epochAt,
   epochList,
   epochsState,
+  isEarlierEdit,
+  isPastRow,
   isSessionEdit,
   labelGap,
   nowTick,
@@ -21,7 +23,7 @@ import { register } from "../state/keymap";
 import { type Route, go, route, setSince } from "../state/router";
 import { serverStats } from "../state/serverStats";
 import { sinceEpoch } from "../state/sinceScope";
-import { tracesState } from "../state/store";
+import { frameworkCopy, tracesState } from "../state/store";
 import { SinceChip } from "./SinceChip";
 import { VerdictRow } from "./SinceStrip";
 import "../styles/changes.css";
@@ -79,7 +81,7 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
   // "This session": a restart with `persist: true` restores the earlier sessions' edits (greyed below).
   const mine = all.filter((x) => isSessionEdit(x.id, x.info));
   const edits = mine.length;
-  const earlier = all.filter((x) => x.info?.session !== undefined && x.info.via !== "start" && x.id > 0).length;
+  const earlier = all.filter((x) => isEarlierEdit(x.id, x.info)).length;
   const regressedEdits = mine.filter((x) => x.verdicts.some((v) => v.status === "regressed")).length;
   const traces = tracesState.value;
   const selected = r.epoch !== undefined ? Number(r.epoch) : undefined;
@@ -152,12 +154,15 @@ export function ChangesView({ r }: { r: Extract<Route, { view: "changes" }> }) {
           to each other, to see what changed.
         </p>
       )}
-      {edits === 0 && (
-        <p class="chg-empty muted">
-          No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up
-          here with the files it changed and how each affected route moved.
-        </p>
-      )}
+      {edits === 0 &&
+        (frameworkCopy.value.isNext ? (
+          <p class="chg-empty muted">
+            No edits yet. Save a source file while <code>next dev</code> runs and send a request: each rebuild shows up
+            here with the files it changed and how each affected route moved.
+          </p>
+        ) : (
+          <p class="chg-empty muted">{frameworkCopy.value.changesEmpty}</p>
+        ))}
       {all.length > 0 && (
         <>
           <ChangesTrack selected={selected} />
@@ -225,7 +230,10 @@ function EpochRow({
   only,
 }: { row: EpochRowData; on: boolean; traces: readonly TraceSummary[]; only: boolean }) {
   const { id, info, n, retained } = row;
-  const past = info?.session !== undefined;
+  // Restored from an earlier session: greyed, with its session tag. A restart edit is part of the dev
+  // loop (each save is a new process) and keeps its full colour.
+  const restored = info?.session !== undefined;
+  const past = isPastRow(info);
   const verdicts = only ? row.verdicts.filter((v) => v.status === "regressed") : row.verdicts;
   const bad = row.verdicts.some((v) => v.status === "regressed");
   const f = filesText(info);
@@ -233,7 +241,7 @@ function EpochRow({
   const since = sinceEpoch.value;
   // A restored edit older than every route's kept epochs: its requests were counted, but no longer
   // per epoch (the server keeps each route's newest few), so "0 req" would be wrong.
-  const aged = past && n === 0;
+  const aged = restored && n === 0;
   const none =
     id === 0 || info?.via === "start"
       ? "Session start: what the first edit is compared with."
@@ -264,7 +272,7 @@ function EpochRow({
           {f.text}
         </span>
         {info && id > 0 && <span class="dim chg-via">({viaLabel(info)})</span>}
-        {past && (
+        {restored && (
           <span class="chg-past-tag dim" title="Restored from an earlier dev session (persist: true)">
             session {info.session}
           </span>

@@ -19,6 +19,7 @@ import {
   readRecents,
   writeRecents,
 } from "../state/palette";
+import { canTracePath, runTracePath } from "../state/path";
 import { queriesData, queriesState, refreshQueries } from "../state/queries";
 import { quoteValue } from "../state/querySuggest";
 import { prefillQuery } from "../state/requestLog";
@@ -26,9 +27,12 @@ import { go, route, setSince } from "../state/router";
 import {
   type MainView,
   bootstrap,
+  frameworkCopy,
   loadTrace,
+  metaState,
   overviewFindings,
   routeStats,
+  selectedTrace,
   setMainView,
   toggleFollow,
   tracesState,
@@ -82,6 +86,17 @@ function extraItems(): PaletteItem[] {
       title: b.label,
       shortcut: formatKey(b.key),
       primary: { label: "Run", run: () => runBinding(b as KeyBinding) },
+    });
+  }
+  // Trace path (request path): button-only in Path mode, offered here whenever it would run.
+  const trace = selectedTrace.peek();
+  if (route.peek().view === "trace" && trace && canTracePath(trace, metaState.peek(), frameworkCopy.peek().isNext)) {
+    out.push({
+      id: "action:trace-path",
+      group: "actions",
+      title: "Trace path: replay this request once, alone, and show which side of each decision it took",
+      keywords: "request path coverage branch decision replay",
+      primary: { label: "Run", run: () => void runTracePath(trace) },
     });
   }
   const procErrors = processErrorTotal.peek();
@@ -183,6 +198,7 @@ export function Palette() {
   const serverEdits = epochList.value;
   // Resolved N+1 call lines (culpritLoc reads them): a trigger to rebuild the finding rows.
   const sites = callSites.value;
+  const fw = frameworkCopy.value;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `sites` is a trigger, see above
   const items = useMemo(
     () =>
@@ -205,11 +221,12 @@ export function Palette() {
               search: hits && hits.q === query.trim() ? hits : undefined,
               extra,
               locOf: culpritLoc,
+              fw,
             },
             ACTS,
           )
         : [],
-    [open, findings, routes, traces, shapes, serverEdits, hits, query, extra, sites],
+    [open, findings, routes, traces, shapes, serverEdits, hits, query, extra, sites, fw],
   );
   const sections = useMemo(() => rankItems(items, query, { recents }), [items, query, recents]);
   const rows = flatRows(sections);

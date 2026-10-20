@@ -15,8 +15,16 @@ const MAX_WRAPPER_DEPTH = 3;
  * `duplicate` and `parallelizable`.
  */
 export const nPlusOne: Rule = (ctx) => {
+  // Shapes are looked up once here, in step with `io`, and reused by every pass below.
   const io: SpanRecord[] = [];
-  for (const s of ctx.spans) if (shapeOf(s)) io.push(s);
+  const shapes: string[] = [];
+  for (const s of ctx.spans) {
+    const shape = shapeOf(s);
+    if (shape) {
+      io.push(s);
+      shapes.push(shape);
+    }
+  }
   if (io.length < ctx.th.nPlusOneMin) return [];
   const out: Finding[] = [];
 
@@ -24,8 +32,9 @@ export const nPlusOne: Rule = (ctx) => {
   // strings are cached per span, so their hashes are too, and nothing gets re-flattened per span.
   // Pass 0: same direct parent.
   const direct = new Map<string, Map<string, SpanRecord[]>>();
-  for (const s of io) {
-    const shape = shapeOf(s)!;
+  for (let i = 0; i < io.length; i++) {
+    const s = io[i]!;
+    const shape = shapes[i]!;
     const anchor = s.parentId ?? "";
     let byShape = direct.get(anchor);
     if (!byShape) direct.set(anchor, (byShape = new Map()));
@@ -46,6 +55,7 @@ export const nPlusOne: Rule = (ctx) => {
     if (chain) wrapped++;
   }
   type Group = { spans: SpanRecord[]; wrappers: SpanRecord[]; chain: SpanRecord[] };
+  const interned: Interned = new Map();
   for (let k = 1; k <= MAX_WRAPPER_DEPTH && wrapped >= ctx.th.nPlusOneMin; k++) {
     // anchor (the outermost wrapper's parent) -> wrapper names -> shape. Keys are strings the spans
     // already hold, so their hashes are cached; building a combined key string per span was the
@@ -57,8 +67,8 @@ export const nPlusOne: Rule = (ctx) => {
       if (!chain || chain.length < k || ctx.claimed.has(s.id)) continue;
       const top = chain[k - 1]!;
       const anchor = top.parentId ?? "";
-      const names = k === 1 ? top.name : namesOf(chain, k);
-      const shape = shapeOf(s)!;
+      const names = k === 1 ? top.name : namesOf(chain, k, interned);
+      const shape = shapes[i]!;
       let byNames = groups.get(anchor);
       if (!byNames) groups.set(anchor, (byNames = new Map()));
       let byShape = byNames.get(names);
@@ -100,9 +110,23 @@ export const nPlusOne: Rule = (ctx) => {
   return out;
 };
 
-function namesOf(chain: SpanRecord[], k: number): string {
+/** Joined key -> next wrapper name -> the longer joined key. */
+type Interned = Map<string, Map<string, string>>;
+
+/**
+ * `a>b>c` for the first k wrapper names. Each distinct join is built once per analysis and reused:
+ * a fresh concatenation per span had to be flattened and hashed again on every Map lookup.
+ */
+function namesOf(chain: SpanRecord[], k: number, interned: Interned): string {
   let out = chain[0]!.name;
-  for (let i = 1; i < k; i++) out += `>${chain[i]!.name}`;
+  for (let i = 1; i < k; i++) {
+    const name = chain[i]!.name;
+    let next = interned.get(out);
+    if (!next) interned.set(out, (next = new Map()));
+    let joined = next.get(name);
+    if (joined === undefined) next.set(name, (joined = `${out}>${name}`));
+    out = joined;
+  }
   return out;
 }
 

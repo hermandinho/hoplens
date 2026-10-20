@@ -1,7 +1,8 @@
 import { signal } from "@preact/signals";
 import type { FindingSeverity, QueryStat, TraceSummary } from "../api/types";
+import { type FrameworkCopy, ruleLabel } from "./framework";
 import { findingQuery, quoteValue } from "./querySuggest";
-import { type FindingGroup, RULE_LABELS, type RouteStats, fmtMs, isError, rankFindingGroups } from "./stats";
+import { type FindingGroup, type RouteStats, fmtMs, isError, rankFindingGroups } from "./stats";
 import { findingSentence } from "./verdict";
 
 /*
@@ -263,6 +264,8 @@ export interface PaletteData {
   extra?: readonly PaletteItem[];
   /** A finding's culprit line (state/callSite: an N+1's loop call); default its own location. */
   locOf?: (f: FindingGroup) => { file: string; line: number } | undefined;
+  /** The framework's wording for finding sentences and rule labels (default Next.js). */
+  fw?: FrameworkCopy;
 }
 
 /** What the rows do. Injected so the items stay testable without the store. */
@@ -317,8 +320,8 @@ export function buildItems(d: PaletteData, act: PaletteActs): PaletteItem[] {
     out.push({
       id: `finding:${f.fingerprint}`,
       group: "findings",
-      title: findingSentence({ rule: f.rule, title: f.title, fn: f.fn, count: f.maxCount }),
-      detail: [RULE_LABELS[f.rule] ?? f.rule, findingImpact(f), loc].filter(Boolean).join(" · "),
+      title: findingSentence({ rule: f.rule, title: f.title, fn: f.fn, count: f.maxCount }, undefined, undefined, d.fw),
+      detail: [ruleLabel(f.rule, d.fw), findingImpact(f), loc].filter(Boolean).join(" · "),
       keywords: [f.title, f.rule, f.fn, f.location?.file, ...f.routes].filter(Boolean).join(" "),
       sev: SEV[f.severity],
       // A server-only row whose example request was evicted can still filter.

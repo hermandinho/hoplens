@@ -316,6 +316,25 @@
     min-width: 32px;
   }
 
+  /*
+   * The builder alone has no subject bar (subjectChrome): its pinned head carries the only close,
+   * so it gets the Back button's touch target. Over a request the bar's "< Back" closes the builder.
+   */
+  .builder-drawer-head {
+    gap: 6px;
+    padding: 2px 6px 2px 12px;
+  }
+
+  .builder-drawer-head .builder-route-pick {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .builder-drawer-head .source-close {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
   /* ---------------------------------------------------------------- request header: verdict first */
 
   .rh {

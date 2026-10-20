@@ -34,7 +34,7 @@ import { prefillQuery } from "../state/requestLog";
 import { route } from "../state/router";
 import { openSourceAt } from "../state/source";
 import { fmtMs, fmtPct, statusClass } from "../state/stats";
-import { actionError, loadTrace, tracesState } from "../state/store";
+import { actionError, frameworkCopy, loadTrace, tracesState } from "../state/store";
 import { Skeleton } from "./Skeleton";
 import { Split } from "./Split";
 
@@ -197,7 +197,7 @@ function ShapeList({ selected }: { selected: string | undefined }) {
         <div class="qv-empty">
           <b>Not available</b>
           This Hoplens runtime has no <code>/api/queries</code> endpoint. Update <code>@hoplens/core</code> and restart{" "}
-          <code>next dev</code>.
+          {frameworkCopy.value.isNext ? <code>next dev</code> : "the app"}.
         </div>
       ) : !data && (state === "loading" || state === "idle") ? (
         <div class="skeleton-wrap" aria-busy="true">
@@ -287,7 +287,7 @@ function ShapeTable({
         {total === 0
           ? "Send requests that hit a database, a cache or an external API. Each call is grouped by its shape here, with literals and ids replaced by ?."
           : groups
-            ? "Hosts appear once a request calls fetch(): calls, p95, error rate and how many GETs asked for Next's data cache."
+            ? `Hosts appear once a request calls fetch(): calls, p95, error rate and how many GETs asked for ${frameworkCopy.value.dataCache}.`
             : "Try another kind."}
       </div>
     );
@@ -435,7 +435,9 @@ function HostFacts({ h }: { h: HostStat }) {
       <span>{h.calls} calls</span>
       <span>p95 {fmtMs(h.p95Ms)}</span>
       {h.errorPct > 0 && <span class="qv-err-chip">{fmtPct(h.errorPct)} failed</span>}
-      <span title="GETs that asked for Next's data cache (force-cache, revalidate > 0). Request-side intent, not an observed hit.">
+      <span
+        title={`GETs that asked for ${frameworkCopy.value.dataCache} (force-cache, revalidate > 0). Request-side intent, not an observed hit.`}
+      >
         cached {fmtPct(h.cachedPct)}
       </span>
       <StatusDots statuses={h.statuses} />

@@ -5,11 +5,13 @@ import { initCompare } from "../state/compare";
 import { sinceNumber, tracesSince } from "../state/epochs";
 import { isMobile, neighbourId } from "../state/mobile";
 import { logMatchCount, logQuery, logRows } from "../state/requestLog";
+import { pickerGroups } from "../state/routePick";
 import { type Route, route } from "../state/router";
 import {
   builderOpen,
   closeBuilder,
   closeSubject,
+  frameworkCopy,
   liveHold,
   loadTrace,
   routesState,
@@ -19,6 +21,7 @@ import {
   selectedTraceId,
   tracesState,
 } from "../state/store";
+import { subjectChrome } from "../state/subjectChrome";
 import { ChangesView } from "./ChangesView";
 import { CompareButton, CompareView, PickBanner, PinToggle } from "./CompareView";
 import { Details } from "./Details";
@@ -248,54 +251,75 @@ function RequestSubject({ r }: { r: Route }) {
     if (next && route.peek().view === "trace") void loadTrace(next, "user");
   });
 
+  // One "New request" label and one close, kept in view (subjectChrome): over a request the sticky
+  // bar's close closes the builder; the builder alone pins its own head.
+  const chrome = subjectChrome(r.view, builderOpen.value);
+
   return (
     <div class="subject" {...(isTrace && isMobile.value ? swipe : {})}>
-      <div class="subject-bar">
-        <span class="subject-kind">{r.view === "compare" ? "Compare" : isTrace ? "Request" : "New request"}</span>
-        {isTrace && (
-          <span class="subject-nav">
-            <button
-              type="button"
-              class="sbtn"
-              disabled={!newer}
-              onClick={() => newer && void loadTrace(newer.id, "user")}
-              title="Newer request in the list"
-              aria-label="Newer request"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              class="sbtn"
-              disabled={!older}
-              onClick={() => older && void loadTrace(older.id, "user")}
-              title="Older request in the list"
-              aria-label="Older request"
-            >
-              ›
-            </button>
-          </span>
-        )}
-        {isTrace && (
-          <span class="subject-nav">
-            <CompareButton traceId={r.traceId} />
-            <PinToggle traceId={r.traceId} />
-          </span>
-        )}
-        <button
-          type="button"
-          class="source-close subject-close"
-          onClick={closeSubject}
-          aria-label="Close"
-          title="Close (the list takes the full width)"
-        >
-          ×
-        </button>
-      </div>
-      {builderOpen.value && <BuilderDrawer />}
+      {chrome.bar && (
+        <SubjectBar r={r} kind={chrome.kind} close={chrome.barClose} newer={newer?.id} older={older?.id} />
+      )}
+      {builderOpen.value && <BuilderDrawer close={chrome.drawerClose} pinned={chrome.drawerHeadPinned} />}
       {r.view === "trace" && <PickBanner />}
       {r.view === "trace" && <TraceSubject traceId={r.traceId} />}
       {r.view === "compare" && <CompareView a={r.a} b={r.b} />}
+    </div>
+  );
+}
+
+function SubjectBar({
+  r,
+  kind,
+  close,
+  newer,
+  older,
+}: { r: Route; kind: string; close: "subject" | "builder" | null; newer?: string; older?: string }) {
+  const isTrace = r.view === "trace";
+  return (
+    <div class="subject-bar">
+      <span class="subject-kind">{kind}</span>
+      {isTrace && (
+        <span class="subject-nav">
+          <button
+            type="button"
+            class="sbtn"
+            disabled={!newer}
+            onClick={() => newer && void loadTrace(newer, "user")}
+            title="Newer request in the list"
+            aria-label="Newer request"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            class="sbtn"
+            disabled={!older}
+            onClick={() => older && void loadTrace(older, "user")}
+            title="Older request in the list"
+            aria-label="Older request"
+          >
+            ›
+          </button>
+        </span>
+      )}
+      {isTrace && (
+        <span class="subject-nav">
+          <CompareButton traceId={r.traceId} />
+          <PinToggle traceId={r.traceId} />
+        </span>
+      )}
+      {close && (
+        <button
+          type="button"
+          class="source-close subject-close"
+          onClick={close === "builder" ? closeBuilder : closeSubject}
+          aria-label={close === "builder" ? "Close request builder" : "Close"}
+          title={close === "builder" ? "Close (the builder keeps your edits)" : "Close (the list takes the full width)"}
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 }
@@ -320,24 +344,17 @@ function TraceSubject({ traceId }: { traceId: string }) {
 }
 
 /** Request builder drawer, with the route picker the old sidebar used to provide. */
-function BuilderDrawer() {
+function BuilderDrawer({ close, pinned }: { close: boolean; pinned: boolean }) {
   const routes = routesState.value?.routes ?? [];
   const key = selectedRouteKey.value ?? "";
   const dims = builderDims.value;
-  const groups = useComputed(() => {
-    const m = new Map<string, NonNullable<typeof routesState.value>["routes"]>();
-    for (const r of routesState.value?.routes ?? []) {
-      const g = r.path.split("/").filter(Boolean)[0] ?? "root";
-      const list = m.get(g) ?? [];
-      list.push(r);
-      m.set(g, list);
-    }
-    return [...m.entries()].sort(([x], [y]) => x.localeCompare(y));
-  }).value;
+  // Next keeps its `:param` paths; other frameworks show the template traces name. Regex routes are
+  // listed last, disabled (nothing to fill); a template + method in two files names the file.
+  const groups = useComputed(() => pickerGroups(routesState.value?.routes ?? [], frameworkCopy.value.isNext)).value;
 
   return (
     <section class={`builder-drawer${dims ? " dims-subject" : ""}`} aria-label="Request builder">
-      <header class="builder-drawer-head">
+      <header class={`builder-drawer-head${pinned ? " pinned" : ""}`}>
         <label class="builder-drawer-title" for="builder-route">
           New request
         </label>
@@ -354,28 +371,27 @@ function BuilderDrawer() {
           <option value="" disabled>
             {routes.length ? "Pick a route…" : "No routes found"}
           </option>
-          {groups.map(([g, items]) => (
-            <optgroup key={g} label={`/${g}`}>
-              {items.flatMap((r) =>
-                r.methods.map((m) => (
-                  <option key={`${r.id}::${m.method}`} value={`${r.id}::${m.method}`}>
-                    {m.method} {r.path}
-                    {m.schemas.length > 0 ? "  (schema)" : ""}
-                  </option>
-                )),
-              )}
+          {groups.map((g) => (
+            <optgroup key={g.label} label={g.label}>
+              {g.options.map((o) => (
+                <option key={o.value} value={o.value} disabled={o.disabled} title={o.reason}>
+                  {o.label}
+                </option>
+              ))}
             </optgroup>
           ))}
         </select>
-        <button
-          type="button"
-          class="source-close"
-          onClick={closeBuilder}
-          aria-label="Close request builder"
-          title="Close (the builder keeps your edits)"
-        >
-          ×
-        </button>
+        {close && (
+          <button
+            type="button"
+            class="source-close"
+            onClick={closeBuilder}
+            aria-label="Close request builder"
+            title="Close (the builder keeps your edits)"
+          >
+            ×
+          </button>
+        )}
       </header>
       {dims && (
         <p class="builder-drawer-note">

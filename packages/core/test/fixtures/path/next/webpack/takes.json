@@ -1,0 +1,697 @@
+{
+ "01-products1": [
+  {
+   "scriptId": "1578",
+   "url": "webpack-internal:///(middleware)/./src/proxy.ts",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 3144,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "config",
+     "ranges": [
+      {
+       "startOffset": 141,
+       "endOffset": 169,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "proxy",
+     "ranges": [
+      {
+       "startOffset": 201,
+       "endOffset": 228,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "proxy",
+     "ranges": [
+      {
+       "startOffset": 575,
+       "endOffset": 1142,
+       "count": 1
+      },
+      {
+       "startOffset": 660,
+       "endOffset": 687,
+       "count": 0
+      },
+      {
+       "startOffset": 689,
+       "endOffset": 988,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "1784",
+   "url": "webpack-internal:///(rsc)/./src/app/api/products/route.ts",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 3419,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "GET",
+     "ranges": [
+      {
+       "startOffset": 138,
+       "endOffset": 163,
+       "count": 4
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "GET",
+     "ranges": [
+      {
+       "startOffset": 781,
+       "endOffset": 1378,
+       "count": 1
+      },
+      {
+       "startOffset": 963,
+       "endOffset": 1135,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "1785",
+   "url": "webpack-internal:///(rsc)/./src/lib/schemas.ts",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 10671,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "CatalogQuery",
+     "ranges": [
+      {
+       "startOffset": 147,
+       "endOffset": 181,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "CreateOrder",
+     "ranges": [
+      {
+       "startOffset": 219,
+       "endOffset": 252,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "DashboardQuery",
+     "ranges": [
+      {
+       "startOffset": 293,
+       "endOffset": 329,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "DbProductsQuery",
+     "ranges": [
+      {
+       "startOffset": 371,
+       "endOffset": 408,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "DbSearchQuery",
+     "ranges": [
+      {
+       "startOffset": 448,
+       "endOffset": 483,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "FeedQuery",
+     "ranges": [
+      {
+       "startOffset": 519,
+       "endOffset": 550,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "FlakyQuery",
+     "ranges": [
+      {
+       "startOffset": 587,
+       "endOffset": 619,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "PokemonQuery",
+     "ranges": [
+      {
+       "startOffset": 658,
+       "endOffset": 692,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "ProductQuery",
+     "ranges": [
+      {
+       "startOffset": 731,
+       "endOffset": 765,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "ReportQuery",
+     "ranges": [
+      {
+       "startOffset": 803,
+       "endOffset": 836,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "1806",
+   "url": "webpack-internal:///(rsc)/./src/lib/store.ts",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 6923,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "createOrder",
+     "ranges": [
+      {
+       "startOffset": 146,
+       "endOffset": 179,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "getOrder",
+     "ranges": [
+      {
+       "startOffset": 214,
+       "endOffset": 244,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 283,
+       "endOffset": 317,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "payOrder",
+     "ranges": [
+      {
+       "startOffset": 352,
+       "endOffset": 382,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 421,
+       "endOffset": 462,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 439,
+       "endOffset": 461,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 706,
+       "endOffset": 949,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 821,
+       "endOffset": 945,
+       "count": 10
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "createOrder",
+     "ranges": [
+      {
+       "startOffset": 950,
+       "endOffset": 1185,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "getOrder",
+     "ranges": [
+      {
+       "startOffset": 1186,
+       "endOffset": 1271,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "payOrder",
+     "ranges": [
+      {
+       "startOffset": 1272,
+       "endOffset": 1516,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 1518,
+       "endOffset": 2167,
+       "count": 1
+      },
+      {
+       "startOffset": 1641,
+       "endOffset": 1648,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "3",
+   "url": "node:internal/per_context/primordials",
+   "functions": [
+    {
+     "functionName": "SafeIterator",
+     "ranges": [
+      {
+       "startOffset": 9489,
+       "endOffset": 9562,
+       "count": 820
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "next",
+     "ranges": [
+      {
+       "startOffset": 9568,
+       "endOffset": 9619,
+       "count": 901
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 9625,
+       "endOffset": 9672,
+       "count": 770
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "137",
+   "url": "file:///D:/WorkZone/Tracepath/node_modules/.pnpm/next@16.4.0_@opentelemetry+api@1.9.1_@playwright+test@1.64.0_@types+node@22.20.5_react-dom@19_mrll7ndzlvd5cajb3duzft6z7q/node_modules/next/dist/server/lib/start-server.js",
+   "functions": [
+    {
+     "functionName": "startServer",
+     "ranges": [
+      {
+       "startOffset": 6480,
+       "endOffset": 22638,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "handlersReady",
+     "ranges": [
+      {
+       "startOffset": 6769,
+       "endOffset": 6775,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "handlersError",
+     "ranges": [
+      {
+       "startOffset": 6801,
+       "endOffset": 6807,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "912",
+   "url": "",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 0,
+       "endOffset": 74,
+       "count": 18
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 1,
+       "endOffset": 73,
+       "count": 18
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  }
+ ],
+ "02-products2": [
+  {
+   "scriptId": "1578",
+   "url": "webpack-internal:///(middleware)/./src/proxy.ts",
+   "functions": [
+    {
+     "functionName": "proxy",
+     "ranges": [
+      {
+       "startOffset": 575,
+       "endOffset": 1142,
+       "count": 2
+      },
+      {
+       "startOffset": 660,
+       "endOffset": 687,
+       "count": 0
+      },
+      {
+       "startOffset": 689,
+       "endOffset": 988,
+       "count": 0
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "1784",
+   "url": "webpack-internal:///(rsc)/./src/app/api/products/route.ts",
+   "functions": [
+    {
+     "functionName": "GET",
+     "ranges": [
+      {
+       "startOffset": 781,
+       "endOffset": 1378,
+       "count": 2
+      },
+      {
+       "startOffset": 963,
+       "endOffset": 1377,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "1785",
+   "url": "webpack-internal:///(rsc)/./src/lib/schemas.ts",
+   "functions": [
+    {
+     "functionName": "ProductQuery",
+     "ranges": [
+      {
+       "startOffset": 731,
+       "endOffset": 765,
+       "count": 2
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "1806",
+   "url": "webpack-internal:///(rsc)/./src/lib/store.ts",
+   "functions": [
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 283,
+       "endOffset": 317,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "wait",
+     "ranges": [
+      {
+       "startOffset": 421,
+       "endOffset": 462,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 439,
+       "endOffset": 461,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "listProducts",
+     "ranges": [
+      {
+       "startOffset": 706,
+       "endOffset": 949,
+       "count": 1
+      }
+     ],
+     "isBlockCoverage": true
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 821,
+       "endOffset": 945,
+       "count": 10
+      }
+     ],
+     "isBlockCoverage": true
+    }
+   ]
+  },
+  {
+   "scriptId": "3",
+   "url": "node:internal/per_context/primordials",
+   "functions": [
+    {
+     "functionName": "SafeIterator",
+     "ranges": [
+      {
+       "startOffset": 9489,
+       "endOffset": 9562,
+       "count": 60
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "next",
+     "ranges": [
+      {
+       "startOffset": 9568,
+       "endOffset": 9619,
+       "count": 70
+      }
+     ],
+     "isBlockCoverage": false
+    },
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 9625,
+       "endOffset": 9672,
+       "count": 54
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "137",
+   "url": "file:///D:/WorkZone/Tracepath/node_modules/.pnpm/next@16.4.0_@opentelemetry+api@1.9.1_@playwright+test@1.64.0_@types+node@22.20.5_react-dom@19_mrll7ndzlvd5cajb3duzft6z7q/node_modules/next/dist/server/lib/start-server.js",
+   "functions": [
+    {
+     "functionName": "requestListener",
+     "ranges": [
+      {
+       "startOffset": 7700,
+       "endOffset": 8844,
+       "count": 4
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  },
+  {
+   "scriptId": "965",
+   "url": "",
+   "functions": [
+    {
+     "functionName": "",
+     "ranges": [
+      {
+       "startOffset": 1,
+       "endOffset": 91,
+       "count": 6
+      }
+     ],
+     "isBlockCoverage": false
+    }
+   ]
+  }
+ ]
+}

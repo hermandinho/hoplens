@@ -78,6 +78,13 @@
   --k-io: var(--muted);
   --k-response: var(--muted);
 
+  /* request path (Path mode): taken = solid, not reached = dashed dim, unknown = hatched */
+  --path-taken: #8fd3a8;
+  --path-untaken: var(--dim);
+  --path-unknown: #e0b66a;
+  --path-taken-bg: color-mix(in srgb, var(--path-taken) 12%, transparent);
+  --path-unknown-bg: color-mix(in srgb, var(--path-unknown) 14%, transparent);
+
   /* syntax (JSON viewer, code) */
   --syn-key: #a9b8d4;
   --syn-str: #a8d8a0;

@@ -115,6 +115,8 @@ function ownsHorizontalDrag(el: Element | null, stop: Element): boolean {
   for (let n = el; n && n !== stop; n = n.parentElement) {
     if (n.tagName === "DIALOG" || n.tagName === "INPUT" || n.tagName === "TEXTAREA" || n.tagName === "SELECT")
       return true;
+    // A view that owns its drags even when it fits (the path flowchart and source).
+    if (n.hasAttribute?.("data-own-drag")) return true;
     if (n.scrollWidth > n.clientWidth + 1) {
       const ox = getComputedStyle(n).overflowX;
       if (ox === "auto" || ox === "scroll") return true;

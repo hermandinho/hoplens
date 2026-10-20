@@ -17,11 +17,13 @@ import {
   setBuilderTab,
   setKvRow,
   setParam,
+  unsendableReason,
   updateBuilder,
 } from "../state/builder";
 import { register } from "../state/keymap";
 import { REPLAY_N, isRunning, replayBusy } from "../state/replay";
-import { builderOpen, metaState } from "../state/store";
+import { missingParams, pathParts } from "../state/routePick";
+import { builderOpen, frameworkCopy, metaState } from "../state/store";
 import { BuilderReplayPanel } from "./ReplayPanel";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -74,6 +76,8 @@ export function RequestBuilder() {
   }
 
   const profiles = Object.entries(meta?.profiles ?? {});
+  const missing = missingParams(s.path, s.params);
+  const unsendable = unsendableReason.value;
 
   return (
     <div class="builder">
@@ -98,7 +102,13 @@ export function RequestBuilder() {
           <PathWithParams path={s.path} params={s.params} onParam={setParam} />
         </div>
 
-        <button type="button" class="send" onClick={() => void sendRequest()} disabled={isSending}>
+        <button
+          type="button"
+          class="send"
+          onClick={() => void sendRequest()}
+          disabled={isSending || missing.length > 0 || !!unsendable}
+          title={unsendable ?? (missing.length ? `Fill ${missing.map((n) => `:${n}`).join(", ")} first` : undefined)}
+        >
           {isSending ? "Sending…" : "Send"}
           <kbd class="send-kbd">{SEND_KEYS}</kbd>
         </button>
@@ -106,7 +116,7 @@ export function RequestBuilder() {
           type="button"
           class="sbtn builder-replay"
           onClick={() => replayBuilder()}
-          disabled={isSending || replaying}
+          disabled={isSending || replaying || missing.length > 0}
           title={`Send this request ${REPLAY_N} times in a row: warm p50/p95, cold runs left out, vs last run`}
         >
           <kbd class="rp-kbd">R</kbd> Replay x{REPLAY_N}
@@ -174,36 +184,36 @@ function PathWithParams({
   params: Record<string, string>;
   onParam: (name: string, value: string) => void;
 }) {
-  const parts = path.split("/");
+  // A param can sit mid-segment (`/report.:format*`): chips and literal text interleave.
+  const parts = pathParts(path);
   return (
     <>
       {parts.map((p, i) => {
-        const key = `${i}-${p}`;
-        if (!p)
-          return i > 0 ? (
+        const key = `${i}-${p.kind}`;
+        if (p.kind === "sep")
+          return (
             <span key={key} class="path-sep">
               /
             </span>
-          ) : null;
-        if (p.startsWith(":")) {
-          const name = p.slice(1).replace(/[+*]$/, "");
+          );
+        if (p.kind === "text")
           return (
-            <span key={key} class="path-chip-wrap">
-              <span class="path-sep">/</span>
-              <input
-                class="path-chip"
-                aria-label={`Path parameter ${name}`}
-                value={params[name] ?? ""}
-                onInput={(e) => onParam(name, (e.target as HTMLInputElement).value)}
-                size={Math.max((params[name] ?? name).length + 1, 4)}
-              />
+            <span key={key} class="path-segment">
+              {p.text}
             </span>
           );
-        }
+        const value = params[p.name] ?? "";
+        const optional = p.mod === "*";
         return (
-          <span key={key} class="path-segment">
-            {i > 0 && <span class="path-sep">/</span>}
-            {p}
+          <span key={key} class="path-chip-wrap">
+            <input
+              class="path-chip"
+              aria-label={`Path parameter ${p.name}${optional ? " (optional)" : ""}`}
+              placeholder={optional ? `${p.name}?` : p.name}
+              value={value}
+              onInput={(e) => onParam(p.name, (e.target as HTMLInputElement).value)}
+              size={Math.max((value || p.name).length + 1, 4)}
+            />
           </span>
         );
       })}
@@ -354,7 +364,15 @@ function AuthPane({
     return (
       <div class="pane">
         <div class="muted">
-          No auth profiles configured. Add them in <code>withHoplens</code>:
+          No auth profiles configured. Add them in{" "}
+          {frameworkCopy.value.isNext ? (
+            <code>withHoplens</code>
+          ) : (
+            <>
+              the Hoplens options (<code>hoplens(app, {"{ profiles }"})</code> or <code>HOPLENS_OPTIONS</code>)
+            </>
+          )}
+          :
           <pre class="code-block mono">{`profiles: {
   admin: { headers: { authorization: "Bearer \${ADMIN_TOKEN}" } },
 }`}</pre>

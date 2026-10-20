@@ -8,7 +8,8 @@
 //
 // Cost: nothing per request. fs.watch callbacks only record a path and arm one unref'd timer; hashing
 // runs in that timer (or when the epoch tracker drains, which is off the request path). A one-time,
-// chunked pre-hash of existing files runs at startup so the first save of an unchanged file is caught.
+// chunked pre-hash of existing files runs at startup so the first save of an unchanged file is caught
+// (files saved around startup are left out of it, so a save racing the pre-hash is never swallowed).
 //
 // Windows: a burst of more than ~40 writes (a git checkout, a codemod) overflows the watcher's change
 // buffer and fs.watch reports one event with no file name: every name in the burst is lost. Such an
@@ -55,7 +56,11 @@ export interface SourceWatchOptions {
   retryMs?: number;
 }
 
-/** Directories watched when the project has no `src/`. Each is watched only if it exists. */
+/**
+ * Directories watched when the project has no `src/`. Each is watched only if it exists. The Express
+ * layout (`routes/`, `controllers/`, `middleware/`, `models/`, plus `lib/` and `services/`) is here
+ * too: those dirs also scope the source manifest that turns a restart into an edit (manifest.ts).
+ */
 export const FALLBACK_DIRS = [
   "app",
   "pages",
@@ -69,6 +74,10 @@ export const FALLBACK_DIRS = [
   "db",
   "prisma",
   "drizzle",
+  "routes",
+  "controllers",
+  "middleware",
+  "models",
 ];
 
 const SOURCE_EXT = new Set([
@@ -86,7 +95,13 @@ const SOURCE_EXT = new Set([
   ".gql",
   ".prisma",
 ]);
-const SKIP_SEGMENTS = new Set(["node_modules", "dist", "build", "out", "coverage"]);
+/** Directory names never walked (also skipped by the source manifest). */
+export const SKIP_SEGMENTS: ReadonlySet<string> = new Set(["node_modules", "dist", "build", "out", "coverage"]);
+
+/** The project-relative dirs holding its source: `src` when it exists, else the FALLBACK_DIRS present. */
+export function sourceDirs(root: string): string[] {
+  return isDir(path.join(root, "src")) ? ["src"] : FALLBACK_DIRS.filter((d) => isDir(path.join(root, d)));
+}
 
 /** True for a project-relative path whose change can affect server code. Exported for tests. */
 export function isSourceFile(rel: string): boolean {
@@ -125,6 +140,14 @@ const FLUSH_HASH_BUDGET = 64;
 const RESCAN_MAX_ENTRIES = 20000;
 /** mtime slack for the rescan (coarse filesystem clocks, a save landing during the previous flush). */
 const RESCAN_SLACK_MS = 2000;
+/**
+ * The pre-hash leaves out files modified this close to (or after) the watcher's start. Such a file
+ * may be a save whose event is still on its way: hashing its new bytes as the baseline would make
+ * that event look like a same-bytes save and drop it. Leaving it out costs at most one save of it
+ * counted as a change. The slack covers file timestamps from a coarser clock than Date.now()
+ * (Windows can stamp a file up to one 15.6ms tick behind).
+ */
+const PREHASH_FRESH_MS = 100;
 
 export function watchSources(root: string, opts: SourceWatchOptions = {}): SourceWatcher {
   const clock = opts.clock ?? Date.now;
@@ -132,8 +155,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
   const maxPending = Math.max(1, opts.maxPending ?? 200);
   const maxHashBytes = opts.maxHashBytes ?? 1024 * 1024;
   const retryMs = opts.retryMs ?? 2000;
-  const dirs =
-    opts.dirs ?? (isDir(path.join(root, "src")) ? ["src"] : FALLBACK_DIRS.filter((d) => isDir(path.join(root, d))));
+  const dirs = opts.dirs ?? sourceDirs(root);
 
   /** rel -> content hash as of the last accepted state. */
   const hashes = new Map<string, string | null>();
@@ -147,6 +169,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
   let armedAt = Number.NEGATIVE_INFINITY;
   /** Wall-clock ms (file mtimes are wall clock) of the last flush; an overflow rescans from here. */
   let flushedAt = Date.now();
+  const startedWall = flushedAt;
   /** Set by a nameless (overflow) event: rescan files modified at or after this wall-clock ms. */
   let rescanFrom: number | undefined;
 
@@ -307,6 +330,7 @@ export function watchSources(root: string, opts: SourceWatchOptions = {}): Sourc
       opts.maxPrehash ?? 4000,
       () => closed,
       (rel) => dirty.has(rel),
+      startedWall - PREHASH_FRESH_MS,
     );
 
   return {
@@ -346,6 +370,8 @@ function prehash(
   limit: number,
   stopped: () => boolean,
   busy: (rel: string) => boolean,
+  /** Files with an mtime at or after this wall-clock ms are not pre-hashed (see PREHASH_FRESH_MS). */
+  freshFrom: number,
 ): void {
   const queue: string[] = [];
   const stack = [...dirs];
@@ -363,8 +389,10 @@ function prehash(
       const rel = queue.pop();
       if (rel !== undefined) {
         if (!hashes.has(rel) && !busy(rel)) {
-          const h = hashFile(path.join(root, rel), maxBytes);
-          if (h !== undefined && !hashes.has(rel)) hashes.set(rel, h);
+          const abs = path.join(root, rel);
+          const h = hashFile(abs, maxBytes);
+          // mtime checked after the read: a save that landed before or during it shows up here.
+          if (h !== undefined && !hashes.has(rel) && mtimeMs(abs) < freshFrom) hashes.set(rel, h);
         }
         continue;
       }
@@ -386,6 +414,14 @@ function prehash(
     if (hashes.size < limit && (queue.length || stack.length)) setImmediate(step).unref?.();
   };
   setImmediate(step).unref?.();
+}
+
+function mtimeMs(p: string): number {
+  try {
+    return fs.statSync(p).mtimeMs;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 function isDir(p: string): boolean {

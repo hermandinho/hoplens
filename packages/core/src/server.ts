@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import * as compareApi from "./api/compare";
 import * as epochsApi from "./api/epochs";
+import { guardRequest } from "./api/guard";
 import * as healthApi from "./api/health";
 import type { ApiModule } from "./api/module";
+import * as pathApi from "./api/path";
+import { pathMeta } from "./path/capture";
 import type { QueryKind } from "./queries";
 import { type QueryTarget, inSinceScope, matchQuery, parseQuery, parseSinceParam } from "./query";
 import {
@@ -14,6 +18,7 @@ import {
   parseFlag,
   parseRepeat,
   prepareRun,
+  resendHeaders,
   runBatch,
   runOnce,
 } from "./replay";
@@ -21,7 +26,6 @@ import type { Runtime } from "./runtime";
 import { summarize } from "./store";
 import type { BodyCapture, TraceRecord } from "./types";
 
-const LOOPBACK = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 let uiCache: { mtimeMs: number; html: string } | null = null;
 let uiPathCache: string | null = null;
 
@@ -69,6 +73,8 @@ interface HandlerCtx {
 
 interface Route {
   method: "GET" | "POST" | "DELETE";
+  /** As registered, with `:name` params (`/api/traces/:id`). */
+  path: string;
   pattern: RegExp;
   paramNames: string[];
   handler: Handler;
@@ -83,7 +89,12 @@ function addRoute(method: Route["method"], pattern: string, handler: Handler) {
       return "([^/]+)";
     })}$`,
   );
-  routes.push({ method, pattern: re, paramNames, handler });
+  routes.push({ method, path: pattern, pattern: re, paramNames, handler });
+}
+
+/** Every mounted route (tests iterate it to prove the guard in handleUi covers each one). */
+export function routeTable(): { method: Route["method"]; path: string }[] {
+  return routes.map((r) => ({ method: r.method, path: r.path }));
 }
 
 function matchRoute(method: string, pathname: string): { route: Route; params: Record<string, string> } | null {
@@ -119,7 +130,7 @@ async function readBody(req: http.IncomingMessage, limit = 5 * 1024 * 1024): Pro
 /* ------------------------------------------------------------------ routes */
 
 addRoute("GET", "/", ({ rt, res }) => {
-  // `rt` present so a future auth guard can see the Runtime.
+  // `rt` unused: handleUi's guard (api/guard.ts) already ran.
   void rt;
   res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
   res.end(uiHtml());
@@ -133,17 +144,22 @@ addRoute("GET", "/index.html", ({ res }) => {
 addRoute("GET", "/api/meta", ({ rt, res }) => {
   let nextVersion: string | undefined;
   let appName: string | undefined;
+  const framework = rt.framework;
   try {
     appName = JSON.parse(fs.readFileSync(path.join(rt.root, "package.json"), "utf8")).name;
-    nextVersion = JSON.parse(
-      fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8"),
-    ).version;
+    // Other adapters report their own version through `framework`; only Next's keeps the `next` field.
+    if (!framework || framework.name === "next") {
+      nextVersion = JSON.parse(
+        fs.readFileSync(require.resolve("next/package.json", { paths: [rt.root] }), "utf8"),
+      ).version;
+    }
   } catch {
     /* optional */
   }
   json(res, 200, {
     app: appName,
     next: nextVersion,
+    framework,
     root: rt.root,
     appPort: rt.appPort ?? (Number(process.env.PORT) || undefined),
     uiPort: rt.uiPort,
@@ -151,6 +167,7 @@ addRoute("GET", "/api/meta", ({ rt, res }) => {
     otel: rt.otel,
     configured: rt.options.configured,
     autoTrace: rt.options.autoTrace ?? true,
+    path: pathMeta(undefined, process.env, rt.pathControl),
     profiles: Object.fromEntries(
       Object.entries(rt.options.profiles ?? {}).map(([k, v]) => [
         k,
@@ -223,19 +240,7 @@ addRoute("GET", "/api/traces/:id/request", ({ rt, params, res }) => {
   const t = rt.store.get(params.id!);
   if (!t) return json(res, 404, { error: "Trace not found" });
   const internal = rt.store.internal(t);
-  const headers = { ...(internal?.rawHeaders ?? t.request.headers) };
-  for (const h of [
-    "host",
-    "connection",
-    "content-length",
-    "accept-encoding",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-port",
-    "x-forwarded-proto",
-  ]) {
-    delete headers[h];
-  }
+  const headers = resendHeaders(rt, t);
   const body =
     internal?.rawBody ??
     (t.request.body?.json !== undefined ? JSON.stringify(t.request.body.json, null, 2) : t.request.body?.text);
@@ -245,12 +250,16 @@ addRoute("GET", "/api/traces/:id/request", ({ rt, params, res }) => {
 addRoute("GET", "/api/source", ({ rt, url, res }) => {
   const file = rt.resolveFile(url.searchParams.get("file") ?? "");
   if (!file) return json(res, 404, { error: "File not found in this project" });
-  const all = fs.readFileSync(file, "utf8").split("\n");
+  const text = fs.readFileSync(file, "utf8");
+  const all = text.split("\n");
+  // The same sha1/12 a path trace records per function (path/capture.ts): the UI checks the lines it
+  // lays counts over are the ones that were traced.
+  const hash = createHash("sha1").update(text).digest("hex").slice(0, 12);
   const line = Number(url.searchParams.get("line") || 1);
   const ctx = Number(url.searchParams.get("context") || 10);
   const start = Math.max(1, line - ctx);
   const end = Math.min(all.length, line + ctx);
-  json(res, 200, { file: url.searchParams.get("file"), line, start, lines: all.slice(start - 1, end) });
+  json(res, 200, { file: url.searchParams.get("file"), line, start, lines: all.slice(start - 1, end), hash });
 });
 
 addRoute("GET", "/api/events", ({ rt, req, res }) => {
@@ -310,7 +319,7 @@ addRoute("POST", "/api/run", async ({ rt, req, res, url }) => {
  * package adds exactly one import above and one entry here; nothing else in this file changes.
  * Mounted after the built-in routes, so a module can't shadow an existing endpoint.
  */
-const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi];
+const API_MODULES: readonly ApiModule[] = [healthApi, compareApi, epochsApi, pathApi];
 
 /** Mount a per-endpoint module. Exported for tests; production modules go in API_MODULES. */
 export function mountApi(mod: ApiModule): void {
@@ -377,11 +386,10 @@ export function recordTarget(t: TraceRecord): QueryTarget {
 /* -------------------------------------------------------------- entrypoint */
 
 export async function handleUi(rt: Runtime, req: http.IncomingMessage, res: http.ServerResponse) {
-  if (!rt.options.allowRemote && !LOOPBACK.has(req.socket.remoteAddress ?? "")) {
-    return json(res, 403, {
-      error: "Hoplens only answers requests from this machine. Set allowRemote: true to change that.",
-    });
-  }
+  // One gate for every route, the UI page and SSE included (api/guard.ts): loopback caller, a
+  // Host that names this machine (DNS rebinding), a local Origin, JSON on state-changing calls.
+  const refused = guardRequest(req, { allowRemote: rt.options.allowRemote });
+  if (refused) return json(res, refused.status, refused.body);
   const url = new URL(req.url ?? "/", "http://local");
   const pathname = url.pathname.replace(/^\/__hoplens/, "") || "/";
   const method = req.method ?? "GET";

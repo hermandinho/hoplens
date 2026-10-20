@@ -202,6 +202,8 @@ export interface Discovery {
 export interface Meta {
   app?: string;
   next?: string;
+  /** The host framework, as its adapter reported it. */
+  framework?: { name: string; version?: string };
   root: string;
   appPort?: number;
   uiPort?: number;
@@ -217,6 +219,8 @@ export interface SourceResponse {
   line: number;
   start: number;
   lines: string[];
+  /** sha1/12 of the whole file as it is now (compared with PathFn.sourceHash). */
+  hash?: string;
 }
 
 export interface RunInput {
@@ -570,7 +574,8 @@ export interface BaselinesResponse {
 // stream GET /api/epochs/events (`event: epoch` = EpochView, `event: regression` = RouteRegression).
 // Mirrors core epoch.ts, regressions.ts and api/epochs.ts.
 
-export type EpochVia = "start" | "src-watch" | "chunk-diff" | "candidates" | "unknown";
+/** "restart": the app restarted under a watcher and its source manifest named the changed files (core manifest.ts). */
+export type EpochVia = "start" | "src-watch" | "chunk-diff" | "candidates" | "unknown" | "restart";
 export type EpochAffectedVia = "imports" | "chunks" | "candidates" | "none";
 
 export interface EpochView {
@@ -909,4 +914,266 @@ export interface ServerRouteStats {
 export interface StatsResponse {
   /** Present only on a `?since=` request a core understood: epochs >= sinceEpoch are counted. */
   scope?: { sinceEpoch: number; partial: boolean };
+}
+
+// Request path (P3 trail UI): POST|GET /api/traces/:id/path, meta.path and the pathTrace stamp
+// (mirrors core path/capture.ts, path/truth.ts, path/analyze.ts). Interfaces merge into Meta,
+// TraceSummary and TraceRecord above. Truth is decided server-side: the UI only renders it.
+
+export interface PathMeta {
+  state: "off" | "on" | "disabled-c8" | "error";
+  reason?: string;
+  /** Why it is on / off at this boot: HOPLENS_PATH, the sticky flag (Enable here), or neither. Absent on an older core. */
+  source?: "env" | "flag" | "default";
+  /** The switch was flipped since boot: the state the next start will have. */
+  pending?: "on" | "off";
+}
+
+export interface Meta {
+  /** Request path state. Absent on a core that predates it. */
+  path?: PathMeta;
+}
+
+/** A request-path replay (core TraceRecord.pathTrace). No payload of its own when superseded / failed. */
+export interface PathTraceStamp {
+  quality: PathQuality;
+  replayOf: string;
+  supersededBy?: string;
+  failed?: string;
+}
+
+export interface TraceSummary {
+  pathTrace?: PathTraceStamp;
+}
+
+export interface TraceRecord {
+  pathTrace?: PathTraceStamp;
+}
+
+export type PathQuality = "exact" | "partial" | "contaminated";
+
+export type PathWhy =
+  | "no-blocks"
+  | "contaminated"
+  | "join-mismatch"
+  | "join-ambiguous"
+  | "no-location"
+  | "source-unreadable"
+  | "too-large"
+  | "source-moved"
+  | "compiled"
+  | "unmapped"
+  | "no-generated-text"
+  | "stale-chunk"
+  | "bundle-copies"
+  | "after-throw"
+  | "arms-inconsistent"
+  | "no-analyzer"
+  | "no-function"
+  | "no-counter"
+  | "suspended";
+
+export type PathTruth = { t: "taken"; n: number } | { t: "not" } | { t: "unknown"; why: PathWhy };
+
+export interface PathArm {
+  label: string;
+  line?: number;
+  count: number | null;
+  taken: "taken" | "not-taken" | "unknown";
+  why?: PathWhy;
+  implied?: boolean;
+}
+
+export type PathDecisionKind = "if" | "switch" | "ternary" | "logical" | "try";
+
+export interface PathDecision {
+  id: string;
+  nodeId: number;
+  kind: PathDecisionKind;
+  line: number;
+  label: string;
+  reach: number | null;
+  why?: PathWhy;
+  arms: PathArm[];
+  verdict: "one" | "split-loop" | "split-calls" | "unreached" | "unknown";
+  /** Server-made chip text: `then`, `then 1/3 . else 2/3`, `not reached`, `? (after-throw)`. */
+  summary: string;
+  inLoop: boolean;
+}
+
+export interface PathLoop {
+  nodeId: number;
+  line: number;
+  label: string;
+  kind: string;
+  entries: number | null;
+  passes: number | null;
+  why?: PathWhy;
+}
+
+export interface PathExitVia {
+  decision: string;
+  label: string;
+  arm: string;
+  line: number;
+}
+
+export interface PathExit {
+  nodeId?: number;
+  kind: "return" | "throw" | "end" | "exception";
+  line: number | null;
+  count: number | null;
+  why?: PathWhy;
+  via?: PathExitVia;
+}
+
+export interface PathNodeArm {
+  label: string;
+  line: number;
+  n: number | null;
+  why?: PathWhy;
+  /** No code of its own (an unwritten else). */
+  implied?: boolean;
+  body?: PathNode[];
+  fallsThrough?: boolean;
+  sharedArm?: string;
+}
+
+/**
+ * The flowchart tree (core truth.ts PathNode): `n` is the node's structural reach (null: UNKNOWN
+ * with `why`); arm and loop counts are the server's, read as they are.
+ */
+export interface PathNode {
+  id: number;
+  k: "block" | "stmt" | "if" | "switch" | "loop" | "try" | "exit" | "fold";
+  line: number;
+  endLine: number;
+  label?: string;
+  n: number | null;
+  why?: PathWhy;
+  body?: PathNode[];
+  arms?: PathNodeArm[];
+  passes?: number | null;
+  exit?: "return" | "throw" | "break" | "continue";
+  target?: string;
+  calls?: string[];
+  callees?: Array<{ name: string; fnKey: string }>;
+  /** Calls left unlinked because more than one recorded hop of this function matches the name. */
+  ambiguous?: string[];
+  fns?: Array<{ id: number; name: string; line: number; fnKey?: string }>;
+  awaits?: number;
+  decisions?: string[];
+}
+
+export interface PathFnAnalysis {
+  status: "ok" | "unknown";
+  why?: PathWhy;
+  calls: number;
+  blended: boolean;
+  decisions: PathDecision[];
+  loops: PathLoop[];
+  exits: PathExit[];
+  /** The flowchart (left out past the payload cap: PathPayloadAnalysis.graphsDropped). */
+  graph?: PathNode;
+  nodeCount: number;
+  truncated?: boolean;
+  warnings?: string[];
+}
+
+export interface PathFn {
+  key: string;
+  name: string;
+  file: string;
+  line: number;
+  startLine?: number;
+  endLine?: number;
+  /** identity: V8 ran the file itself; sourcemap: a loader's output, carried over by its source map. */
+  mapping: "identity" | "sourcemap" | "none";
+  /** The generated text V8 ran (mapping 'sourcemap'). */
+  generated?: { hash: string; length: number; via: "hook" | "debugger" };
+  calls: { hops: number; coverage: number | null; checked: boolean };
+  truth: PathTruth;
+  blocks: boolean;
+  truncated?: boolean;
+  stale?: boolean;
+  /** sha1/12 of the file's text when the trace was captured (the Source view checks it). */
+  sourceHash?: string;
+  analysis?: PathFnAnalysis;
+}
+
+export interface PathLane {
+  spanId: string;
+  kind: "handler" | "function";
+  name: string;
+  file?: string;
+  line?: number;
+  fnKey?: string;
+  depth: number;
+  calls: number;
+  truth: PathTruth;
+  threw?: boolean;
+}
+
+export interface PathPayloadAnalysis {
+  text: string;
+  exit?: { fnKey: string; nodeId?: number; kind: PathExit["kind"]; line: number | null; via?: PathExitVia };
+  ms: number;
+  graphsDropped?: boolean;
+  error?: string;
+}
+
+export interface PathPayload {
+  v: number;
+  traceId: string;
+  replayOf: string;
+  quality: PathQuality;
+  contamination: string[];
+  warnings: string[];
+  window: {
+    quietMs: number;
+    settleMs: number;
+    taint: string[];
+    retries: number;
+    /** Reset and final take, ms (V8 serializes every script: 0.1-1s under next dev). */
+    takeMs?: [number, number];
+    scripts?: number;
+    totalScripts?: number;
+    /** Next dev: the final take's script kinds, and what mapping the bundles cost. */
+    bundled?: { kinds: Record<string, number>; holding: number; files: number; reads: number; ms: number };
+    /** Untraced framework requests (Next's /_next/*) inside the window. */
+    internal?: string[];
+  };
+  lanes: PathLane[];
+  functions: Record<string, PathFn>;
+  analysis?: PathPayloadAnalysis;
+}
+
+export type PathErrorCode =
+  | "method"
+  | "not-found"
+  | "no-path"
+  | "superseded"
+  | "evicted"
+  | "path-off"
+  | "busy"
+  | "not-quiet"
+  | "take-failed"
+  | "replay-failed";
+
+/** Every path API error body: `{ code, error, ...details }`. */
+export interface PathErrorBody {
+  code: PathErrorCode | string;
+  error: string;
+  /** not-quiet */
+  reason?: string;
+  inflight?: number;
+  requests?: string[];
+  /** replay-failed */
+  status?: number;
+  /** superseded */
+  traceId?: string;
+  /** evicted */
+  replayOf?: string;
+  /** path-off */
+  state?: PathMeta["state"];
 }

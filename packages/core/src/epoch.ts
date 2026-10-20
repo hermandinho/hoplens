@@ -36,6 +36,13 @@ export type MtimeProbe = (() => number) & {
   close?: () => void;
 };
 
+/**
+ * A probe that never sees a rebuild: one epoch for the whole process (0, or the restored one with
+ * `persist`). For adapters with no build output to watch (`RuntimeConfig.epochs.mode: "none"`); no
+ * watchers, so nothing to close.
+ */
+export const nullProbe: MtimeProbe = () => 0;
+
 /** Build-output names kept between two drains. */
 const MAX_PROBE_NAMES = 100;
 /** Build-output paths kept between two drains for the chunk diff; past this the diff is untrusted. */
@@ -182,7 +189,12 @@ export type EpochVia =
   /** No source change seen; hints derived from the rebuilt chunk names. */
   | "candidates"
   /** A rebuild with nothing to attribute it to. */
-  | "unknown";
+  | "unknown"
+  /**
+   * The process restarted (node --watch, tsx watch, nodemon) and the source manifest says these files
+   * changed since the previous process (`RuntimeConfig.epochs.mode: "restart"`, manifest.ts).
+   */
+  | "restart";
 
 export interface EpochInfo {
   /** Epoch number (same as the `epoch` fact). */
@@ -316,11 +328,13 @@ export class EpochTracker {
   /**
    * WP10: continue after a persisted session. This session starts at epoch `base` and `prior` (earlier
    * sessions' epochs, each with `session` set) go before it in the ring. Only before the first bump.
+   * `current` replaces the start marker as this session's first epoch: a `"restart"` edit, or (mode
+   * "restart", nothing changed) the previous session's last epoch, continued.
    */
-  restore(base: number, prior: readonly EpochInfo[]): void {
-    if (this.epoch !== 0 || this.infos.length !== 1 || base <= 0) return;
+  restore(base: number, prior: readonly EpochInfo[], current?: Omit<EpochInfo, "id">): void {
+    if (this.epoch !== 0 || this.infos.length !== 1 || base < 0 || (base === 0 && !current)) return;
     this.epoch = base;
-    this.infos[0]!.id = base;
+    this.infos[0] = current ? { ...current, id: base } : { ...this.infos[0]!, id: base };
     const keep = prior.filter((i) => i.id < base).slice(-(this.maxInfos - 1));
     this.infos.unshift(...keep);
   }
@@ -430,8 +444,16 @@ export class EpochTracker {
     if (newCompile || t - this.lastProbeAt >= this.minProbeMs) {
       this.lastProbeAt = t;
       const m = this.probe();
-      if (this.lastMtime < 0) this.lastMtime = m;
-      else if (m > this.lastMtime) {
+      if (this.lastMtime < 0) {
+        this.lastMtime = m;
+        // Baseline the chunk index. Next 16 creates the tracker inside the first request, which then
+        // compiles its route before any probe ran (the output watcher is armed by the first probe), so
+        // those chunks were never read: an edit to that route rewrote its chunk in place, every module
+        // read as "added" and the trusted diff saw no edit (no epoch). The update reads the route entries
+        // written since the prime and the chunks they load, as an absorbed (non-bumping) rebuild.
+        this.probe.drainNames?.();
+        this.chunkDiff(true);
+      } else if (m > this.lastMtime) {
         this.lastMtime = m;
         // An on-demand compile of a brand-new route isn't an edit, nor are the chunk writes that
         // trail it and get noticed by the next (unrelated) request.

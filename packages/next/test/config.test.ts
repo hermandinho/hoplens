@@ -64,3 +64,47 @@ describe("serverExternalPackages in dev", () => {
     expect(await externals(withPg, { transpilePackages: ["postgres"] })).toEqual(["@hoplens/core"]);
   });
 });
+
+// pnpm does not hoist transitive dependencies: `@hoplens/transform` and `@hoplens/ui` are deps of
+// the adapter (and of core), not of the app, so a bare specifier resolved from the project root
+// fails. Turbopack then reports "Could not parse module '[project]/instrumentation.ts', file not
+// found" and webpack throws "Cannot find module '@hoplens/transform/loader'".
+describe("loader and UI paths when the app root can't see Hoplens' own dependencies (pnpm)", () => {
+  let root: string;
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "hoplens-cfg-pnpm-"));
+    fs.writeFileSync(path.join(root, "package.json"), "{}");
+    const next = path.join(root, "node_modules", "next");
+    fs.mkdirSync(next, { recursive: true });
+    fs.writeFileSync(path.join(next, "package.json"), JSON.stringify({ name: "next", version: "16.4.0" }));
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+  afterEach(() => Reflect.deleteProperty(process.env, "HOPLENS_UI_PATH"));
+
+  async function config() {
+    vi.spyOn(process, "cwd").mockReturnValue(root);
+    expect(() => require.resolve("@hoplens/transform/loader", { paths: [root] })).toThrow();
+    return withHoplens({})(DEV, {});
+  }
+
+  test("the Turbopack rule names the loader by an absolute path that exists", async () => {
+    const out = await config();
+    const rule = Object.values(out.turbopack.rules as Record<string, any>)[0];
+    const loader = rule.loaders[0].loader as string;
+    expect(path.isAbsolute(loader)).toBe(true);
+    expect(fs.existsSync(loader)).toBe(true);
+  });
+
+  test("the webpack rule resolves the loader without throwing", async () => {
+    const out = await config();
+    const cfg = out.webpack({ module: { rules: [] } }, { isServer: true, nextRuntime: "nodejs" });
+    const loader = cfg.module.rules[0].use[0].loader as string;
+    expect(path.isAbsolute(loader)).toBe(true);
+    expect(fs.existsSync(loader)).toBe(true);
+  });
+
+  test("the UI HTML path is found through core", async () => {
+    await config();
+    expect(process.env.HOPLENS_UI_PATH && fs.existsSync(process.env.HOPLENS_UI_PATH)).toBe(true);
+  });
+});

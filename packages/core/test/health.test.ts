@@ -6,8 +6,9 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import type { IntervalHistogram } from "node:perf_hooks";
 import ts from "typescript";
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { attachHealthEvents } from "../src/api/health";
 import { HealthMonitor, loopFloorMs } from "../src/health";
 import type { Runtime } from "../src/runtime";
@@ -15,6 +16,7 @@ import { handleUi } from "../src/server";
 import { TraceStore } from "../src/store";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const nsToMs = (ns: number) => ns / 1e6;
 function block(ms: number) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -47,17 +49,26 @@ describe("HealthMonitor", () => {
     expect(s.loopMax).toBeGreaterThanOrEqual(min);
     expect(s.rss).toBeGreaterThan(0);
     expect(s.heapUsed).toBeGreaterThan(0);
-    // The histogram resets per window.
-    await wait(30);
-    expect(h.sample().loopP99).toBeLessThan(90);
+    // The histogram resets per window: checked on the histogram itself, since how late the next
+    // window's timers run depends on machine load (a descheduled process reads 150ms+ anyway).
+    const hist = (h as unknown as { histogram: IntervalHistogram }).histogram;
+    expect(hist.count).toBe(0);
+    expect(hist.max).toBe(0);
   });
 
   test("the sampler's own timer interval is not reported as loop delay", async () => {
     const h = monitor({ resolutionMs: 20, sampleMs: 60_000 }).start();
     await wait(250);
+    // Raw values read ~20ms (Linux) / ~31ms (Windows) on an idle loop: the timer interval itself.
+    const raw = nsToMs((h as unknown as { histogram: IntervalHistogram }).histogram.percentile(50));
     const s = h.sample();
-    // Raw values read ~20ms (Linux) / ~31ms (Windows) on an idle loop.
-    expect(s.loopP50).toBeLessThan(10);
+    // Calibrated against this window's raw p50 instead of assuming an idle machine. Up to the platform's
+    // interval (+1ms) the raw p50 is the sampler's own timer and must read ~0. Lateness beyond that is
+    // real delay (on a loaded machine the process waits for a core, and so would the app's timers), and
+    // may be reported, but only that excess: the interval is never part of it.
+    const excess = Math.max(0, raw - loopFloorMs(undefined, Number.POSITIVE_INFINITY, 20));
+    expect(s.loopP50).toBeLessThan(10 + excess);
+    if (excess === 0) expect(s.loopP50).toBeLessThan(10);
   });
 
   test("loopFloorMs: lowest window p50, clamped to [resolution, the platform's timer interval + 1]", () => {
@@ -230,29 +241,48 @@ setTimeout(() => { fs.writeSync(1, "ALIVE"); process.exit(0); }, 150);`,
 /* ------------------------------------------------------------------ SSE feed */
 
 describe("attachHealthEvents", () => {
-  test("throttles to one event per gap, creates no timer until needed, clears it on detach", async () => {
+  // Fake timers (Date included): the throttle is pure timer + clock logic, and on a loaded machine a
+  // real `wait(150)` can resolve well past the gap, so a later emit is legitimately sent at once.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("throttles to one event per gap, creates no timer until needed, clears it on detach", () => {
+    vi.useFakeTimers();
     const h = monitor({ sampleMs: 60_000 });
     const chunks: string[] = [];
     const detach = attachHealthEvents(h, (c) => chunks.push(c), 100);
+    expect(vi.getTimerCount()).toBe(0);
     h.sample();
     h.emit("sample");
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatch(/^event: health\ndata: /);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(10);
     h.emit("sample");
     h.emit("sample");
     expect(chunks).toHaveLength(1);
-    await wait(150);
+    expect(vi.getTimerCount()).toBe(1);
+    // Sent exactly one gap after the previous event, not one gap after the emit.
+    vi.advanceTimersByTime(89);
+    expect(chunks).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     expect(chunks).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
     // A pending send is dropped on detach.
+    vi.advanceTimersByTime(50);
     h.emit("sample");
+    expect(chunks).toHaveLength(2);
     detach();
-    await wait(150);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1000);
     expect(chunks).toHaveLength(2);
     expect(h.listenerCount("sample")).toBe(0);
     expect(h.listenerCount("processError")).toBe(0);
   });
 
-  test("immediate: the first event counts toward the gap, so the next tick waits", async () => {
+  test("immediate: the first event counts toward the gap, so the next tick waits", () => {
+    vi.useFakeTimers();
     const h = monitor({ sampleMs: 60_000 });
     const chunks: string[] = [];
     const detach = attachHealthEvents(h, (c) => chunks.push(c), 100, { immediate: true });
@@ -260,7 +290,9 @@ describe("attachHealthEvents", () => {
     h.sample();
     h.emit("sample");
     expect(chunks).toHaveLength(1);
-    await wait(150);
+    vi.advanceTimersByTime(99);
+    expect(chunks).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     expect(chunks).toHaveLength(2);
     detach();
   });

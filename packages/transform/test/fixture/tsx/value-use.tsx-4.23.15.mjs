@@ -1,0 +1,3 @@
+var __defProp=Object.defineProperty;var __name=(target,value)=>__defProp(target,"name",{value,configurable:true});function asValue(){return 2}__name(asValue,"asValue");const handlers={asValue};function plain(){return 3}__name(plain,"plain");export{asValue,handlers,plain};
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJtYXBwaW5ncyI6ImtIQUFPLFNBQVMsU0FBa0IsQ0FDaEMsTUFBTyxFQUNULENBRmdCLDBCQUlULE1BQU0sU0FBVyxDQUFFLE9BQVEsRUFFM0IsU0FBUyxPQUFnQixDQUM5QixNQUFPLEVBQ1QsQ0FGZ0IiLCJuYW1lcyI6W10sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbInZhbHVlLXVzZS50cyJdLCJzb3VyY2VzQ29udGVudCI6W251bGxdfQ==

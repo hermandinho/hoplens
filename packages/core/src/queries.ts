@@ -167,6 +167,12 @@ function kindOf(s: SpanRecord): QueryKind | undefined {
 interface Owner {
   fn?: string;
   location?: SourceLocation;
+  /** Caller key for spans with no location of their own, built once per owner per trace. */
+  key?: string;
+}
+
+function callerKeyOf(fn: string | undefined, loc: SourceLocation | undefined): string {
+  return `${fn ?? ""}|${loc ? `${loc.file}:${loc.line}` : ""}`;
 }
 
 function ownerOf(s: SpanRecord, byId: Map<string, SpanRecord>): Owner {
@@ -259,7 +265,7 @@ export class QueryStatsStore {
       let owner = owners.get(pk);
       if (!owner) owners.set(pk, (owner = ownerOf(s, byId)));
       const loc = s.location ?? owner.location;
-      const callerKey = `${owner.fn ?? ""}|${loc ? `${loc.file}:${loc.line}` : ""}`;
+      const callerKey = s.location ? callerKeyOf(owner.fn, loc) : (owner.key ??= callerKeyOf(owner.fn, loc));
       const c = q.callers.get(callerKey);
       if (c) c.calls++;
       else if (q.callers.size < MAX_SIDE) {

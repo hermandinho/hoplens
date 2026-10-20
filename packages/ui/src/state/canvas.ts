@@ -34,6 +34,49 @@ export function setCanvasMode(m: CanvasMode): void {
   write(MODE_KEY, m);
 }
 
+/* ------------------------------------------------------- Path mode (request path) */
+
+/**
+ * The Journey pane's third mode: the request path trail (key x). Kept apart from the Flame / Tree
+ * choice, which stays remembered: Path is not, since it only says something on a path trace. A path
+ * trace opens in Path mode; leaving it for a normal trace goes back to Flame / Tree, unless Path was
+ * picked by hand.
+ */
+export type JourneyMode = CanvasMode | "path";
+
+export const pathMode = signal(false);
+let pathAuto = false;
+
+export function setJourneyMode(m: JourneyMode): void {
+  pathAuto = false;
+  if (m === "path") pathMode.value = true;
+  else {
+    pathMode.value = false;
+    setCanvasMode(m);
+  }
+}
+
+export function togglePathMode(): void {
+  pathAuto = false;
+  pathMode.value = !pathMode.value;
+}
+
+/** Path mode after opening a trace (pure): `auto` = it was switched on by opening a path trace. */
+export function modeOnOpen(
+  cur: { path: boolean; auto: boolean },
+  isPathTrace: boolean,
+): { path: boolean; auto: boolean } {
+  if (isPathTrace) return { path: true, auto: cur.auto || !cur.path };
+  return cur.auto ? { path: false, auto: false } : cur;
+}
+
+/** Call when the Journey pane shows another trace. */
+export function openedTrace(isPathTrace: boolean): void {
+  const next = modeOnOpen({ path: pathMode.peek(), auto: pathAuto }, isPathTrace);
+  pathAuto = next.auto;
+  if (pathMode.peek() !== next.path) pathMode.value = next.path;
+}
+
 export function toggleCritical(): void {
   showCritical.value = !showCritical.value;
   write(CRIT_KEY, showCritical.value ? "1" : "0");

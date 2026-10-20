@@ -269,6 +269,25 @@ function attachRequestBody(rt: Runtime, trace: TraceRecord, p: PreparedRun) {
   }
 }
 
+/** Headers a resend must not copy from the captured request (the client sets its own). */
+export const RESEND_DROP_HEADERS = [
+  "host",
+  "connection",
+  "content-length",
+  "accept-encoding",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+] as const;
+
+/** A captured request's headers as a resend sends them: unredacted when kept, minus RESEND_DROP_HEADERS. */
+export function resendHeaders(rt: Runtime, t: TraceRecord): Record<string, string> {
+  const headers = { ...(rt.store.internal(t)?.rawHeaders ?? t.request.headers) };
+  for (const h of RESEND_DROP_HEADERS) delete headers[h];
+  return headers;
+}
+
 /* ------------------------------------------------------------- the batch */
 
 export type RunExclusion = "cold" | "5xx" | "error" | "no-trace";
@@ -362,6 +381,27 @@ export async function runBatch(
   opts: BatchOptions = {},
 ): Promise<BatchResult> {
   const p = prepareRun(rt, input);
+  activeBatches++;
+  try {
+    return await batchLoop(rt, input, p, repeat, opts);
+  } finally {
+    activeBatches--;
+  }
+}
+
+/** Replay xN batches running right now (the request path refuses to capture during one). */
+let activeBatches = 0;
+export function batchesRunning(): number {
+  return activeBatches;
+}
+
+async function batchLoop(
+  rt: Runtime,
+  input: RunInput,
+  p: PreparedRun,
+  repeat: { n: number; capped: boolean; requested?: number },
+  opts: BatchOptions,
+): Promise<BatchResult> {
   const now = opts.now ?? Date.now;
   const totalMs = opts.totalMs ?? BATCH_TOTAL_MS;
   const batchId = `b_${randomUUID().slice(0, 8)}`;

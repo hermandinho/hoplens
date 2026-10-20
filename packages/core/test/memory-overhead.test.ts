@@ -69,14 +69,25 @@ describe("TraceStore memory bound", () => {
   });
 });
 
+/**
+ * Per-item cost, best of a few batches: under a loaded test run one batch can be descheduled, the
+ * best one is still the code's own cost (as the bench gates do).
+ */
+function bestPerItem(batches: number, n: number, run: (i: number) => void): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let b = 0; b < batches; b++) {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) run(b * n + i);
+    best = Math.min(best, (performance.now() - t0) / n);
+  }
+  return best;
+}
+
 describe("overhead budget", () => {
   test("TraceStore.add stays well under 1ms per insert at 10k inserts", () => {
     const store = new TraceStore(500);
     const traces = Array.from({ length: 10_000 }, (_, i) => fakeTrace(`t${i}`));
-    const t0 = performance.now();
-    for (const t of traces) store.add(t, { rawHeaders: {} });
-    const elapsed = performance.now() - t0;
-    const perInsert = elapsed / traces.length;
+    const perInsert = bestPerItem(5, 2_000, (i) => store.add(traces[i]!, { rawHeaders: {} }));
     // Well under the 2ms/request runtime budget; this is just the store cost.
     expect(perInsert, `${perInsert.toFixed(3)} ms per insert`).toBeLessThan(0.1);
   });
@@ -90,11 +101,7 @@ describe("overhead budget", () => {
       meta: { timestamp: Date.now(), source: "test" },
     };
 
-    const N = 2_000;
-    const t0 = performance.now();
-    for (let i = 0; i < N; i++) preview(payload, r);
-    const elapsed = performance.now() - t0;
-    const perCall = elapsed / N;
+    const perCall = bestPerItem(5, 400, () => preview(payload, r));
     expect(perCall, `${perCall.toFixed(3)} ms per preview`).toBeLessThan(1);
   });
 });

@@ -12,7 +12,6 @@ import {
   zoomTo,
 } from "../state/canvas";
 import {
-  COLD_GAP_LABEL,
   type ColdWait,
   type CriticalSegment,
   type FlameRect,
@@ -48,7 +47,7 @@ import { highlightNonce, highlightedSpanIds, selectHop, selectedHopId } from "..
 import { register } from "../state/keymap";
 import { isMobile } from "../state/mobile";
 import { BUCKET_LABELS, fmtMs } from "../state/stats";
-import { selectedTrace } from "../state/store";
+import { frameworkCopy, selectedTrace } from "../state/store";
 import { type SpanGroup, bucketOf, buildSpanTree, hidingGroups, selfTimes } from "../state/traceview";
 import { Minimap } from "./Minimap";
 
@@ -56,7 +55,8 @@ import { Minimap } from "./Minimap";
  * The single-request canvas, in two modes over one display tree (nested by parentId):
  *  - Tree: one indented, collapsible row per span with a time-proportional bar;
  *  - Flame: an icicle where width is duration and children sit in the rows below their parent.
- * Next.js plumbing (request/router/render/response/compile) folds into one "Next.js" band, five or
+ * Framework plumbing (request/router/render/response/compile) folds into one band ("Next.js",
+ * "Express": frameworkCopy.band), five or
  * more same-shape siblings fold into an "xN" group striped with the bucket its subtree spends most
  * time in, the critical path is outlined (toggle), idle gaps are hatched and warn/error logs show as
  * ticks. Above the canvas: span search (`/`, n/N), zoom (z, 0, [ ], Ctrl+wheel) and a minimap with
@@ -639,7 +639,8 @@ function foldNote(f: FoldSummary | undefined): string | undefined {
 function nodeTitle(n: ViewNode, ctx: DrawCtx): string {
   if (n.type === "band") {
     const k = n.band.spans.length;
-    return `Next.js: ${k} framework span${k === 1 ? "" : "s"} (request, routing, compile, render, response), ${fmtMs(n.band.wallMs)} wall.\nClick to ${n.open ? "fold them" : "show them"}.`;
+    const fw = frameworkCopy.value;
+    return `${fw.band}: ${k} framework span${k === 1 ? "" : "s"} (${fw.bandParts}), ${fmtMs(n.band.wallMs)} wall.\nClick to ${n.open ? "fold them" : "show them"}.`;
   }
   if (n.type === "group") {
     const g = n.group;
@@ -676,7 +677,7 @@ function ColdNote({
   // Zoomed past most of the wait (the cold default view): say what is hidden.
   if (zoomed && range[0] > cold.start + wait / 2) {
     return (
-      <span class="tc-cold-note" title={`Cold request: ${fmtMs(gapMs)} of the wait is ${COLD_GAP_LABEL}`}>
+      <span class="tc-cold-note" title={`Cold request: ${fmtMs(gapMs)} of the wait is ${frameworkCopy.value.coldGap}`}>
         <span class="tc-cold-swatch" aria-hidden="true" />
         From the handler: {fmtMs(wait)} wait before it hidden
         <button type="button" class="chip tc-btn" onClick={onShowAll}>
@@ -687,7 +688,7 @@ function ColdNote({
   }
   if (!cold.gap || zoomed) return null;
   return (
-    <span class="tc-cold-note" title={COLD_GAP_LABEL}>
+    <span class="tc-cold-note" title={frameworkCopy.value.coldGap}>
       <span class="tc-cold-swatch" aria-hidden="true" />
       {fmtMs(gapMs)} untraced wait {folded ? "drawn compressed" : "at true scale"}
       <button type="button" class="chip tc-btn" onClick={onToggleFold} aria-pressed={!folded}>
@@ -720,7 +721,7 @@ function Axis({ scale, ttfb }: { scale: TimeScale; ttfb: number | undefined }) {
         <span
           class="tc-axis-break"
           style={{ left: `${scale.x(fold.a) * 100}%`, width: `${fold.share * 100}%` }}
-          title={`${fmtMs(fold.b - fold.a)} drawn compressed: ${COLD_GAP_LABEL}`}
+          title={`${fmtMs(fold.b - fold.a)} drawn compressed: ${frameworkCopy.value.coldGap}`}
         />
       )}
       {showTtfb && ttfb !== undefined && (
@@ -756,11 +757,11 @@ function GapHatches({
               key={`${a}-${b}`}
               class="tc-gap tc-cold"
               style={boxStyle(box)}
-              title={`${fmtMs(b - a)} before the handler: ${COLD_GAP_LABEL}. Nothing traced ran here.`}
+              title={`${fmtMs(b - a)} before the handler: ${frameworkCopy.value.coldGap}. Nothing traced ran here.`}
             >
               <span class="tc-cold-label">
                 <b>{fmtMs(b - a)} untraced</b>
-                {labelled && <span> {COLD_GAP_LABEL}</span>}
+                {labelled && <span> {frameworkCopy.value.coldGap}</span>}
               </span>
             </span>
           );
@@ -882,7 +883,7 @@ function TreeRow({
           <span class={`jw-kind-pill jw-kind-${kind}`}>{kindLabel(kind)}</span>
           {n.type === "group" && <span class="wf-group-count mono">×{n.group.members.length}</span>}
           <span class={`jw-span-name ${note ? "jw-name-keep" : ""}`}>
-            {span ? span.name : n.type === "group" ? n.group.label : "Next.js"}
+            {span ? span.name : n.type === "group" ? n.group.label : frameworkCopy.value.band}
           </span>
           {note && <span class={`tc-fold-note mono fold-${fold?.bucket}`}>{note}</span>}
           {n.type === "band" && (
@@ -998,7 +999,7 @@ function FlameBox({ rect, ctx }: { rect: FlameRect; ctx: DrawCtx }) {
     ? span.name
     : n.type === "group"
       ? `×${n.group.members.length} ${n.group.label}${note ? ` ${note}` : ""}`
-      : "Next.js";
+      : frameworkCopy.value.band;
   const cls = [
     "fl-rect",
     `b-${nodeFill(n, ctx.folds)}`,
@@ -1072,6 +1073,8 @@ const KIND_LABELS: Record<HopKind | "next", string> = {
   next: "NEXT",
 };
 
+/** The band's chip follows the framework ("NEXT" for Next.js). */
 function kindLabel(k: HopKind | "next"): string {
+  if (k === "next") return frameworkCopy.value.bandChip;
   return KIND_LABELS[k] ?? "·";
 }

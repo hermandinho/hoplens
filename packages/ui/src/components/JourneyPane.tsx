@@ -1,24 +1,70 @@
 import { useEffect } from "preact/hooks";
-import { type CanvasMode, canvasMode, setCanvasMode, showCritical, toggleCritical } from "../state/canvas";
+import {
+  type JourneyMode,
+  canvasMode,
+  openedTrace,
+  pathMode,
+  setCanvasMode,
+  setJourneyMode,
+  showCritical,
+  toggleCritical,
+  togglePathMode,
+} from "../state/canvas";
 import { register } from "../state/keymap";
+import { isMobile } from "../state/mobile";
+import { pathFocus, pathPayloads, stampOf } from "../state/path";
 import { selectedTrace, tracesState } from "../state/store";
 import { JourneyWaterfall } from "./JourneyWaterfall";
+import { PathPane } from "./PathPane";
 
-/** The span canvas (Flame or Tree) for the selected request. */
+const MODE_TITLE: Record<JourneyMode, string> = {
+  flame: "Flame: nested boxes, width = duration (t toggles)",
+  tree: "Tree: one indented row per span, collapsible (t toggles)",
+  path: "Path: which side of each decision this request took (x toggles)",
+};
+
+/** The span canvas (Flame or Tree), or the request path (Path), for the selected request. */
 export function JourneyPane() {
   const trace = selectedTrace.value;
   const spans = trace?.spans.length ?? 0;
   // The list summary can be ahead of the loaded record while a late-span reload is in flight.
   const summary = trace ? tracesState.value.find((t) => t.id === trace.id) : undefined;
   const dropped = Math.max(trace?.facts?.droppedSpans ?? 0, summary?.facts?.droppedSpans ?? 0);
-  const mode = canvasMode.value;
-  useEffect(
-    () =>
-      register("trace", "t", "Toggle tree / flame", () =>
-        setCanvasMode(canvasMode.value === "flame" ? "tree" : "flame"),
+  const stamp = stampOf(trace, summary, trace ? pathPayloads.value.get(trace.id) : undefined);
+  const phone = isMobile.value;
+  const spanMode = phone ? "tree" : canvasMode.value;
+  const mode: JourneyMode = pathMode.value ? "path" : spanMode;
+  const isPathTrace = !!stamp;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: per opened trace
+  useEffect(() => {
+    if (trace) openedTrace(isPathTrace);
+  }, [trace?.id, isPathTrace]);
+  useEffect(() => {
+    const offs = [
+      register("trace", "t", "Toggle tree / flame", () => {
+        pathMode.value = false;
+        setCanvasMode(canvasMode.value === "flame" ? "tree" : "flame");
+      }),
+      register(
+        "trace",
+        "x",
+        "Toggle the Path view: which side of each decision this request took",
+        () => {
+          togglePathMode();
+          // On a path trace, move focus to its trail so j / k reach the lanes (not the request list).
+          const t = selectedTrace.peek();
+          if (!pathMode.peek() || !t) return;
+          const sum = tracesState.peek().find((x) => x.id === t.id);
+          if (stampOf(t, sum, pathPayloads.peek().get(t.id))) pathFocus.value = t.id;
+        },
+        { hint: "path" },
       ),
-    [],
-  );
+    ];
+    return () => {
+      for (const off of offs) off();
+    };
+  }, []);
+  const modes: JourneyMode[] = phone ? ["tree", "path"] : ["flame", "tree", "path"];
   return (
     <section class="journey-pane" aria-label="Journey">
       <header class="journey-pane-head">
@@ -45,32 +91,36 @@ export function JourneyPane() {
         )}
         {trace && (
           <div class="tc-controls">
-            <button
-              type="button"
-              class={`chip tc-crit-toggle ${showCritical.value ? "chip-active" : ""}`}
-              aria-pressed={showCritical.value}
-              onClick={toggleCritical}
-              title="Outline the critical path: the chain of spans the end of the request waited on"
-            >
-              <span class="tc-crit-swatch" aria-hidden="true" />
-              Critical path
-            </button>
-            <fieldset class="tc-mode">
+            {mode !== "path" && (
+              <button
+                type="button"
+                class={`chip tc-crit-toggle ${showCritical.value ? "chip-active" : ""}`}
+                aria-pressed={showCritical.value}
+                onClick={toggleCritical}
+                title="Outline the critical path: the chain of spans the end of the request waited on"
+              >
+                <span class="tc-crit-swatch" aria-hidden="true" />
+                Critical path
+              </button>
+            )}
+            <fieldset class="tc-mode tc-mode-path">
               <legend class="sr-only">Canvas mode</legend>
-              {(["flame", "tree"] as CanvasMode[]).map((m) => (
+              {modes.map((m) => (
                 <button
                   key={m}
                   type="button"
                   class={`chip tc-mode-btn ${mode === m ? "chip-active" : ""}`}
                   aria-pressed={mode === m}
-                  onClick={() => setCanvasMode(m)}
-                  title={
-                    m === "flame"
-                      ? "Flame: nested boxes, width = duration (t toggles)"
-                      : "Tree: one indented row per span, collapsible (t toggles)"
-                  }
+                  onClick={() => setJourneyMode(m)}
+                  title={MODE_TITLE[m]}
                 >
-                  {m === "flame" ? "Flame" : "Tree"}
+                  {m === "flame" ? "Flame" : m === "tree" ? "Tree" : "Path"}
+                  {m === "path" && isPathTrace && (
+                    <>
+                      <span class="tc-path-dot" aria-hidden="true" />
+                      <span class="sr-only"> (path trace)</span>
+                    </>
+                  )}
                 </button>
               ))}
             </fieldset>
@@ -78,7 +128,7 @@ export function JourneyPane() {
         )}
       </header>
       <div class="journey-pane-body">
-        <JourneyWaterfall />
+        {trace && mode === "path" ? <PathPane trace={trace} stamp={stamp} /> : <JourneyWaterfall />}
       </div>
     </section>
   );

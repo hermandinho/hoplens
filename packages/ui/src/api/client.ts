@@ -3,6 +3,8 @@ import type {
   HealthSnapshot,
   HealthTick,
   Meta,
+  PathMeta,
+  PathPayload,
   QueriesResponse,
   RunInput,
   RunResult,
@@ -15,6 +17,13 @@ import type {
 // Hoplens serves the UI at /__hoplens/ and the API under /__hoplens/api. In Vite dev the proxy
 // in vite.config.ts rewrites both to the standalone runtime port on 127.0.0.1:4983.
 const API = "/__hoplens/api";
+
+/**
+ * Headers for every POST / DELETE: core refuses a state-changing call from a page unless it says
+ * content-type: application/json (never a "simple" request, so a cross-origin page can't send it
+ * without a CORS preflight). Same-origin calls are not preflighted.
+ */
+export const WRITE_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
 
 async function get<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -73,7 +82,26 @@ export const api = {
     ),
   source: (file: string, line: number, context = 10) =>
     get<SourceResponse>(`/source?file=${encodeURIComponent(file)}&line=${line}&context=${context}`),
-  clearTraces: () => fetch(`${API}/traces`, { method: "DELETE" }).then((r) => r.ok),
+  clearTraces: () => fetch(`${API}/traces`, { method: "DELETE", headers: WRITE_HEADERS }).then((r) => r.ok),
+  /** Request path: replay a GET/HEAD trace once, alone, and map its decisions (a NEW trace). */
+  tracePath: async (id: string): Promise<{ traceId: string; path: PathPayload }> => {
+    const path = `/traces/${encodeURIComponent(id)}/path`;
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: WRITE_HEADERS });
+    if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
+    return (await res.json()) as { traceId: string; path: PathPayload };
+  },
+  /**
+   * The request path's sticky switch (Express): writes / removes the flag the next start reads.
+   * 409 when HOPLENS_PATH decides or the adapter has none; answers the new meta.path (with `pending`).
+   */
+  pathSwitch: async (on: boolean): Promise<{ path: PathMeta }> => {
+    const path = `/path/${on ? "enable" : "disable"}`;
+    const res = await fetch(`${API}${path}`, { method: "POST", headers: WRITE_HEADERS });
+    if (!res.ok) throw new HoplensApiError(res.status, await res.text().catch(() => res.statusText), path);
+    return (await res.json()) as { path: PathMeta };
+  },
+  /** The stored path of a path trace (the last 20 are kept). */
+  path: (id: string) => get<PathPayload>(`/traces/${encodeURIComponent(id)}/path`),
   run: async (input: RunInput): Promise<RunResult> => {
     const res = await fetch(`${API}/run`, {
       method: "POST",
@@ -118,12 +146,15 @@ export interface LiveConnection {
 
 /**
  * Open the live-event SSE stream and invoke `onEvent` for each parsed event.
- * Reconnects with a capped backoff (1s → 30s) on disconnect. The returned
- * handle closes both the EventSource and any pending reconnect timer.
+ * Reconnects with a capped backoff (1s → 30s) on disconnect; `maxDelay`, read at each retry, lowers
+ * the cap (the store uses it while a request path toggle waits for the restart, so the tab notices
+ * the restart within seconds). The returned handle closes both the EventSource and any pending
+ * reconnect timer.
  */
 export function openLive(
   onEventMain: (ev: LiveEvent) => void,
   onStatus?: (status: "live" | "reconnecting") => void,
+  opts: { maxDelay?: () => number } = {},
 ): LiveConnection {
   const onEvent = (ev: LiveEvent) => {
     onEventMain(ev);
@@ -182,7 +213,7 @@ export function openLive(
       source?.close();
       source = null;
       onStatus?.("reconnecting");
-      timer = setTimeout(connect, delay);
+      timer = setTimeout(connect, Math.min(delay, opts.maxDelay?.() ?? 30_000));
       delay = Math.min(delay * 2, 30_000);
     };
   };

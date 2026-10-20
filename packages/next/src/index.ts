@@ -51,8 +51,7 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     // for serverExternalPackages. Resolve the UI HTML path here (Node, pre-bundle) and pass it
     // through to the runtime via env.
     try {
-      const uiPkg = createRequire(path.join(resolved.root, "package.json")).resolve("@hoplens/ui/package.json");
-      const uiRoot = path.dirname(uiPkg);
+      const uiRoot = path.dirname(resolveUiPackage(resolved.root));
       const uiFile = [path.join(uiRoot, "dist", "index.html"), path.join(uiRoot, "index.html")].find((f) =>
         fs.existsSync(f),
       );
@@ -97,7 +96,8 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
     };
 
     const autoTrace = options.autoTrace ?? true;
-    if (autoTrace !== false) {
+    const loader = autoTrace === false ? null : resolveOwn(resolved.root, LOADER);
+    if (autoTrace !== false && loader) {
       const loaderOptions = {
         root: resolved.root,
         include: typeof autoTrace === "object" ? (autoTrace.include ?? []) : [],
@@ -117,7 +117,7 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
                 { content: /export\s+(default\s+)?(async\s+)?(function|const|let)\b/ },
               ],
             },
-            loaders: [{ loader: LOADER, options: loaderOptions }],
+            loaders: [{ loader, options: loaderOptions }],
           },
         };
       }
@@ -135,7 +135,7 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
             enforce: "pre",
             use: [
               {
-                loader: createRequire(path.join(resolved.root, "package.json")).resolve(LOADER),
+                loader,
                 options: loaderOptions,
               },
             ],
@@ -147,6 +147,37 @@ export function withHoplens(config: ConfigInput = {}, options: HoplensOptions = 
 
     return out;
   };
+}
+
+/**
+ * Resolve one of this adapter's own dependencies to an absolute path, from this file's location
+ * first. pnpm does not hoist transitive dependencies, so `@hoplens/transform` (a dependency of
+ * `@hoplens/next`, not of the app) is not resolvable from the project root there; a bare specifier
+ * in the Turbopack rule surfaces as "Could not parse module '[project]/instrumentation.ts', file
+ * not found". The project root stays a fallback (a hoisted or linked install). Both bundlers take
+ * an absolute loader path. This runs in Node at config-eval time, never inside a bundle. `null`
+ * when neither location has it (function hops are then off instead of breaking `next dev`).
+ */
+function resolveOwn(root: string, spec: string): string | null {
+  for (const from of [__filename, path.join(root, "package.json")]) {
+    try {
+      return createRequire(from).resolve(spec);
+    } catch {
+      /* next location */
+    }
+  }
+  return null;
+}
+
+/** `@hoplens/ui` is a dependency of `@hoplens/core`, so look it up from core's own location. */
+function resolveUiPackage(root: string): string {
+  try {
+    const core = resolveOwn(root, "@hoplens/core/package.json");
+    if (core) return createRequire(core).resolve("@hoplens/ui/package.json");
+  } catch {
+    /* fall back to the project root */
+  }
+  return createRequire(path.join(root, "package.json")).resolve("@hoplens/ui/package.json");
 }
 
 function nextMajor(root: string): number {

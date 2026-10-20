@@ -45,9 +45,13 @@ The script is named `e2e` (not `test`) on purpose, so repo-wide `pnpm -r test` r
 quick — this suite needs Chromium installed and a free port 3100, which the default unit
 test sweep shouldn't require.
 
-The suite launches `next dev` via Playwright's `webServer` config (`reuseExistingServer`
-locally, fresh in CI). If a stale `next dev` is already bound to port 3100, stop it before
-re-running — Next 16 refuses to spin up a second dev server on the same cwd.
+The suite launches the Next example's `next dev` on port 3100 (UI port 14983) via
+Playwright's `webServer` config (`reuseExistingServer` locally, fresh in CI). Port 3100 is
+also the Express example's default `PORT`, and Express serves `/__hoplens/api/meta` too, so
+locally Playwright would reuse a running Express example as if it were the Next app: stop it,
+or start it on another port (`PORT=3101 pnpm --filter example-express-app dev`), before
+running the suite. Likewise stop a stale `next dev` on 3100 — Next 16 refuses to spin up a
+second dev server on the same cwd.
 
 ## verify:build — dev-only guarantee
 
@@ -60,8 +64,11 @@ was actually bundled.
 
 ## verify:install — end-to-end install smoke
 
-`verify:install` simulates `npm i -D hoplens` from a greenfield project. It packs all
-seven `@hoplens/*` workspaces into tarballs, writes a scratch Next 16 project in a temp
-dir with those tarballs as `file:` deps, runs `npm install`, then `npx hoplens init`,
+`verify:install` simulates `npm i -D hoplens` from a greenfield project. It packs the
+`hoplens` meta package and every workspace package it depends on, transitively (cli, next,
+express, core, schema, transform, ui; the list is read from the `workspace:` dependencies,
+not hard-coded), into tarballs, writes a scratch Next 16 project in a temp
+dir with the meta tarball as its one `file:` dep (npm `overrides` point the
+`@hoplens/*` dependencies at the other tarballs), runs `npm install`, then `npx hoplens init`,
 then `npx hoplens doctor` — expecting doctor to exit 0. Temp dirs are cleaned up on
 success; pass `--keep` to leave them for inspection.

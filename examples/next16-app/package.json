@@ -10,8 +10,6 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
-    "@hoplens/next": "workspace:*",
-    "hoplens": "workspace:*",
     "next": "16.4.0",
     "pg": "8.23.1",
     "react": "19.3.0",
@@ -23,6 +21,7 @@
     "@types/pg": "8.15.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "hoplens": "workspace:*",
     "typescript": "~5.7.2"
   }
 }

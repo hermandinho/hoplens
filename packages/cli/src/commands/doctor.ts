@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { loadTypeScript } from "@hoplens/transform/ts";
+import { doctorExpress, doctorPath } from "../express/commands";
+import { detectFramework, frameworkFlag } from "../framework";
+import { nextFlagPath } from "../next/pathflag";
+import { CONFIG_FILES, LITERAL_NODE_IMPORT, configState } from "../next/wiring";
 import { c, fail, ok, skip, warn } from "../style";
 import { readJson, safeResolve } from "../util";
 
-const CONFIG_FILES = ["next.config.ts", "next.config.mts", "next.config.mjs", "next.config.js", "next.config.cjs"];
 const INSTRUMENTATION_FILES = [
   "instrumentation.ts",
   "instrumentation.js",
@@ -27,7 +30,7 @@ const MIN_NODE_MINOR = 9;
  * npx hoplens doctor
  * ```
  */
-export async function doctor(_args: string[]) {
+export async function doctor(args: string[]) {
   const root = process.cwd();
   console.log(`\n${c.magenta("◆ Hoplens")} doctor\n`);
 
@@ -63,6 +66,26 @@ export async function doctor(_args: string[]) {
     ? good("TypeScript available (Zod pre-fill and function tracing on)")
     : skip("TypeScript not found — Zod pre-fill and tracing fall back to runtime-only");
 
+  // A project with neither next nor express gets no framework checks: init can't wire it either.
+  const flag = frameworkFlag(args);
+  const fw = typeof flag === "object" ? flag : detectFramework(pkg, flag);
+  if ("error" in fw) {
+    nope(
+      "neither" in fw && fw.neither
+        ? `${fw.error} Hoplens supports Next.js (next) and Express (express); install one, or pass --framework next|express to check one anyway.`
+        : fw.error,
+      true,
+    );
+    printSummary(state);
+    return;
+  }
+  if ("framework" in fw && fw.framework === "express") {
+    doctorExpress(root, pkg, { good, nope });
+    integrations(pkg);
+    printSummary(state);
+    return;
+  }
+
   // ── Install ─────────────────────────────────────────────────────────────
   console.log(`\n${c.dim("  Install")}`);
   const nextPkg = readJson(safeResolve("next/package.json", root));
@@ -89,10 +112,15 @@ export async function doctor(_args: string[]) {
   const cfg = CONFIG_FILES.find((f) => fs.existsSync(path.join(root, f)));
   if (!cfg) nope("No next.config.* in this directory — run npx hoplens init", true);
   else {
-    const src = fs.readFileSync(path.join(root, cfg), "utf8");
-    src.includes("withHoplens")
-      ? good(`${cfg} uses withHoplens`)
-      : nope(`${cfg} doesn't wrap config in withHoplens — run npx hoplens init`, true);
+    const state = configState(fs.readFileSync(path.join(root, cfg), "utf8"));
+    if (state === "none") nope(`${cfg} doesn't wrap config in withHoplens — run npx hoplens init`, true);
+    else if (state === "guarded") good(`${cfg} uses withHoplens, loaded by next dev only`);
+    else good(`${cfg} uses withHoplens`);
+    if (state === "unguarded")
+      nope(
+        `${cfg} imports hoplens/next at the top: next build/start without dev dependencies will fail; run npx hoplens init to upgrade`,
+        false,
+      );
   }
 
   const ins = INSTRUMENTATION_FILES.find((f) => fs.existsSync(path.join(root, f)));
@@ -105,6 +133,12 @@ export async function doctor(_args: string[]) {
       nope(`${ins} doesn't load hoplens/node — run npx hoplens init`, true);
     } else {
       good(`${ins} loads the Hoplens runtime`);
+      if (ins.endsWith(".ts") && LITERAL_NODE_IMPORT.test(src)) {
+        nope(
+          `${ins} imports hoplens/node as a plain string: next build's type check fails without dev dependencies; run npx hoplens init to upgrade`,
+          false,
+        );
+      }
       if (!src.includes('NODE_ENV === "development"') && !src.includes("NODE_ENV==='development'")) {
         nope('Hoplens isn\'t gated by NODE_ENV === "development" — it will attach in production too', false);
       }
@@ -118,24 +152,35 @@ export async function doctor(_args: string[]) {
     }
   }
 
+  // ── Request path ────────────────────────────────────────────────────────
+  const devCmd = typeof pkg.scripts?.dev === "string" ? pkg.scripts.dev : null;
+  doctorPath(devCmd ? { key: "dev", cmd: devCmd } : null, process.env, { nope }, nextFlagPath(root));
+
+  integrations(pkg);
+
+  printSummary(state);
+}
+
+/** The Integrations section, shared by the Next and Express checks. */
+function integrations(pkg: any) {
   // ── Integrations ────────────────────────────────────────────────────────
   console.log(`\n${c.dim("  Integrations")}`);
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const otelPkgs = Object.keys(deps).filter((d) => d.startsWith("@opentelemetry/"));
   otelPkgs.length
-    ? good(
+    ? ok(
         `OpenTelemetry detected (${otelPkgs.length} package${otelPkgs.length === 1 ? "" : "s"}) — Hoplens will attach as a reader`,
       )
     : skip("OpenTelemetry not detected — Hoplens runs standalone");
 
   deps.zod
-    ? good(`Zod ${deps.zod} — RequestBuilder will pre-fill from your schemas`)
+    ? ok(`Zod ${deps.zod} — RequestBuilder will pre-fill from your schemas`)
     : skip("Zod not detected — RequestBuilder won't pre-fill schema examples");
 
   const portEnv = process.env.HOPLENS_PORT;
-  skip(portEnv ? `HOPLENS_PORT=${portEnv}` : "HOPLENS_PORT not set — Hoplens picks a free port automatically");
-
-  printSummary(state);
+  skip(
+    portEnv ? `HOPLENS_PORT=${portEnv}` : "HOPLENS_PORT not set — the UI uses 4983, or the first free port up to 4993",
+  );
 }
 
 function printSummary(state: { criticals: number; warnings: number }) {

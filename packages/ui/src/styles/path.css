@@ -1,0 +1,893 @@
+/*
+ * Path mode (PathPane.tsx, plan P3 mockup B): Trace path action and its phases, the path-trace
+ * badges, verdict line and the decision trail. Taken chips are solid (--path-taken), not-reached ones
+ * dashed and dim (--path-untaken), UNKNOWN ones hatched (--path-unknown), never dashed.
+ */
+
+.path-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 16px;
+  min-width: 0;
+}
+
+.path-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 68ch;
+}
+
+.path-empty p {
+  margin: 0;
+}
+
+.path-lede {
+  color: var(--muted);
+}
+
+.path-off-title {
+  color: var(--fg);
+}
+
+.path-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.sbtn.path-go:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.path-switch-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-sm);
+}
+
+output.path-pending {
+  display: block;
+}
+
+.path-badge-pending {
+  color: var(--fg);
+  border-style: dashed;
+}
+
+.path-switch-error {
+  color: var(--err, var(--fg));
+}
+
+.path-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.path-cmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.path-cmd code {
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+/* quiet... replaying... settling... mapping */
+.path-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--fs-sm) var(--font-mono);
+  color: var(--dim);
+}
+
+.path-phases .done {
+  color: var(--muted);
+}
+
+.path-phases .now {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.path-error {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-bg);
+  border-radius: 0 6px 6px 0;
+  font-size: var(--fs-sm);
+}
+
+.path-inflight {
+  margin: 2px 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.path-error-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------- path trace */
+
+.path-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-size: var(--fs-label);
+}
+
+.path-badge {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.path-q-exact {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.path-q-partial {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.path-q-contaminated {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.path-verdict {
+  margin: 0;
+  padding: 2px 0 2px 10px;
+  border: 0;
+  border-left: 3px solid var(--line-3);
+  background: none;
+  color: var(--fg);
+  font: 600 var(--fs-title) / 1.4 var(--font-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+button.path-verdict:hover,
+button.path-verdict:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
+.path-v-exit {
+  border-left-color: var(--path-taken);
+}
+
+.path-v-threw {
+  border-left-color: var(--err);
+}
+
+.path-v-unknown {
+  border-left-color: var(--path-unknown);
+}
+
+.path-sub {
+  margin-top: -6px;
+  font-size: var(--fs-sm);
+}
+
+.path-warnings {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-sm);
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------------ trail */
+
+.path-trail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.path-lane {
+  padding: 6px 0 6px calc(var(--depth, 0) * 18px);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.path-lane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
+.path-lane-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border-radius: 3px;
+}
+
+.path-lane-name:hover {
+  text-decoration: underline;
+}
+
+.path-lane-file {
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.path-lane-notes {
+  margin: 4px 0 2px;
+  padding-left: 18px;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.path-lane-notes .pt-chip {
+  cursor: default;
+}
+
+.path-lane-calls {
+  font-size: var(--fs-label);
+}
+
+.path-blend,
+.path-threw {
+  font: 500 var(--fs-label) var(--font-mono);
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+}
+
+.path-threw {
+  color: var(--err);
+  border-color: var(--err);
+}
+
+.pt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 4px 0 0 14px;
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+
+.pt-chip {
+  position: relative;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 5px;
+  font: var(--fs-sm) / 1.5 var(--font-mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.pt-chip-taken {
+  border: 1px solid var(--path-taken);
+  background: var(--path-taken-bg);
+  color: var(--path-taken);
+}
+
+.pt-chip-exit {
+  font-weight: 600;
+}
+
+/* both sides ran: outlined, no fill */
+.pt-chip-split {
+  border: 1px solid var(--path-taken);
+  background: none;
+  color: var(--path-taken);
+}
+
+.pt-chip-not {
+  border: 1px dashed var(--line-3);
+  background: none;
+  color: var(--path-untaken);
+}
+
+.pt-chip-unknown {
+  border: 1px solid var(--path-unknown);
+  color: var(--path-unknown);
+  background: repeating-linear-gradient(135deg, var(--path-unknown-bg) 0 4px, transparent 4px 8px);
+}
+
+.pt-chip-why {
+  color: var(--muted);
+}
+
+/* The UNKNOWN reason on keyboard focus too (title only shows on hover). */
+.pt-chip-unknown:focus-visible::after {
+  content: attr(data-why);
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 3;
+  width: max-content;
+  max-width: min(40ch, 80vw);
+  padding: 4px 8px;
+  border: 1px solid var(--line-3);
+  border-radius: 6px;
+  background: var(--raise);
+  color: var(--fg);
+  font: var(--fs-label) / 1.4 var(--font-ui);
+  white-space: normal;
+}
+
+.path-more {
+  padding: 1px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-label);
+}
+
+.path-more:hover,
+.path-more:focus-visible {
+  color: var(--fg);
+}
+
+/* ------------------------------------------------- function panel (P4) */
+
+/* Trail and function panel: side by side at >= 1100px, else the panel takes the trail's place. */
+.path-split {
+  display: grid;
+  gap: 10px 18px;
+  min-width: 0;
+}
+
+.path-split-trail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.path-split.has-panel > .path-split-trail {
+  display: none;
+}
+
+@media (min-width: 1100px) {
+  .path-split.has-panel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    align-items: start;
+  }
+
+  .path-split.has-panel > .path-split-trail {
+    display: flex;
+  }
+
+  .path-fn {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.path-fn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.path-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.path-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 1;
+  gap: 2px 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-label);
+  min-width: 0;
+}
+
+.path-crumbs li {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.path-crumbs li + li::before {
+  content: ">";
+  margin: 0 6px;
+  color: var(--dim);
+}
+
+.path-fn-close {
+  flex: none;
+}
+
+.path-fn-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: var(--fs-label);
+}
+
+.path-fn-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.path-fn-head .path-fn-view {
+  margin-left: auto;
+}
+
+.path-fn-unknown {
+  color: var(--path-unknown);
+}
+
+.path-evidence {
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+}
+
+/* flowchart: scrolls sideways inside the panel only */
+.path-flow {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.path-fold-all {
+  position: sticky;
+  left: 0;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.path-flow-cap {
+  position: sticky;
+  left: 0;
+  min-height: 1.4em;
+  margin: 4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.pf {
+  display: block;
+  font: 11px var(--font-mono);
+}
+
+.pf text {
+  fill: var(--fg);
+}
+
+.pf-e polyline {
+  fill: none;
+  stroke-linejoin: round;
+}
+
+.pf-e.pf-taken polyline {
+  stroke: var(--path-taken);
+  stroke-width: 2.5;
+}
+
+.pf-e.pf-not polyline {
+  stroke: var(--path-untaken);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.pf-e.pf-unknown polyline {
+  stroke: var(--path-unknown);
+  stroke-width: 1.5;
+  stroke-dasharray: 1 3;
+}
+
+.pf-el {
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3;
+}
+
+.pf-taken > .pf-el {
+  fill: var(--path-taken);
+}
+
+.pf-not > .pf-el,
+.pf-not .pf-t,
+.pf-not .pf-c {
+  fill: var(--path-untaken);
+}
+
+.pf-unknown > .pf-el,
+.pf-unknown .pf-c {
+  fill: var(--path-unknown);
+}
+
+.pf-s {
+  fill: var(--panel-2);
+  stroke: var(--line-3);
+}
+
+.pf-taken .pf-s {
+  stroke: var(--path-taken);
+  stroke-width: 1.5;
+}
+
+.pf-taken .pf-c {
+  fill: var(--path-taken);
+}
+
+.pf-not .pf-s {
+  fill: none;
+  stroke: var(--path-untaken);
+  stroke-dasharray: 3 3;
+}
+
+.pf-unknown .pf-s {
+  fill: url(#pf-hatch);
+  stroke: var(--path-unknown);
+}
+
+.pf-hatch-line {
+  stroke: var(--path-unknown-bg);
+  stroke-width: 4;
+}
+
+.pf-k-entry .pf-t,
+.pf-exit .pf-t {
+  font-weight: 600;
+}
+
+.pf-exit .pf-s {
+  stroke-width: 3;
+}
+
+.pf-frame rect {
+  fill: none;
+  stroke: var(--line-3);
+  stroke-dasharray: 4 3;
+}
+
+.pf-frame text {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.pf-n {
+  outline: none;
+}
+
+.pf-act {
+  cursor: pointer;
+}
+
+.pf-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0;
+}
+
+.pf-n:focus-visible .pf-ring,
+.pf-n:hover .pf-ring {
+  opacity: 1;
+}
+
+.pf-n:hover .pf-ring {
+  stroke: var(--line-3);
+}
+
+.pf-k-callee .pf-s {
+  fill: var(--path-taken-bg);
+}
+
+.pf-k-callee .pf-t {
+  /* Chips are sized at the 10px tag width (pathFlow.ts TAG_CH). */
+  font-size: 10px;
+  fill: var(--path-taken);
+  text-decoration: underline;
+}
+
+.pf-tag {
+  font-size: 10px;
+}
+
+.pf-tag rect {
+  fill: none;
+  stroke: var(--line-3);
+}
+
+.pf-tag.pf-taken rect {
+  stroke: var(--path-taken);
+  fill: var(--path-taken-bg);
+}
+
+.pf-tag.pf-split rect {
+  stroke: var(--path-taken);
+}
+
+.pf-tag.pf-not rect {
+  stroke-dasharray: 3 3;
+}
+
+.pf-tag.pf-unknown rect {
+  stroke: var(--path-unknown);
+  fill: url(#pf-hatch);
+}
+
+.pf-tag.pf-taken text,
+.pf-tag.pf-split text {
+  fill: var(--path-taken);
+}
+
+.pf-tag.pf-not text {
+  fill: var(--path-untaken);
+}
+
+.pf-tag.pf-unknown text {
+  fill: var(--path-unknown);
+}
+
+/* source with a count gutter */
+.path-src {
+  max-width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.path-src:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ps-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 10px;
+}
+
+.ps-g {
+  flex: none;
+  width: 4ch;
+  padding-right: 4px;
+  text-align: right;
+  border-right: 2px solid var(--line-2);
+  color: var(--muted);
+}
+
+/* The counts and line numbers stay put while a long line scrolls sideways. */
+.ps-g,
+.ps-n {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg);
+}
+
+.ps-g {
+  left: 0;
+}
+
+.ps-n {
+  left: calc(4ch + 8px);
+}
+
+.ps-hit .ps-g,
+.ps-hit .ps-n {
+  background: linear-gradient(var(--accent-bg), var(--accent-bg)), var(--bg);
+}
+
+.ps-br {
+  display: none;
+}
+
+.ps-taken .ps-g {
+  color: var(--path-taken);
+  border-right-color: var(--path-taken);
+}
+
+.ps-not .ps-g,
+.ps-not .ps-code,
+.ps-not .ps-n {
+  color: var(--path-untaken);
+}
+
+.ps-not .ps-g {
+  border-right-style: dashed;
+}
+
+.ps-unknown .ps-g {
+  color: var(--path-unknown);
+  border-right-color: var(--path-unknown);
+  background: repeating-linear-gradient(135deg, var(--path-unknown-bg) 0 4px, transparent 4px 8px), var(--bg);
+}
+
+.ps-n {
+  flex: none;
+  width: 4ch;
+  text-align: right;
+  color: var(--dim);
+}
+
+.ps-code {
+  white-space: pre;
+  color: var(--fg);
+}
+
+.ps-hit {
+  background: var(--accent-bg);
+}
+
+.ps-exit .ps-code {
+  font-weight: 600;
+}
+
+.ps-note {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: var(--fs-label);
+  border: 1px solid var(--line-3);
+  color: var(--muted);
+}
+
+.ps-note-taken,
+.ps-note-split {
+  border-color: var(--path-taken);
+  color: var(--path-taken);
+}
+
+.ps-note-taken {
+  background: var(--path-taken-bg);
+}
+
+.ps-note-not {
+  border-style: dashed;
+  color: var(--path-untaken);
+}
+
+.ps-note-unknown {
+  border-color: var(--path-unknown);
+  color: var(--path-unknown);
+}
+
+.ps-fold {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 0 10px 0 0;
+  border: 0;
+  background: none;
+  color: var(--path-untaken);
+  font: inherit;
+  text-align: left;
+}
+
+.ps-fold:hover,
+.ps-fold:focus-visible {
+  color: var(--fg);
+}
+
+.ps-fold .ps-g {
+  border-right-style: dashed;
+  color: var(--path-untaken);
+}
+
+/* Path chip of the mode switch: a dot when the open trace is a path trace. */
+.tc-path-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--path-taken);
+  vertical-align: middle;
+}
+
+/* Request list marker. */
+.path-mark {
+  font: 500 var(--fs-label) var(--font-mono);
+  color: var(--path-taken);
+  border: 1px solid var(--line-2);
+  padding: 0 5px;
+  border-radius: 4px;
+}
+
+@media (max-width: 760px) {
+  .journey-pane-head .tc-mode.tc-mode-path,
+  .path-fn-head .tc-mode.path-fn-view {
+    display: inline-flex;
+  }
+
+  /* Decision / loop notes on their own line under the code, where a phone can read them. */
+  .ps-row {
+    flex-wrap: wrap;
+  }
+
+  .ps-br {
+    display: block;
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .ps-br + .ps-note {
+    margin-left: calc(8ch + 16px);
+  }
+
+  .path-pane {
+    padding: 10px 10px 14px;
+  }
+
+  .path-lane {
+    padding-left: calc(var(--depth, 0) * 10px);
+  }
+
+  .pt-chips {
+    margin-left: 6px;
+  }
+}

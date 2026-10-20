@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { FindingRollup, FindingSummary, StatsResponse, TraceFacts, TraceSummary } from "../src/api/types";
-import { matchQuery, parseQuery, summaryTarget } from "../src/state/query";
+import { compileGlob, matchQuery, parseQuery, summaryTarget } from "../src/state/query";
 import { mergeFindingGroups, serverErrorTally, serverRouteStats } from "../src/state/serverStats";
 import {
   ERROR_QUERIES,
@@ -430,5 +430,19 @@ describe("NEXT is epoch-aware: a finding the last edit fixed is marked, not curr
       ],
     );
     expect(m.get("GET /a")).toBe(4);
+  });
+});
+
+/* A route row's filter (`route:/`) on the root route: only `/`, not every path. */
+
+describe("route: glob prefix match", () => {
+  test("a bare `/` matches the root only; longer patterns keep prefix semantics", () => {
+    const root = compileGlob("/");
+    expect(root.test("/")).toBe(true);
+    expect(root.test("/api/health")).toBe(false);
+    expect(compileGlob("/api").test("/api/x")).toBe(true);
+    expect(compileGlob("/api/").test("/api/x")).toBe(true);
+    expect(compileGlob("/api").test("/apix")).toBe(false);
+    expect(compileGlob("/*").test("/api/health")).toBe(true);
   });
 });

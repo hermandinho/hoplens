@@ -339,10 +339,15 @@ export class Persister {
     this.reset = true;
   }
 
-  /** Write queued rows now (sync: the timer and shutdown both call it; it is never on the request path). */
-  flush(): void {
-    if (!this.buffer.length && !this.reset) return;
+  /**
+   * Write queued rows now (sync: the timer and shutdown both call it; it is never on the request path).
+   * True when the rows reached the disk (or there were none). On a failure (a file briefly locked on
+   * Windows) the rows stay queued for the next flush and it returns false.
+   */
+  flush(): boolean {
+    if (!this.buffer.length && !this.reset) return true;
     const lines = this.buffer;
+    const reset = this.reset;
     this.buffer = [];
     try {
       fs.mkdirSync(this.dir, { recursive: true });
@@ -350,7 +355,7 @@ export class Persister {
         this.reset = false;
         fs.rmSync(this.rotated, { force: true });
         this.writeFresh(this.file, lines);
-        return;
+        return this.flushed();
       }
       if (this.size < 0) this.size = fileSize(this.file);
       const chunk = lines.join("");
@@ -359,13 +364,36 @@ export class Persister {
         fs.rmSync(this.rotated, { force: true });
         fs.renameSync(this.file, this.rotated);
         this.writeFresh(this.file, lines);
-        return;
+        return this.flushed();
       }
       fs.appendFileSync(this.file, chunk);
       this.size += bytes;
+      return this.flushed();
     } catch {
       this.size = -1; // re-stat next time
+      this.reset = this.reset || reset;
+      this.buffer = lines.concat(this.buffer);
+      if (this.buffer.length > MAX_BUFFER) this.buffer.splice(0, this.buffer.length - MAX_BUFFER);
+      return false;
     }
+  }
+
+  /** Called once after the next flush that reaches the disk (at once when nothing is queued). */
+  afterFlush(fn: () => void): void {
+    if (!this.buffer.length && !this.reset) fn();
+    else this.pending.push(fn);
+  }
+  private pending: Array<() => void> = [];
+
+  private flushed(): true {
+    for (const fn of this.pending.splice(0)) {
+      try {
+        fn();
+      } catch {
+        /* best effort */
+      }
+    }
+    return true;
   }
 
   /** Stop the timer and write what is left. Idempotent. */
@@ -412,7 +440,8 @@ function fileSize(f: string): number {
   }
 }
 
-/** `<root>/<distDir>/cache/hoplens`. */
-export function persistDir(root: string, distDir: string): string {
+/** `<root>/<distDir>/cache/hoplens`, or `stateDir` (resolved against root) when the adapter set one. */
+export function persistDir(root: string, distDir: string, stateDir?: string): string {
+  if (stateDir) return path.resolve(root, stateDir);
   return path.join(root, distDir || ".next", PERSIST_DIR);
 }

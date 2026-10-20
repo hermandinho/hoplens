@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Discovery, DiscoverySource, MethodInfo, ProxyInfo, RouteInfo, SchemaInfo } from "@hoplens/core";
-import { type Resolver, type Shape, describeShape, exampleOf, interpretSchema } from "@hoplens/schema";
+import type { Discovery, DiscoverySource, MethodInfo, ProxyInfo, RouteInfo } from "@hoplens/core";
+import { SchemaProject, fieldsOf, scriptKind } from "@hoplens/schema";
 import { loadTypeScript } from "@hoplens/transform/ts";
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
@@ -20,13 +20,14 @@ const SOURCE_EXT = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".mts", ".cts", ".cjs"
  */
 export class NextDiscoverySource implements DiscoverySource {
   private cache = new Map<string, { sig: string; route: RouteInfo & { __deps?: string[] } }>();
-  private compiler: { options: any; host: any } | null = null;
-  private sfCache = new Map<string, { mtimeMs: number; sf: any }>();
+  private readonly project: SchemaProject;
 
   constructor(
     private readonly root: string,
     private readonly basePath: string,
-  ) {}
+  ) {
+    this.project = new SchemaProject(root);
+  }
 
   scan(): Discovery {
     const ts = loadTypeScript(this.root);
@@ -181,7 +182,7 @@ export class NextDiscoverySource implements DiscoverySource {
       if (!n) return null;
       if (n.__alias) return fnOf(locals.get(n.__alias)) ?? n.node;
       if (n.__reexport) {
-        const target = this.loadModule(ts, n.spec, sf.fileName, deps);
+        const target = this.project.loadModule(ts, n.spec, sf.fileName, deps);
         if (!target) return n.node;
         for (const st of target.statements) {
           if (ts.isFunctionDeclaration(st) && st.name?.text === n.__reexport) return st;
@@ -203,220 +204,11 @@ export class NextDiscoverySource implements DiscoverySource {
       if (!raw) continue;
       const fn = fnOf(raw);
       const line = lineOf(fn ?? raw.node ?? raw);
-      const schemas = fn ? this.findSchemas(ts, fn, sf, deps) : [];
+      const schemas = fn ? this.project.findSchemas(ts, fn, sf, deps) : [];
       const readsBody = fn ? readsRequestBody(ts, fn, sf, router) : false;
       out.push({ method: router === "pages" ? "ANY" : name, line, schemas, readsBody });
     }
     return out;
-  }
-
-  private findSchemas(ts: any, fn: any, sf: any, deps: Set<string>): SchemaInfo[] {
-    const found: SchemaInfo[] = [];
-    const parseMethods = new Set(["parse", "safeParse", "parseAsync", "safeParseAsync", "spa", "decode", "safeDecode"]);
-    const varInit = new Map<string, string>();
-    const visitVars = (n: any) => {
-      if (ts.isVariableDeclaration(n) && n.initializer) {
-        const text = n.initializer.getText(sf);
-        if (ts.isIdentifier(n.name)) varInit.set(n.name.text, text);
-        else if (ts.isObjectBindingPattern(n.name)) {
-          for (const el of n.name.elements) if (ts.isIdentifier(el.name)) varInit.set(el.name.text, text);
-        }
-      }
-      ts.forEachChild(n, visitVars);
-    };
-    try {
-      visitVars(fn);
-    } catch {
-      // Pathological ASTs can overflow the recursive visitor; local var tracking just degrades.
-    }
-    const classify = (text: string, hops = 0): SchemaInfo["target"] | null => {
-      if (/\.json\s*\(|\breq\.body\b|\brequest\.body\b/.test(text)) return "body";
-      if (/\.formData\s*\(/.test(text)) return "form";
-      if (/searchParams|\bquery\b/.test(text)) return "query";
-      if (/\bparams\b/.test(text)) return "params";
-      if (hops < 3) {
-        for (const id of text.match(/[A-Za-z_$][\w$]*/g) ?? []) {
-          const init = varInit.get(id);
-          if (init) {
-            const c = classify(init, hops + 1);
-            if (c) return c;
-          }
-        }
-      }
-      return null;
-    };
-    const resolver = this.resolver(ts, deps);
-    const visit = (n: any) => {
-      if (
-        ts.isCallExpression(n) &&
-        ts.isPropertyAccessExpression(n.expression) &&
-        parseMethods.has(n.expression.name.text) &&
-        n.arguments.length
-      ) {
-        const target = classify(n.arguments[0].getText(sf));
-        if (target && !found.some((f) => f.target === target)) {
-          const schemaExpr = n.expression.expression;
-          let shape = interpretSchema(schemaExpr, sf, resolver);
-          if (shape.t !== "any" || shape.ref) {
-            const hit = ts.isIdentifier(schemaExpr) ? resolver.resolve(schemaExpr.text, sf) : null;
-            const name = ts.isIdentifier(schemaExpr)
-              ? schemaExpr.text
-              : ts.isPropertyAccessExpression(schemaExpr)
-                ? schemaExpr.getText(sf)
-                : undefined;
-            const where = hit ?? { sf, node: schemaExpr };
-            if (shape.t === "any") shape = { t: "object", props: {} };
-            found.push({
-              target,
-              name,
-              file: rel(this.root, where.sf.fileName),
-              line: where.sf.getLineAndCharacterOfPosition(where.node.getStart(where.sf)).line + 1,
-              shape,
-              example: exampleOf(shape),
-              fields: fieldsOf(shape),
-            });
-          }
-        }
-      }
-      ts.forEachChild(n, visit);
-    };
-    try {
-      visit(fn);
-    } catch {
-      // Pathological ASTs (e.g. extreme assignment chains) can overflow the recursive visitor.
-      // Scanner must still succeed; the route just gets no detected schemas.
-    }
-    return found;
-  }
-
-  private resolver(ts: any, deps: Set<string>): Resolver {
-    const findInFile = (name: string, sf: any, depth: number): { node: any; sf: any; name: string } | null => {
-      if (depth > 6) return null;
-      for (const st of sf.statements) {
-        if (ts.isVariableStatement(st)) {
-          for (const d of st.declarationList.declarations) {
-            if (ts.isIdentifier(d.name) && d.name.text === name && d.initializer)
-              return { node: d.initializer, sf, name };
-          }
-        } else if ((ts.isEnumDeclaration(st) || ts.isFunctionDeclaration(st)) && st.name?.text === name) {
-          return { node: st, sf, name };
-        }
-      }
-      for (const st of sf.statements) {
-        if (!ts.isImportDeclaration(st) || !st.importClause) continue;
-        const spec = st.moduleSpecifier.text;
-        const nb = st.importClause.namedBindings;
-        if (nb && ts.isNamedImports(nb)) {
-          for (const el of nb.elements) {
-            if (el.name.text !== name) continue;
-            const target = this.loadModule(ts, spec, sf.fileName, deps);
-            if (target) return findExport((el.propertyName ?? el.name).text, target, depth + 1);
-          }
-        }
-        if (st.importClause.name?.text === name) {
-          const target = this.loadModule(ts, spec, sf.fileName, deps);
-          if (target) return findExport("default", target, depth + 1);
-        }
-      }
-      return null;
-    };
-    const findExport = (name: string, sf: any, depth: number): { node: any; sf: any; name: string } | null => {
-      if (depth > 6) return null;
-      for (const st of sf.statements) {
-        if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause)) {
-          for (const el of st.exportClause.elements) {
-            if (el.name.text !== name) continue;
-            const local = (el.propertyName ?? el.name).text;
-            if (st.moduleSpecifier) {
-              const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
-              if (target) return findExport(local, target, depth + 1);
-            } else return findInFile(local, sf, depth + 1);
-          }
-        }
-        if (ts.isExportAssignment(st) && name === "default") {
-          return ts.isIdentifier(st.expression)
-            ? findInFile(st.expression.text, sf, depth + 1)
-            : { node: st.expression, sf, name };
-        }
-      }
-      const local = findInFile(name, sf, depth);
-      if (local) return local;
-      for (const st of sf.statements) {
-        if (ts.isExportDeclaration(st) && !st.exportClause && st.moduleSpecifier) {
-          const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
-          const hit = target && findExport(name, target, depth + 1);
-          if (hit) return hit;
-        }
-      }
-      return null;
-    };
-    return {
-      ts,
-      resolve: (name, sf) => findInFile(name, sf, 0),
-      resolveMember: (ns, member, sf) => {
-        for (const st of sf.statements) {
-          if (!ts.isImportDeclaration(st) || !st.importClause?.namedBindings) continue;
-          const nb = st.importClause.namedBindings;
-          if (ts.isNamespaceImport(nb) && nb.name.text === ns) {
-            const target = this.loadModule(ts, st.moduleSpecifier.text, sf.fileName, deps);
-            if (target) return findExport(member, target, 0);
-          }
-        }
-        return null;
-      },
-    };
-  }
-
-  private loadModule(ts: any, spec: string, fromFile: string, deps: Set<string>): any | null {
-    if (spec === "zod" || spec.startsWith("zod/")) return null;
-    const resolved = this.resolveModule(ts, spec, fromFile);
-    if (!resolved || resolved.includes(`${path.sep}node_modules${path.sep}`)) return null;
-    deps.add(resolved);
-    return this.sourceFile(ts, resolved);
-  }
-
-  private resolveModule(ts: any, spec: string, fromFile: string): string | null {
-    if (!this.compiler) {
-      let options: any = {
-        moduleResolution: ts.ModuleResolutionKind.Bundler ?? ts.ModuleResolutionKind.NodeNext,
-        allowJs: true,
-      };
-      for (const name of ["tsconfig.json", "jsconfig.json"]) {
-        const p = path.join(this.root, name);
-        if (!fs.existsSync(p)) continue;
-        const cfg = ts.readConfigFile(p, ts.sys.readFile);
-        if (cfg.config) {
-          const parsed = ts.parseJsonConfigFileContent(cfg.config, ts.sys, this.root);
-          options = { ...parsed.options, allowJs: true };
-        }
-        break;
-      }
-      this.compiler = { options, host: ts.sys };
-    }
-    const r = ts.resolveModuleName(spec, fromFile, this.compiler.options, this.compiler.host);
-    const file = r.resolvedModule?.resolvedFileName;
-    if (!file || file.endsWith(".d.ts")) return null;
-    return file;
-  }
-
-  private sourceFile(ts: any, file: string): any | null {
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      return null;
-    }
-    const hit = this.sfCache.get(file);
-    if (hit && hit.mtimeMs === stat.mtimeMs) return hit.sf;
-    const sf = ts.createSourceFile(
-      file,
-      fs.readFileSync(file, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-      scriptKind(ts, file),
-    );
-    this.sfCache.set(file, { mtimeMs: stat.mtimeMs, sf });
-    return sf;
   }
 
   private findProxy(ts: any): ProxyInfo | undefined {
@@ -485,18 +277,7 @@ function readsRequestBody(ts: any, fn: any, sf: any, router: "app" | "pages"): b
   return new RegExp(`\\b${name}\\s*\\.\\s*(json|formData|text|arrayBuffer|blob|body)\\b`).test(text);
 }
 
-export function fieldsOf(shape: Shape, prefix = "", out: SchemaInfo["fields"] = [], depth = 0): SchemaInfo["fields"] {
-  if (depth > 6) return out;
-  if (shape.t === "object") {
-    for (const [k, v] of Object.entries(shape.props)) {
-      const p = prefix ? `${prefix}.${k}` : k;
-      out.push({ path: p, type: describeShape(v), optional: !!v.optional || !!v.hasDefault });
-      if (v.t === "object") fieldsOf(v, p, out, depth + 1);
-      if (v.t === "array" && v.item.t === "object") fieldsOf(v.item, `${p}[]`, out, depth + 1);
-    }
-  }
-  return out;
-}
+export { fieldsOf };
 
 function* walk(dir: string): Generator<string> {
   let entries: fs.Dirent[];
@@ -536,11 +317,4 @@ function rel(root: string, file: string) {
 function lineOfIndex(src: string, idx: number) {
   if (idx < 0) return 0;
   return src.slice(0, idx).split("\n").length;
-}
-
-function scriptKind(ts: any, file: string) {
-  if (file.endsWith(".tsx")) return ts.ScriptKind.TSX;
-  if (file.endsWith(".jsx")) return ts.ScriptKind.JSX;
-  if (/\.(c|m)?js$/.test(file)) return ts.ScriptKind.JS;
-  return ts.ScriptKind.TS;
 }

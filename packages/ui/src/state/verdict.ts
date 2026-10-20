@@ -11,6 +11,7 @@ import type {
   TraceSummary,
 } from "../api/types";
 import { criticalPath, isLate } from "./flame";
+import { type FrameworkCopy, NEXT_COPY, findingTitle } from "./framework";
 import { BUCKETS, SMALL_SAMPLE, fmtMs, percentiles, routeKeyOf, warmDurations } from "./stats";
 import { bucketOf, isMarker, shapeLabel, shapeOf, unionLength } from "./traceview";
 
@@ -113,7 +114,8 @@ export function topFinding(findings: readonly Finding[] | undefined): Finding | 
   return best;
 }
 
-export function verdictFor(t: TraceRecord): Verdict {
+/** `fw`: the framework's wording (Next.js by default), for the cold and bucket sentences. */
+export function verdictFor(t: TraceRecord, fw: FrameworkCopy = NEXT_COPY): Verdict {
   const total = totalOf(t);
   if (!t.done) return { rule: "pending", tone: "info", text: "Still running…", spanIds: [] };
   const failed = isFailed(t);
@@ -126,7 +128,7 @@ export function verdictFor(t: TraceRecord): Verdict {
     return {
       rule: "cold",
       tone: failed ? "fail" : "info",
-      text: `Waited ${fmtMs(wait)} before the handler (cold: likely dev compile). Handler itself took ${fmtMs(handlerMs)}.`,
+      text: `Waited ${fmtMs(wait)} before the handler (cold: ${fw.coldTag}). Handler itself took ${fmtMs(handlerMs)}.`,
       spanIds: h ? [h.id] : [],
       zoom: "handler",
     };
@@ -164,7 +166,7 @@ export function verdictFor(t: TraceRecord): Verdict {
     const v: Verdict = {
       rule: "finding",
       tone: failed ? "fail" : "slow",
-      text: `${failed ? "Failed" : "Slow"} because ${findingSentence(top, t.spans)}.`,
+      text: `${failed ? "Failed" : "Slow"} because ${findingSentence(top, t.spans, undefined, fw)}.`,
       saveableMs: top.estSavedMs,
       finding: top,
       spanIds: top.spanIds,
@@ -214,7 +216,7 @@ export function verdictFor(t: TraceRecord): Verdict {
   return {
     rule: "bucket",
     tone: "info",
-    text: `Mostly ${BUCKET_WORDS[big]}: ${count ? `${count}, ` : ""}${pct}%.`,
+    text: `Mostly ${bucketWords(big, fw)}: ${count ? `${count}, ` : ""}${pct}%.`,
     spanIds: t.spans.filter((s) => !isMarker(s) && s.kind !== "request" && bucketOf(s) === big).map((s) => s.id),
   };
 }
@@ -224,10 +226,16 @@ const BUCKET_WORDS: Record<TimeBucket, string> = {
   cache: "cache",
   ext: "external calls",
   fn: "your code",
-  framework: "Next.js internals",
-  compile: "dev compile",
+  framework: NEXT_COPY.frameworkWords,
+  compile: NEXT_COPY.compileWords,
   idle: "untraced time",
 };
+
+function bucketWords(b: TimeBucket, fw: FrameworkCopy): string {
+  if (b === "framework") return fw.frameworkWords;
+  if (b === "compile") return fw.compileWords;
+  return BUCKET_WORDS[b];
+}
 
 function bucketCount(b: TimeBucket, c: NonNullable<TraceRecord["facts"]>["counts"]): string | undefined {
   const n = b === "db" ? c.db : b === "cache" ? c.cache : b === "ext" ? c.fetch : b === "fn" ? c.fn : undefined;
@@ -263,6 +271,7 @@ export function findingSentence(
   f: Pick<FindingSummary, "rule" | "title" | "fn" | "count">,
   spans?: readonly SpanRecord[],
   spanIds?: readonly string[],
+  fw: FrameworkCopy = NEXT_COPY,
 ): string {
   const ids = spanIds ?? (f as Partial<Finding>).spanIds ?? [];
   const n = f.count ?? ids.length;
@@ -288,7 +297,7 @@ export function findingSentence(
     case "fetch-uncached": {
       const url = /^fetch (\S+) not cached/.exec(f.title)?.[1];
       const times = n > 1 ? ` (${n} calls)` : "";
-      return url ? `fetch ${url} skips Next's data cache${times}` : lowerFirst(f.title);
+      return url ? `fetch ${url} skips ${fw.dataCache}${times}` : lowerFirst(f.title);
     }
     case "large-payload":
       return lowerFirst(f.title.replace(/^(Response|Request) body is/, "the $1 body is"));
@@ -301,7 +310,7 @@ export function findingSentence(
       return m ? `${fnRef(m[1])} spent ${fmtMs(Number(m[2]))} in its own code (${m[3]}%)` : lowerFirst(f.title);
     }
     case "cold-compile":
-      return `the dev compile ran first (${lowerFirst(f.title)})`;
+      return `${fw.coldClause} (${lowerFirst(findingTitle(f.title, fw))})`;
     default:
       return lowerFirst(f.title);
   }

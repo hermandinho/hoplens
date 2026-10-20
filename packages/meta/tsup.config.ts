@@ -4,6 +4,8 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     next: "src/next.ts",
+    express: "src/express.ts",
+    "express-register": "src/express-register.ts",
     node: "src/node.ts",
     trace: "src/trace.ts",
   },
@@ -19,5 +21,7 @@ export default defineConfig({
   // The hoplens tarball bundles the Next adapter + core runtime so a single
   // `npm i -D hoplens` is enough. Keeping the CLI external — users invoke it
   // via the bin shim which resolves @hoplens/cli at runtime.
-  external: ["typescript", "next", "@hoplens/cli"],
+  // The Express adapter stays external too: `hoplens/express` and `hoplens/express/register` must load
+  // the one @hoplens/express (and its one @hoplens/core) whichever way the app imports it.
+  external: ["typescript", "next", "@hoplens/cli", "express", "@hoplens/express", "@hoplens/express/register"],
 });

@@ -12,8 +12,9 @@ import type { Runtime } from "../runtime";
  *   export const endpoints: ApiEndpoint[] = [{ method: "GET", path: "/api/health", handle }];
  *
  * Paths are relative to the /__hoplens mount and may contain `:name` params (`/api/compare/:a`).
- * Handlers only run for loopback callers (handleUi checks allowRemote first) and never on the app's
- * request path, so they may do real work, but must not keep timers alive after `req` closes.
+ * Handlers only run after handleUi's guard (api/guard.ts: loopback caller, local Host and Origin,
+ * JSON content type on POST/DELETE; relaxed under allowRemote) and never on the app's request
+ * path, so they may do real work, but must not keep timers alive after `req` closes.
  */
 
 export type ApiMethod = "GET" | "POST" | "DELETE";

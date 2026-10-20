@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { c, skip } from "../style";
 import { flagStateDir, scriptEnv } from "./pathflag";
-import { REGISTER } from "./script";
+import { REGISTER, entryFiles, nodeCommands } from "./script";
 
 // The "Function hops" section of `hoplens doctor` for Express. The CLI does not depend on the runtime,
 // so the few rules the register hook applies at boot are repeated here (packages/express/src/
@@ -154,6 +154,199 @@ export function runnerLine(r: RunnerView): string {
   }
 }
 
+/** What the Node running the app can do for function hops (the doctor reads its own Node: `node -v`). */
+export interface NodeView {
+  version: string;
+  /** Node strips types itself, by default (`process.features.typescript`). */
+  stripsTypes: boolean;
+  /** The ESM hook API Hoplens picks there (@hoplens/transform register.ts hookApi()). */
+  hookApi: "sync" | "async";
+  /** `--import` modules evaluate in flag order (register.ts importOrderHonored(): Node 20.11+). */
+  importOrdered: boolean;
+}
+
+/** This process's Node, as the register hook would see it on the same Node. */
+export function currentNode(env: Env = process.env): NodeView {
+  let hookApi: NodeView["hookApi"] = "async";
+  let importOrdered = true;
+  try {
+    const r = require("@hoplens/transform/register") as typeof import("@hoplens/transform/register");
+    hookApi = r.hookApi(env);
+    importOrdered = r.importOrderHonored();
+  } catch {
+    /* an older transform: the defaults */
+  }
+  return {
+    version: process.version,
+    stripsTypes: Boolean((process as any).features?.typescript),
+    hookApi,
+    importOrdered,
+  };
+}
+
+/** The Node the app will run on, as far as the project pins it: the spec and where it is set. */
+export interface AppNode {
+  spec: string;
+  /** `package.json volta.node`, `.node-version`, `.nvmrc` or `package.json engines.node`. */
+  from: string;
+}
+
+/** The app's Node version as the project pins it (volta, .node-version, .nvmrc, engines), or null. Exported for tests. */
+export function appNodeVersion(root: string): AppNode | null {
+  let pkg: any;
+  try {
+    pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  } catch {
+    pkg = undefined;
+  }
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+  const volta = str(pkg?.volta?.node);
+  if (volta) return { spec: volta, from: "package.json volta.node" };
+  for (const file of [".node-version", ".nvmrc"]) {
+    try {
+      const line = fs
+        .readFileSync(path.join(root, file), "utf8")
+        .split(/\r?\n/)
+        .map((l) => l.replace(/#.*/, "").trim())
+        .find(Boolean);
+      if (line) return { spec: line, from: file };
+    } catch {
+      /* not there */
+    }
+  }
+  const engines = str(pkg?.engines?.node);
+  return engines ? { spec: engines, from: "package.json engines.node" } : null;
+}
+
+const LTS: Record<string, number> = { fermium: 14, gallium: 16, hydrogen: 18, iron: 20, jod: 22, krypton: 24 };
+const vkey = (major: number, minor = 0, patch = 0) => major * 1e6 + minor * 1e3 + patch;
+/** Node strips types by default from 22.18 and from 23.6 (not 23.0 - 23.5). */
+const STRIP_22 = vkey(22, 18);
+const STRIP_23 = vkey(23, 6);
+
+/** One semver comparator set as [lo, hi) over version keys, or null when it cannot be read. */
+function interval(part: string): [number, number] | null {
+  let lo = 0;
+  let hi = Number.POSITIVE_INFINITY;
+  const words = part
+    .replace(/(>=|<=|>|<|=|\^|~)\s+/g, "$1")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const comps = words.length === 3 && words[1] === "-" ? [`>=${words[0]}`, `<=${words[2]}`] : words;
+  for (const comp of comps) {
+    if (/^[xX*]$/.test(comp)) continue;
+    const m = /^(>=|<=|>|<|=|\^|~)?v?(\d+)(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?$/.exec(comp);
+    if (!m) return null;
+    const op = m[1] ?? "=";
+    const M = Number(m[2]);
+    const mi = m[3] !== undefined && /^\d+$/.test(m[3]) ? Number(m[3]) : undefined;
+    const pa = mi !== undefined && m[4] !== undefined && /^\d+$/.test(m[4]) ? Number(m[4]) : undefined;
+    const floor = vkey(M, mi ?? 0, pa ?? 0);
+    // The first version past the bucket the comparator names (`22` -> 23.0.0, `22.5` -> 22.6.0, `22.5.1` -> 22.5.2).
+    const past = mi === undefined ? vkey(M + 1) : pa === undefined ? vkey(M, mi + 1) : vkey(M, mi, pa + 1);
+    if (op === "=") {
+      lo = Math.max(lo, floor);
+      hi = Math.min(hi, past);
+    } else if (op === "^") {
+      lo = Math.max(lo, floor);
+      hi = Math.min(hi, vkey(M + 1));
+    } else if (op === "~") {
+      lo = Math.max(lo, floor);
+      hi = Math.min(hi, mi === undefined ? vkey(M + 1) : vkey(M, mi + 1));
+    } else if (op === ">=") lo = Math.max(lo, floor);
+    else if (op === ">") lo = Math.max(lo, past);
+    else if (op === "<") hi = Math.min(hi, floor);
+    else hi = Math.min(hi, past);
+  }
+  return lo < hi ? [lo, hi] : null;
+}
+
+/** Whether every Node the spec allows strips types by default, none does, or it depends. Exported for tests. */
+export function specStripsTypes(spec: string): "yes" | "no" | "unknown" {
+  const s = spec.trim().toLowerCase();
+  const lts = /^lts\/([a-z]+)$/.exec(s);
+  if (lts) {
+    const major = LTS[lts[1]!];
+    return major === undefined ? "unknown" : major >= 24 ? "yes" : "no";
+  }
+  const says = new Set<"yes" | "no">();
+  for (const part of s.split("||")) {
+    const r = interval(part);
+    if (!r) return "unknown";
+    const [lo, hi] = r;
+    // A range from 22.18 up counts as stripping: only a pin inside 23.0 - 23.5 (an odd, end-of-life line) does not.
+    const in23Gap = lo >= vkey(23) && hi <= STRIP_23;
+    if (in23Gap || hi <= STRIP_22) says.add("no");
+    else if (lo >= STRIP_22) says.add("yes");
+    else return "unknown";
+  }
+  return says.size === 1 ? [...says][0]! : "unknown";
+}
+
+/** A TypeScript loader in a node command or NODE_OPTIONS: Node then does not run the .ts itself. */
+const TS_LOADER =
+  /(?:^|[\s=/"'])(?:tsx|ts-node|@swc-node\/register|@swc\/register|esbuild-register|@esbuild-kit\/[\w-]+|jiti|sucrase\/register|@babel\/register)(?:\/[\w./-]*)?(?=$|[\s"'])|(?:^|\s)--experimental-(?:strip|transform)-types\b/;
+const NO_STRIP = /(?:^|\s)--no-experimental-strip-types\b/;
+
+/**
+ * The doctor's lines about the app's Node for this runner: `nope` for a row that cannot work there (a
+ * .ts entry under plain node on a Node the project pins below type stripping, or with stripping
+ * turned off), `warn` for one that may not (plain node on a .ts entry, the app's Node not known),
+ * `note` for one that works differently or that the doctor cannot judge (a runner it does not
+ * recognise). `app` is the Node the project pins (appNodeVersion): the doctor's own Node is not
+ * necessarily the app's, so it is not used here. Exported for tests.
+ */
+export function nodeLines(
+  cmd: string,
+  runner: RunnerView,
+  node: NodeView,
+  app: AppNode | null = null,
+  env: Env = {},
+): { nope: string[]; warn: string[]; note: string[] } {
+  const nope: string[] = [];
+  const warn: string[] = [];
+  const note: string[] = [
+    node.hookApi === "sync"
+      ? `Node ${node.version}: the ESM hook runs in-thread (module.registerHooks, as tsx's does on this Node); a cold start parses on the main thread, a warm one answers from the transform cache`
+      : `Node ${node.version}: the ESM hook runs in Node's hooks worker (module.register)`,
+  ];
+  const isTs = (f: string) => /\.[cm]?ts$/.test(f);
+  const nodeOptions = ` ${{ ...env, ...scriptEnv(cmd) }.NODE_OPTIONS ?? ""} `;
+  if (runner.kind === "node" && !TS_LOADER.test(nodeOptions)) {
+    // The plain node command that runs a .ts entry with no loader of its own.
+    const plain = nodeCommands(cmd).find((words) => words.some(isTs) && !TS_LOADER.test(` ${words.join(" ")} `));
+    const tsEntry = plain?.find(isTs);
+    const fix = (entry: string) => `run it with tsx (tsx --import ${REGISTER} ${entry})`;
+    if (plain && tsEntry) {
+      const says = app ? specStripsTypes(app.spec) : "unknown";
+      if (NO_STRIP.test(` ${plain.join(" ")} `) || NO_STRIP.test(nodeOptions))
+        nope.push(
+          `${tsEntry} is TypeScript and the dev script runs node with --no-experimental-strip-types — drop the flag (Node 22.18+), or ${fix(tsEntry)}`,
+        );
+      else if (says === "no")
+        nope.push(
+          `${tsEntry} is TypeScript and the app's Node (${app!.spec}, from ${app!.from}) does not strip types (22.18+ does by default, 22.6+ with --experimental-strip-types) — ${fix(tsEntry)} or a newer Node`,
+        );
+      else if (says === "unknown")
+        warn.push(
+          `${tsEntry} is TypeScript under plain node: that needs Node 22.18+ (22.6+ with --experimental-strip-types)${app ? `, and ${app.from} allows ${app.spec}` : ", and the project pins no Node version (engines.node, .nvmrc, .node-version)"} — on an older Node, ${fix(tsEntry)}`,
+        );
+    } else if (!plain) {
+      const tsEntry = entryFiles(cmd).find(isTs);
+      if (tsEntry && !TS_LOADER.test(` ${cmd} `))
+        note.push(
+          `${tsEntry} is TypeScript and the doctor does not recognise the dev script's runner, so it cannot tell what compiles it — function hops need it loaded through tsx, ts-node or Node 22.18+ type stripping`,
+        );
+    }
+  }
+  if (runner.kind === "tsx-first" && !node.importOrdered)
+    note.push(
+      `Node ${node.version} runs \`--import tsx\` after Hoplens' hook (20.9 / 20.10 do not keep --import order; 20.11+ do): Hoplens rewrites each file as on disk (RAW) and tsx compiles the result, so function hops are the same, but the request path cannot read tsx's output there (HOPLENS_PATH_DEBUGGER=1, or Node 20.11+)`,
+    );
+  return { nope, warn, note };
+}
+
 /** The transform cache's dir as the register hook resolves it, or why it is off. Exported for tests. */
 export function cacheView(
   root: string,
@@ -190,6 +383,7 @@ export function doctorFunctionHops(
   cjsEntry: string | null,
   env: Env,
   { nope }: Pick<Report, "nope">,
+  node?: NodeView,
 ): void {
   if (!wired && !inCode.length) return;
   console.log(`\n${c.dim("  Function hops")}`);
@@ -217,6 +411,16 @@ export function doctorFunctionHops(
 
   const runner = runnerView(dev!.cmd);
   skip(runnerLine(runner));
+  const nodeSays = nodeLines(
+    dev!.cmd,
+    runner,
+    node ?? currentNode({ ...env, ...scriptEnv(dev!.cmd) }),
+    appNodeVersion(root),
+    env,
+  );
+  for (const l of nodeSays.note) skip(l);
+  for (const l of nodeSays.nope) nope(l, true);
+  for (const l of nodeSays.warn) nope(l, false);
   if (runner.kind === "ts-node-esm")
     nope(
       "ts-node's ESM loader is untested with function hops (its output may be refused, refused=compiled / unmapped) — use tsx, or ts-node's CommonJS register (-r ts-node/register)",

@@ -291,6 +291,40 @@ describe("files on disk", () => {
     });
   });
 
+  test("a top-level .json no module imports is no edit; package.json / tsconfig.json still count", () => {
+    const dir = path.join(root, "node_modules", ".cache", "hoplens");
+    write("app.js", "const cfg = require('./settings.json');\nrequire('./routes/users');\n");
+    write("routes/users.js", "module.exports = require('../seed.json');\n");
+    write("settings.json", '{"a":1}');
+    write("seed.json", "[]");
+    write("package.json", '{"name":"x"}');
+    write("tsconfig.json", "{}");
+    write("routes/data/store.json", "{}");
+    const opts = { typescript: () => ts };
+    const c0 = checkRestart(root, dir, { ...opts, clock: () => Date.now() - 60_000 });
+    expect(c0.next.files["trace.json"]).toBeUndefined();
+    writeManifest(path.join(dir, MANIFEST_FILE), c0.next);
+    // The app (or a tool) writes JSON into the project root and a nested dir: no edit.
+    write("path.json", '{"blocks":[]}');
+    write("trace.json", '{"id":"t"}');
+    write("routes/data/store.json", '{"rows":[1]}');
+    const c1 = checkRestart(root, dir, opts);
+    expect(c1.diff).toEqual({ changed: [], added: [], deleted: [] });
+    writeManifest(path.join(dir, MANIFEST_FILE), c1.next);
+    write("path.json", '{"blocks":[1]}');
+    expect(checkRestart(root, dir, opts).diff).toEqual({ changed: [], added: [], deleted: [] });
+    // Imported JSON (top-level and nested-relative) and project config still count.
+    write("settings.json", '{"a":2}');
+    write("seed.json", "[1]");
+    write("package.json", '{"name":"x","type":"module"}');
+    write("tsconfig.json", '{"compilerOptions":{}}');
+    expect(checkRestart(root, dir, opts).diff).toEqual({
+      changed: ["package.json", "seed.json", "settings.json", "tsconfig.json"],
+      added: [],
+      deleted: [],
+    });
+  });
+
   test("the manifest file is not one a watcher restarts on (nodemon watches .json)", () => {
     expect(MANIFEST_FILE.endsWith(".json")).toBe(false);
   });

@@ -164,14 +164,13 @@ function sweep(spans: SpanRecord[], duration: number): { time: Record<TimeBucket
   // Parent-chain depth only breaks exact start+end ties, which are rare: compute it on demand.
   let depthMap: Map<string, number> | undefined;
   const depth = (id: string) => (depthMap ??= depths(timed)).get(id) ?? 0;
-  type Ev = { at: number; open: boolean; s: SpanRecord };
-  const events: Ev[] = [];
-  for (const s of timed) {
-    events.push({ at: Math.max(0, s.start), open: true, s });
-    events.push({ at: Math.min(duration, s.end), open: false, s });
-  }
-  // Closes before opens at the same instant, so an abutting sibling doesn't overlap.
-  events.sort((a, b) => a.at - b.at || (a.open === b.open ? 0 : a.open ? 1 : -1));
+  // Opens in start order (computeFacts passes spans already sorted by start, so that sort is
+  // skipped there), closes in end order; both sorts are stable, so equal instants keep input order.
+  // The merge below takes closes before opens at the same instant, so an abutting sibling doesn't
+  // overlap: the same order as one event list sorted by (instant, close first), with no event
+  // objects and a quarter of the comparisons.
+  const opens = isSortedByStart(timed) ? timed : [...timed].sort((a, b) => Math.max(0, a.start) - Math.max(0, b.start));
+  const closes = [...timed].sort((a, b) => Math.min(duration, a.end) - Math.min(duration, b.end));
 
   const active: SpanRecord[] = [];
   let cursor = 0;
@@ -187,13 +186,27 @@ function sweep(spans: SpanRecord[], duration: number): { time: Record<TimeBucket
     } else time[bucket] += to - cursor;
     cursor = to;
   };
-  for (const ev of events) {
-    flush(ev.at);
-    if (ev.open) active.push(ev.s);
-    else {
-      const i = active.indexOf(ev.s);
-      if (i >= 0) active.splice(i, 1);
+  // A timed span opens strictly before it closes (start < duration, end > 0, start < end), so
+  // every close below finds its span already active.
+  const n = timed.length;
+  let o = 0;
+  for (let c = 0; c < n; ) {
+    const closeAt = Math.min(duration, closes[c]!.end);
+    if (o < n) {
+      const s = opens[o]!;
+      const openAt = Math.max(0, s.start);
+      if (openAt < closeAt) {
+        flush(openAt);
+        active.push(s);
+        o++;
+        continue;
+      }
     }
+    flush(closeAt);
+    // Nested spans close innermost first, so the closing span is nearly always the last active one.
+    const i = active.lastIndexOf(closes[c]!);
+    if (i >= 0) active.splice(i, 1);
+    c++;
   }
   flush(duration);
   return { time, gap };

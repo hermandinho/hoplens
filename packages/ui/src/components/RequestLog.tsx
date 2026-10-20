@@ -554,7 +554,7 @@ function LogRow({
     t.pathTrace && !t.pathTrace.supersededBy ? (
       <span
         class="path-mark"
-        title={`Path trace (${t.pathTrace.failed ? `capture failed: ${t.pathTrace.failed}` : t.pathTrace.quality}): a replay of ${t.pathTrace.replayOf}; opens in Path mode`}
+        title={`Path trace (${t.pathTrace.failed ? `capture failed: ${t.pathTrace.failed}` : t.pathTrace.quality}): a replay of ${t.pathTrace.replayOf}; opens in the Path view`}
       >
         path
       </span>

@@ -40,7 +40,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "test": "tsup --silent && vitest run"
+    "test": "tsup --silent && vitest run",
+    "test:runners": "vitest run test/hooks.test.ts test/cjs-layer.test.ts test/generated.test.ts test/cache.test.ts"
   },
   "engines": { "node": ">=20.9" },
   "dependencies": {

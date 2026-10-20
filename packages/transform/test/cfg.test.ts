@@ -18,7 +18,10 @@ import {
 import { loadTypeScript } from "../src/ts";
 
 const ts = loadTypeScript(process.cwd());
-const cfg = (text: string, file = "x.js", opts = {}) => buildCfg(ts, text, file, opts)!;
+// A generous parse budget: the production 250ms is wall time, and under a loaded parallel run a
+// fixture blew it and folded, so the decision a test reads was missing (a TypeError, not a bug).
+// The budget test below passes its own maxMs and clock.
+const cfg = (text: string, file = "x.js", opts = {}) => buildCfg(ts, text, file, { maxMs: 10_000, ...opts })!;
 const fn = (text: string, name: string, file = "x.js") => {
   const f = cfg(text, file).functions.find((x) => x.name === name);
   if (!f) throw new Error(`no ${name}`);
@@ -360,9 +363,11 @@ describe("caps", () => {
   });
 
   test("the model of an unchanged text is cached", () => {
+    // The production call (no options): passing maxMs/maxNodes bypasses the cache on purpose.
     const text = "function f(a) { return a ? 1 : 2; }";
-    expect(cfg(text, "cache.js")).toBe(cfg(text, "cache.js"));
-    expect(cfg(`${text} `, "cache.js")).not.toBe(cfg(text, "cache.js"));
+    const prod = (t: string) => buildCfg(ts, t, "cache.js")!;
+    expect(prod(text)).toBe(prod(text));
+    expect(prod(`${text} `)).not.toBe(prod(text));
   });
 
   test("labels are clipped; syntax errors flagged; no TypeScript, no model", () => {

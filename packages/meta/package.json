@@ -1,14 +1,17 @@
 {
   "name": "hoplens",
   "version": "0.3.1",
-  "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js adapter.",
+  "description": "The request-journey visualizer for Node.js backends. Meta-package: pulls in the CLI and the Next.js and Express adapters.",
   "keywords": [
     "nextjs",
     "next",
+    "express",
+    "expressjs",
     "devtools",
     "tracing",
     "api",
     "route-handlers",
+    "middleware",
     "opentelemetry",
     "zod",
     "observability"

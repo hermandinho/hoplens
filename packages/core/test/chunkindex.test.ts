@@ -495,6 +495,42 @@ describe("EpochTracker with the chunk diff", () => {
     expect(s.tr.info(1)?.files).toEqual(["src/lib/new.ts", "src/lib/store.ts"]);
   });
 
+  test("a route compiled before the first probe is baselined, so a later edit to it is an epoch", async () => {
+    // Next 16 loads instrumentation (and so creates the tracker) inside the first request, which then
+    // compiles its route: those chunks are written before the build-output watcher saw anything, and
+    // the first probe only took the baseline mtime. Measured on the next16 example (Turbopack): editing
+    // that route rewrote its `[root-of-the-server]` chunk in place, every module read as "added", the
+    // trusted diff had no edits and no epoch was created.
+    const p = tpProject();
+    const server = p.server;
+    fs.rmSync(path.join(server, "app"), { recursive: true, force: true });
+    fs.rmSync(path.join(server, "chunks"), { recursive: true, force: true });
+    write(path.join(server, "chunks", "[turbopack]_runtime.js"), 'var RUNTIME_PUBLIC_PATH = "server/chunks/x";\n');
+    const idx = new ChunkIndex(p.root, ".next");
+    await until(() => idx.primed);
+    const probe = fakeProbe();
+    probe.mtime = 0; // nothing seen yet: the first compile happened before the watcher was armed
+    const sources = fakeSources();
+    let clock = 10_000;
+    const tr = new EpochTracker(probe, 0, () => clock, 2000, 5000, { sources, chunks: idx });
+    p.writeAll(); // the first request's on-demand compile
+    expect(tr.observe("GET /api/products", true).epoch).toBe(0);
+    clock += 30_000;
+    tr.observe("GET /api/products", false);
+    clock += 30_000;
+    // The edit: products' chunk rewritten in place with the new route code.
+    sources.push({ file: "src/app/api/products/route.ts", at: clock, kind: "change" });
+    p.chunk("[root-of-the-server]__p1._.js", ["products", "store", "schemas"], {
+      products: "async function GET() { return list().concat(2); }",
+    });
+    probe.written.push(path.join(server, "chunks", "[root-of-the-server]__p1._.js"));
+    probe.mtime = clock + 5;
+    clock += 1000;
+    expect(tr.observe("GET /api/products", false).epoch).toBe(1);
+    expect(tr.info(1)).toMatchObject({ files: ["src/app/api/products/route.ts"], via: "src-watch" });
+    expect(tr.info(1)?.chunkScope?.routes).toEqual(["/api/products"]);
+  });
+
   test("an untrusted diff falls back to the old rule (bump, watcher attribution)", async () => {
     const s = await setup();
     s.sources.push({ file: "src/lib/store.ts", at: s.now(), kind: "change" });

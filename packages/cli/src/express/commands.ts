@@ -128,7 +128,9 @@ export async function initPath(
   }
   if (want === undefined) {
     if (now === "on") {
-      skip(`Request path already enabled (${rel}); disable it in the Path tab or with hoplens init --no-path`);
+      skip(
+        `Request path already enabled (${rel}); disable it in the Path view (press x on a request) or with hoplens init --no-path`,
+      );
       return;
     }
     if (opt.ask === false || !opt.io?.interactive) return;
@@ -363,7 +365,7 @@ const V8_COVERAGE_RE = /\bNODE_V8_COVERAGE=|(?:^|[\s;&|])c8(?=$|\s)/;
 /**
  * The request path, as the register hook will decide it: HOPLENS_PATH in the dev script or the
  * environment wins (1/true on, anything else off), else the sticky flag file (`hoplens init --path`
- * or the Path tab's Enable), else off. Warns when it would be on with NODE_V8_COVERAGE (c8) set too,
+ * or the Path view's Enable), else off. Warns when it would be on with NODE_V8_COVERAGE (c8) set too,
  * which keeps it disabled, and when the flag file is not valid JSON. Exported for tests.
  */
 /**
@@ -406,11 +408,11 @@ export function doctorPath(
   } else if (flagState === "on") {
     on = true;
     skip(
-      `request path: on (flag) — ${flag!.rel}: V8 block coverage runs from boot, so CPU-heavy code runs slower; disable it in the Path tab`,
+      `request path: on (flag) — ${flag!.rel}: V8 block coverage runs from boot, so CPU-heavy code runs slower; disable it in the Path view (press x on a request)`,
     );
   } else {
     on = false;
-    skip("request path: off — enable it in the Path tab or with hoplens init --path");
+    skip("request path: off — enable it in the Path view (press x on a request) or with hoplens init --path");
   }
   if (flagState === "corrupt")
     nope(

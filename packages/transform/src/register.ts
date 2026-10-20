@@ -1,8 +1,18 @@
-// Node `module.register()` hook for unbundled servers (Express today). Registers the ESM load hook
-// (src/hooks.ts, built to dist/hooks.mjs) and installs the CommonJS layer (src/cjs.ts: a self-healing
-// Module._extensions wrapper with a scoped fs.readFileSync swap) once per process, from the main
-// thread only: a `-r` preload also runs inside the hooks worker, where registering again would chain
-// a second copy.
+// Node module hooks for unbundled servers (Express today). Registers the ESM load step
+// (src/esmload.ts) and installs the CommonJS layer (src/cjs.ts: a self-healing Module._extensions
+// wrapper with a scoped fs.readFileSync swap) once per process, from the main thread only: a `-r`
+// preload also runs inside the hooks worker, where registering again would chain a second copy.
+//
+// Which hook API: the ESM step must sit on the same side as tsx's hooks, so that the flag order
+// decides which loader sees the other's output (`--import tsx --import hoplens`: ours runs first and
+// gets tsx's output, COMPILED mode; the other order: RAW). Synchronous hooks (`module.registerHooks()`)
+// always run before every asynchronous one (`module.register()`, in the hooks worker), whatever the
+// order they were registered in. tsx (4.23.15 checked) registers synchronous hooks on Node 22.22.3+ /
+// 24.11.1+ / 25.1+ (its own feature table, SYNC_HOOKS_SINCE), asynchronous ones below that, so Hoplens
+// does the same (hookApi(); HOPLENS_LOADER_HOOKS=sync|async overrides). An async hook next to tsx's
+// sync ones would also send a CommonJS `.ts` entry through Node's ESM translator on 24 (its
+// `require.cache` is undefined there). The sync hook passes `require()` of CommonJS straight through:
+// the CommonJS layer handles those reads.
 //
 // Transform cache (src/cache.ts, `cacheDir`): both loaders look each file up there before they parse
 // it, so a warm restart loads no TypeScript. HOPLENS_DEBUG=transform (or `debug: true`) prints one
@@ -14,6 +24,7 @@ import { pathToFileURL } from "node:url";
 import { MessageChannel, isMainThread } from "node:worker_threads";
 import { cacheDisabledByEnv } from "./cache";
 import { installCommonJS } from "./cjs";
+import { type LoadResult, createEsmLoader } from "./esmload";
 import { retainGenerated, retentionOn } from "./generated";
 import type { TransformOptions } from "./index";
 
@@ -160,6 +171,77 @@ export interface HookData {
   verbose?: boolean;
 }
 
+/**
+ * The Node versions on which tsx uses `module.registerHooks()` (tsx 4.23.15's own feature table, the
+ * first release of each line). Same table, so Hoplens' ESM step and tsx's hooks are always both
+ * synchronous or both asynchronous.
+ */
+export const SYNC_HOOKS_SINCE: readonly (readonly [number, number, number])[] = [
+  [22, 22, 3],
+  [24, 11, 1],
+  [25, 1, 0],
+  [26, 0, 0],
+];
+
+/** `version` (`v22.23.3`) is at or past the SYNC_HOOKS_SINCE entry of its major (or a later major's). */
+export function versionHasSyncHooks(version: string): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return false;
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const last = SYNC_HOOKS_SINCE[SYNC_HOOKS_SINCE.length - 1]!;
+  if (v[0]! > last[0]) return true;
+  const row = SYNC_HOOKS_SINCE.find((r) => r[0] === v[0]);
+  if (!row) return false;
+  for (let i = 0; i < 3; i++) if (v[i] !== row[i]) return v[i]! > row[i]!;
+  return true;
+}
+
+/**
+ * Node evaluates `--import` modules in flag order. Node 20.9 / 20.10 do not when a module's graph has
+ * CommonJS in it (tsx's does, and so does Hoplens' register hook): such a module finishes after the
+ * `--import` flags behind it, so `--import tsx --import hoplens` registers tsx's hooks last and they run
+ * first, and Hoplens sees each file as on disk (RAW, not COMPILED). Fixed in 20.11.0 (bisected on
+ * 20.9.0 / 20.10.0 / 20.11.0 builds; 21.x not checked).
+ */
+export function importOrderHonored(version: string = process.version): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return true;
+  const major = Number(m[1]);
+  if (major !== 20) return major > 20;
+  return Number(m[2]) >= 11;
+}
+
+/** Which hook API register() uses for the ESM step on this process. */
+export type HookApi = "sync" | "async";
+
+/**
+ * `sync` (module.registerHooks, in-thread) where tsx uses it too, else `async` (module.register, the
+ * hooks worker). HOPLENS_LOADER_HOOKS=sync|async overrides (sync only where registerHooks exists).
+ */
+export function hookApi(
+  env: Record<string, string | undefined> = process.env,
+  version: string = process.version,
+  hasRegisterHooks: boolean = typeof (nodeModule as any).registerHooks === "function",
+): HookApi {
+  const want = env.HOPLENS_LOADER_HOOKS?.trim().toLowerCase();
+  if (want === "async") return "async";
+  if (want === "sync") return hasRegisterHooks ? "sync" : "async";
+  return hasRegisterHooks && versionHasSyncHooks(version) ? "sync" : "async";
+}
+
+/** A sync hook's load context for `require()` (not `import`): CommonJS reads belong to the CommonJS layer. */
+function requireContext(context: unknown): boolean {
+  const c = (context as { conditions?: unknown } | null)?.conditions;
+  return Array.isArray(c) && c.includes("require") && !c.includes("import");
+}
+
+const API = Symbol.for("hoplens.transform.hookApi");
+
+/** The hook API register() used in this process (undefined before it ran or when it registered nothing). */
+export function registeredHookApi(): HookApi | undefined {
+  return (globalThis as any)[API];
+}
+
 const REGISTERED = Symbol.for("hoplens.transform.register");
 
 /**
@@ -208,57 +290,100 @@ export function register(opts: RegisterOptions = { root: process.cwd() }): () =>
     } catch {
       /* the ESM hook still goes in */
     }
-    try {
-      if (typeof (nodeModule as any).register !== "function") throw new Error("no module.register");
-      const { port1, port2 } = new MessageChannel();
-      const waiting = new Map<number, () => void>();
-      let seq = 0;
-      port1.on("message", (m: HookReport | GeneratedMessage | FlushedMessage) => {
-        if (m?.type === "generated") retainGenerated(m.file, m.code);
-        else if (m?.type === "flushed") waiting.get(m.id)?.();
-        else onReport(m);
-      });
-      g[FLUSH] = (cb: () => void, timeoutMs: number) => {
-        const id = ++seq;
-        let done = false;
-        const fire = () => {
-          if (done) return;
-          done = true;
-          waiting.delete(id);
-          clearTimeout(timer);
+    const data: HookData = {
+      root: opts.root,
+      include: opts.include,
+      exclude: opts.exclude,
+      preset: opts.preset ?? "node",
+    };
+    if (opts.retainGenerated) data.retain = true;
+    if (cacheDir) data.cacheDir = cacheDir;
+    if (verbose) data.verbose = true;
+    const api = hookApi();
+    if (api === "sync") {
+      try {
+        let tx: typeof import("./index") | undefined;
+        const loader = createEsmLoader(data, {
+          post: (m) => {
+            if (m.type === "generated") retainGenerated(m.file, m.code);
+            else onReport(m);
+          },
+          // A computed path (as in cjs.ts), so the bundler leaves dist/index.js out of register.js.
+          transform: () => {
+            tx ??= require(path.join(__dirname, "index.js")) as typeof import("./index");
+            return tx;
+          },
+          typescriptLoaded: () => Boolean(tx?.typescriptLoaded()),
+          distDir: __dirname,
+          thread: "main",
+        });
+        const handle = (nodeModule as any).registerHooks({
+          load(url: string, context: unknown, nextLoad: (u: string, c?: unknown) => LoadResult): LoadResult {
+            const r = nextLoad(url, context);
+            const cjs = /^commonjs/.test(String(r?.format));
+            // `require()` of CommonJS: the CommonJS layer sees that read.
+            if (cjs && requireContext(context)) return r;
+            // Imported CommonJS Node reloads through its CommonJS loader: with the pristine source the
+            // step wraps it (the reload compiles what it returns); another loader's output (tsx) is not
+            // refused, the CommonJS layer may see the file there.
+            const reloaded =
+              cjs && (r as { shouldBeReloadedByCJSLoader?: unknown }).shouldBeReloadedByCJSLoader === true;
+            return loader.load(url, r, reloaded);
+          },
+        });
+        g[API] = "sync";
+        disposers.push(() => {
+          loader.disable();
+          handle?.deregister?.();
+        });
+      } catch {
+        /* the CommonJS layer still works */
+      }
+    } else {
+      try {
+        if (typeof (nodeModule as any).register !== "function") throw new Error("no module.register");
+        const { port1, port2 } = new MessageChannel();
+        const waiting = new Map<number, () => void>();
+        let seq = 0;
+        port1.on("message", (m: HookReport | GeneratedMessage | FlushedMessage) => {
+          if (m?.type === "generated") retainGenerated(m.file, m.code);
+          else if (m?.type === "flushed") waiting.get(m.id)?.();
+          else onReport(m);
+        });
+        g[FLUSH] = (cb: () => void, timeoutMs: number) => {
+          const id = ++seq;
+          let done = false;
+          const fire = () => {
+            if (done) return;
+            done = true;
+            waiting.delete(id);
+            clearTimeout(timer);
+            try {
+              cb();
+            } catch {
+              /* the caller's own */
+            }
+          };
+          // Kept ref'd: it holds the process open until the answer (the port itself is unref'd).
+          const timer = setTimeout(fire, timeoutMs);
+          waiting.set(id, fire);
           try {
-            cb();
+            port1.postMessage({ type: "flush", id });
           } catch {
-            /* the caller's own */
+            fire();
           }
         };
-        // Kept ref'd: it holds the process open until the answer (the port itself is unref'd).
-        const timer = setTimeout(fire, timeoutMs);
-        waiting.set(id, fire);
-        try {
-          port1.postMessage({ type: "flush", id });
-        } catch {
-          fire();
-        }
-      };
-      port1.unref();
-      const data: HookData = {
-        root: opts.root,
-        include: opts.include,
-        exclude: opts.exclude,
-        preset: opts.preset ?? "node",
-        port: port2,
-      };
-      if (opts.retainGenerated) data.retain = true;
-      if (cacheDir) data.cacheDir = cacheDir;
-      if (verbose) data.verbose = true;
-      (nodeModule as any).register(pathToFileURL(path.join(__dirname, "hooks.mjs")).href, {
-        data,
-        transferList: [port2],
-      });
-      disposers.push(() => port1.postMessage({ type: "disable" }));
-    } catch {
-      /* the CommonJS layer still works */
+        port1.unref();
+        data.port = port2;
+        (nodeModule as any).register(pathToFileURL(path.join(__dirname, "hooks.mjs")).href, {
+          data,
+          transferList: [port2],
+        });
+        g[API] = "async";
+        disposers.push(() => port1.postMessage({ type: "disable" }));
+      } catch {
+        /* the CommonJS layer still works */
+      }
     }
     return () => {
       for (const d of disposers) {

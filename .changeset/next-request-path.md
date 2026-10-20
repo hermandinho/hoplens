@@ -4,7 +4,7 @@
 ---
 
 Request path for Next dev (Turbopack and `--webpack`). With `HOPLENS_PATH=1`, or the sticky switch
-(the Path tab's Enable button, `hoplens init --path`: `.next/cache/hoplens/path.json`, or
+(the Path view's Enable button, `hoplens init --path`: `.next/cache/hoplens/path.json`, or
 withHoplens' `stateDir`), the instrumentation hook starts V8 block coverage first thing, before the
 first request's proxy and route code, and Trace path replays a GET once and shows which branches of
 your route and lib functions ran. Nothing of the inspector loads while it is off; NODE_V8_COVERAGE

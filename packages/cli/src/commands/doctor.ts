@@ -167,7 +167,9 @@ function integrations(pkg: any) {
     : skip("Zod not detected — RequestBuilder won't pre-fill schema examples");
 
   const portEnv = process.env.HOPLENS_PORT;
-  skip(portEnv ? `HOPLENS_PORT=${portEnv}` : "HOPLENS_PORT not set — Hoplens picks a free port automatically");
+  skip(
+    portEnv ? `HOPLENS_PORT=${portEnv}` : "HOPLENS_PORT not set — the UI uses 4983, or the first free port up to 4993",
+  );
 }
 
 function printSummary(state: { criticals: number; warnings: number }) {

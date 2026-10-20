@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { hookApi, importOrderHonored, versionHasSyncHooks } from "../src/register";
+import { TEST_NODE, testNodeFeatures, withTestNode } from "./test-node";
 
 const DIST = path.resolve(__dirname, "..", "dist");
 const REGISTER = path.join(DIST, "register.js");
@@ -32,7 +34,7 @@ globalThis.__hoplens = { wrap(fn, meta) { globalThis.__wrapped.push(meta); const
 function node(args: string[], cwd = root): { stdout: string; stderr: string; status: number | null } {
   const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: cwd };
   for (const k of Object.keys(env)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete env[k];
-  const r = spawnSync(process.execPath, args, { cwd, env, encoding: "utf8", timeout: 30000 });
+  const r = spawnSync(TEST_NODE, args, { cwd, env: withTestNode(env), encoding: "utf8", timeout: 30000 });
   return { stdout: r.stdout, stderr: r.stderr, status: r.status };
 }
 
@@ -83,18 +85,50 @@ describe("ESM hook", () => {
     const r = node([flag, preload(), "src/main.js"]);
     expect(r.stderr).toBe("");
     const out = parse(r.stdout);
+    const sync = testNodeFeatures().hookApi === "sync";
     expect(out.wrapped).toEqual([
       { name: "a", file: "src/a.js", line: 1 },
       { name: "b", file: "src/a.js", line: 4 },
+      // The in-thread (sync) hook gets the source of a CommonJS file imported from ESM from Node and
+      // gives it the CommonJS trailer; the worker's async hook gets none (Node reads it later itself).
+      ...(sync ? [{ name: "c", file: "src/old.cjs", line: 1 }] : []),
     ]);
     expect(out.aMarked).toBe(true);
-    // One hook instance: each file reported once, nothing else reported. The CommonJS file imported
-    // from ESM reaches the CommonJS layer with its source already read by Node's ESM loader (reported
-    // synchronously there, so in either order with the hook's report).
+    // One hook instance: each file reported once, nothing else reported. With the async hook, the
+    // CommonJS file imported from ESM reaches the CommonJS layer with its source already read by Node's
+    // ESM loader (reported synchronously there, so in either order with the hook's report); with the
+    // sync hook, the hook wrapped it and the layer says nothing more.
     expect(out.reports).toHaveLength(2);
     expect(out.reports).toContainEqual({ type: "wrapped", file: "src/a.js", fns: 2 });
-    expect(out.reports).toContainEqual({ type: "refused", file: "src/old.cjs", reason: "esm-loader" });
+    expect(out.reports).toContainEqual(
+      sync
+        ? { type: "wrapped", file: "src/old.cjs", fns: 1 }
+        : { type: "refused", file: "src/old.cjs", reason: "esm-loader" },
+    );
   });
+
+  test.each(["sync", "async"] as const)(
+    "HOPLENS_LOADER_HOOKS=%s picks the hook API (sync only where module.registerHooks exists)",
+    (want) => {
+      write(
+        "api.cjs",
+        `${PRELOAD(SHIM)}\nprocess.on("exit", () => console.log(JSON.stringify({ api: require(${JSON.stringify(REGISTER)}).registeredHookApi() })));`,
+      );
+      write("src/noop.js", "export const x = 1;\n");
+      const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: root, HOPLENS_LOADER_HOOKS: want };
+      for (const k of Object.keys(env)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete env[k];
+      const r = spawnSync(TEST_NODE, ["-r", path.join(root, "api.cjs"), "src/noop.js"], {
+        cwd: root,
+        env: withTestNode(env),
+        encoding: "utf8",
+        timeout: 30000,
+      });
+      const hasSync = spawnSync(TEST_NODE, ["-p", "typeof require('node:module').registerHooks"], {
+        encoding: "utf8",
+      }).stdout.trim();
+      expect(parse(r.stdout).api).toBe(want === "sync" && hasSync === "function" ? "sync" : "async");
+    },
+  );
 
   test("a source that differs from the file on disk is refused and loads untouched", () => {
     // A loader that changes the source (what tsx does).
@@ -225,6 +259,7 @@ setTimeout(() => console.log(JSON.stringify({ v: f7(), marked: Boolean(f7.__hopl
       expect(out.wrapped).toEqual([
         { name: "a", file: "src/a.js", line: 1 },
         { name: "b", file: "src/a.js", line: 4 },
+        ...(testNodeFeatures().hookApi === "sync" ? [{ name: "c", file: "src/old.cjs", line: 1 }] : []),
       ]);
     } finally {
       fs.rmSync(link, { recursive: true, force: true });
@@ -259,17 +294,20 @@ w.on("message", (m) => console.log(JSON.stringify({ registeredInWorker: m })));
 });
 
 describe("ESM hook: CommonJS that Node reads itself", () => {
-  test("--import with CommonJS TypeScript Node strips (.cts): the pristine source is wrapped in the hook", () => {
-    const app = path.join(root, "ctsapp");
-    const w = (rel: string, s: string) => write(path.join("ctsapp", rel), s);
-    w("package.json", JSON.stringify({ name: "ctsapp", private: true }));
-    w(
-      "src/math.cts",
-      "function add(a: number, b: number): number {\n  return a + b;\n}\nexports.add = add;\nexports.twice = (n: number): number => n * 2;\n",
-    );
-    w(
-      "src/server.cts",
-      `const math = require("./math.cts");
+  const strips = testNodeFeatures().typescript;
+  test.skipIf(!strips)(
+    `--import with CommonJS TypeScript Node strips (.cts): the pristine source is wrapped in the hook${strips ? "" : ` (skipped: Node ${testNodeFeatures().version} cannot strip types itself)`}`,
+    () => {
+      const app = path.join(root, "ctsapp");
+      const w = (rel: string, s: string) => write(path.join("ctsapp", rel), s);
+      w("package.json", JSON.stringify({ name: "ctsapp", private: true }));
+      w(
+        "src/math.cts",
+        "function add(a: number, b: number): number {\n  return a + b;\n}\nexports.add = add;\nexports.twice = (n: number): number => n * 2;\n",
+      );
+      w(
+        "src/server.cts",
+        `const math = require("./math.cts");
 exports.handler = function handler(): number {
   return math.add(1, 2);
 };
@@ -277,18 +315,44 @@ setTimeout(() => {
   console.log(JSON.stringify({ sum: exports.handler(), marked: [Boolean(math.add.__hoplens), Boolean(math.twice.__hoplens)], reports: globalThis.__reports }));
 }, 200);
 `,
-    );
-    const r = node(["--import", pathToFileURL(path.join(root, "preload.cjs")).href, "src/server.cts"], app);
-    expect(r.stderr).not.toMatch(/Error:/);
-    const out = parse(r.stdout);
-    expect(out.sum).toBe(3);
-    expect(out.marked).toEqual([true, true]);
-    expect(out.reports).toEqual(
-      expect.arrayContaining([
-        { type: "wrapped", file: "src/server.cts", fns: 1 },
-        { type: "wrapped", file: "src/math.cts", fns: 2 },
-      ]),
-    );
-    expect(out.reports.filter((x: any) => x.type !== "wrapped")).toEqual([]);
+      );
+      const r = node(["--import", pathToFileURL(path.join(root, "preload.cjs")).href, "src/server.cts"], app);
+      expect(r.stderr).not.toMatch(/Error:/);
+      const out = parse(r.stdout);
+      expect(out.sum).toBe(3);
+      expect(out.marked).toEqual([true, true]);
+      expect(out.reports).toEqual(
+        expect.arrayContaining([
+          { type: "wrapped", file: "src/server.cts", fns: 1 },
+          { type: "wrapped", file: "src/math.cts", fns: 2 },
+        ]),
+      );
+      expect(out.reports.filter((x: any) => x.type !== "wrapped")).toEqual([]);
+    },
+  );
+});
+
+describe("which hook API, per Node version", () => {
+  test("sync hooks from tsx's table: 22.22.3+, 24.11.1+, 25.1+, 26+; never on 20, 21, 23", () => {
+    for (const v of ["v22.22.3", "v22.23.0", "v24.11.1", "v24.22.0", "v25.1.0", "v26.0.0", "v27.3.1"])
+      expect(versionHasSyncHooks(v), v).toBe(true);
+    for (const v of ["v20.9.0", "v20.20.2", "v21.7.3", "v22.20.0", "v22.22.2", "v23.11.0", "v24.11.0", "v25.0.0", "x"])
+      expect(versionHasSyncHooks(v), v).toBe(false);
+  });
+
+  test("HOPLENS_LOADER_HOOKS overrides; sync only where module.registerHooks exists", () => {
+    expect(hookApi({}, "v24.22.0", true)).toBe("sync");
+    expect(hookApi({}, "v22.20.0", true)).toBe("async");
+    expect(hookApi({ HOPLENS_LOADER_HOOKS: "async" }, "v24.22.0", true)).toBe("async");
+    expect(hookApi({ HOPLENS_LOADER_HOOKS: "sync" }, "v22.20.0", true)).toBe("sync");
+    expect(hookApi({ HOPLENS_LOADER_HOOKS: "sync" }, "v20.9.0", false)).toBe("async");
+    expect(hookApi({}, "v24.22.0", false)).toBe("async");
+  });
+
+  test("--import order is kept from 20.11 on (bisected: 20.10.0 runs a CommonJS-importing preload late)", () => {
+    expect(importOrderHonored("v20.9.0")).toBe(false);
+    expect(importOrderHonored("v20.10.0")).toBe(false);
+    expect(importOrderHonored("v20.11.0")).toBe(true);
+    expect(importOrderHonored("v22.0.0")).toBe(true);
   });
 });

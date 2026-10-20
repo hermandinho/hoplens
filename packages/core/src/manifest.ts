@@ -569,12 +569,21 @@ export function checkRestart(root: string, dir: string, opts: RestartCheckOption
 }
 
 const DATA_EXT = /\.json$/i;
+/** JSON that changes how the project builds or runs without any module importing it. */
+const CONFIG_JSON = /^(?:package|[jt]sconfig(?:\.[\w.-]+)?)\.json$/i;
+
+/** True for a `.json` that only counts as an edit when some module imports it. Exported for tests. */
+export function isDataJson(rel: string): boolean {
+  const base = rel.slice(rel.lastIndexOf("/") + 1);
+  return DATA_EXT.test(base) && !CONFIG_JSON.test(base);
+}
 
 /**
  * Leave out of a diff what is not an edit: a file "deleted" only because a capped walk no longer
- * reached it (it is still on disk), and a `.json` under a source dir that no module imports and that
- * was written after the previous process started (a store the app writes itself, lowdb-style; a
- * top-level `package.json` / `tsconfig.json` always counts). Never throws.
+ * reached it (it is still on disk), and a `.json` that no module imports and that was written after
+ * the previous process started, wherever it sits (a store or dump the app writes itself, lowdb-style,
+ * or a `path.json` saved into the project root). `package.json` and `tsconfig*.json` /
+ * `jsconfig*.json` always count. Never throws.
  */
 function dropNoise(
   root: string,
@@ -593,7 +602,7 @@ function dropNoise(
         return true;
       }
     });
-  const data = [...changed, ...added].filter((f) => f.includes("/") && DATA_EXT.test(f));
+  const data = [...changed, ...added].filter(isDataJson);
   if (data.length) {
     const fresh = data.filter((f) => {
       const h = next.files[f];

@@ -137,11 +137,15 @@ describe("flag file", () => {
   });
 
   test("banner names the source", () => {
-    expect(pathOnLine("flag")).toBe("request path: on (flag; disable in the Path tab)");
+    expect(pathOnLine("flag")).toBe("request path: on (flag; disable in the Path view, press x on a request)");
     expect(pathOnLine("env")).toBe("request path: on (HOPLENS_PATH)");
-    expect(pathBanner({ state: "on" }, "flag")).toEqual({ info: "request path: on (flag; disable in the Path tab)" });
+    expect(pathBanner({ state: "on" }, "flag")).toEqual({
+      info: "request path: on (flag; disable in the Path view, press x on a request)",
+    });
     expect(pathBanner({ state: "on" }, "env")).toEqual({ info: "request path: on (HOPLENS_PATH)" });
-    expect(pathBanner({ state: "error", reason: "boom" }, "flag")?.note).toMatch(/disable it in the Path tab/);
+    expect(pathBanner({ state: "error", reason: "boom" }, "flag")?.note).toMatch(
+      /press x on a request and disable it in the Path view to silence this/,
+    );
   });
 });
 
@@ -231,7 +235,7 @@ describe("boot", () => {
     const s = await start({}, "--import");
     expect(s.probe).toMatchObject({ inspector: true, coverageModule: true, coverage: true });
     await poll(async () =>
-      s.stdout().includes("request path: on (flag; disable in the Path tab)") ? true : undefined,
+      s.stdout().includes("request path: on (flag; disable in the Path view, press x on a request)") ? true : undefined,
     );
     const meta = await request(s.port, "GET", "/__hoplens/api/meta");
     expect(meta.body.path).toEqual({ state: "on", source: "flag" });

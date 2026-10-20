@@ -12,6 +12,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { type Child, type Fixture, REGISTER, childEnv, freePort, makeFixture, poll, run } from "./helpers";
+import { testNodeFeatures } from "./test-node";
 
 const REGISTER_URL = pathToFileURL(REGISTER).href;
 const REPO = path.resolve(__dirname, "..", "..", "..");
@@ -216,12 +217,19 @@ const KEYS = {
 } as const;
 const MAPPED = ["handler", "classify", "scan", "guarded"] as const;
 
+/** The oracle is Node's own type stripping (22.6+ flag, default since 22.18): none on older Nodes. */
+const STRIPS_TYPES = testNodeFeatures().typescript;
+const P5_TITLE = `P5: TypeScript under every runner, against the type-stripping oracle${
+  STRIPS_TYPES ? "" : ` (skipped: Node ${testNodeFeatures().version} has no type stripping, the oracle)`
+}`;
+
 let esm: Fixture;
 let cjs: Fixture;
 /** The ground truth: the stripped run's payload. */
 let oracle: any;
 
 beforeAll(async () => {
+  if (!STRIPS_TYPES) return;
   const files = { "src/branchy.ts": BRANCHY, "src/routes.ts": ROUTES, "src/server.ts": SERVER };
   esm = makeFixture("express5", {
     ...files,
@@ -260,7 +268,7 @@ function expectOracle(p: any, setup: string) {
   expect(p.warnings.join("\n"), setup).toMatch(/dropped: not mapped to src\/branchy\.ts with certainty/);
 }
 
-describe("P5: TypeScript under every runner, against the type-stripping oracle", () => {
+describe.skipIf(!STRIPS_TYPES)(P5_TITLE, () => {
   test("oracle (node --import hoplens, Node's own type stripping): identity, exact, every decision counted", () => {
     expect(oracle.quality).toBe("exact");
     expect(oracle.analysis.text).toBe("Exited: end of GET /api/run/:mode L23");

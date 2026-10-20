@@ -10,6 +10,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { type Fixture, PKG, REGISTER, childEnv, freePort, makeFixture, poll, run } from "./helpers";
+import { testNodeFeatures } from "./test-node";
 
 const REGISTER_URL = pathToFileURL(REGISTER).href;
 
@@ -24,7 +25,19 @@ function tsxLoader(): string | undefined {
   }
 }
 const TSX = tsxLoader();
-const STRIPS_TYPES = Boolean((process.features as { typescript?: unknown }).typescript);
+const NODE = testNodeFeatures();
+const STRIPS_TYPES = NODE.typescript;
+/**
+ * The in-thread hook (module.registerHooks, where tsx uses it too): it runs on the main thread, so the
+ * main thread loads TypeScript on a cold start, and Node hands it the source of a CommonJS file
+ * imported from ESM (legacy.cjs), which it wraps. The async hook runs in the hooks worker and never
+ * gets that source (the CommonJS layer reports it refused=esm-loader).
+ */
+const SYNC = NODE.hookApi === "sync";
+/** The banner's count for src/server.js (svc.js, plus legacy.cjs under the sync hook). */
+const SERVER_JS_HOPS = SYNC ? "function hops: 6 fns in 2 files" : "function hops: 5 fns in 1 file";
+/** Where `--import tsx --import hoplens` gives Hoplens tsx's output (COMPILED); Node 20.9 / 20.10 run tsx late (RAW). */
+const TSX_FIRST_MODE = NODE.importOrdered ? "compiled" : "raw";
 
 /** The services module, in JS and in TypeScript (same lines, so the same line numbers). */
 const SVC_BODY = (ts: boolean) => `export async function getThing(id${ts ? ": number" : ""}) {
@@ -167,8 +180,8 @@ describe("ESM JavaScript (--import)", () => {
     s = await start(fx, ["--import", REGISTER_URL, "src/server.js"]);
   });
 
-  test("the shim is in before user code; the main thread loads no TypeScript", () => {
-    expect(s.probe).toMatchObject({ global: true, wrapped: true, typescript: false });
+  test(`the shim is in before user code; the main thread loads ${SYNC ? "TypeScript (the sync hook parses there)" : "no TypeScript"}`, () => {
+    expect(s.probe).toMatchObject({ global: true, wrapped: true, typescript: SYNC });
   });
 
   test("handler > fn > fn, with the file and line of each function", async () => {
@@ -204,9 +217,13 @@ describe("ESM JavaScript (--import)", () => {
     expect(await topFrame(s)).toBe(want);
   });
 
-  test("the banner counts the wrapped functions and the CommonJS file it left alone, on one line", async () => {
+  test(`the banner counts the wrapped functions${SYNC ? " (legacy.cjs too)" : " and the CommonJS file it left alone"}, on one line`, async () => {
     const out = await poll(async () => (s.stdout().includes("function hops:") ? s.stdout() : undefined));
-    expect(out).toContain("function hops: 5 fns in 1 file");
+    expect(out).toContain(SERVER_JS_HOPS);
+    if (SYNC) {
+      expect(out).not.toContain("function hops skipped");
+      return;
+    }
     expect(out.split("function hops skipped").length - 1).toBe(1);
     // legacy.cjs is imported from ESM: Node's ESM loader read it, so the CommonJS layer could not swap it.
     expect(out).toContain(
@@ -223,7 +240,7 @@ describe("-r preload", () => {
     const t = await traceFor(s.port, "/thing/8");
     expect(fnSpans(t).map((x: any) => x.name)).toEqual(["getThing", "label"]);
     const out = await poll(async () => (s.stdout().includes("function hops:") ? s.stdout() : undefined));
-    expect(out).toContain("function hops: 5 fns in 1 file");
+    expect(out).toContain(SERVER_JS_HOPS);
     expect(out).not.toContain("compiled by another loader");
   });
 });
@@ -375,19 +392,23 @@ describe.skipIf(!TSX_CLI)("tsx CLI (COMPILED mode)", { timeout: 30_000 }, () => 
     expect(await topFrame(s)).toBe(want);
   });
 
-  test("a file COMPILED mode cannot map is refused in one line; it and the app run as without Hoplens", async () => {
-    const s = await startTree([TSX_CLI!, "--import", REGISTER_URL, "src/server-odd.ts"]);
-    await expectTsHops(s, 6);
-    expect(JSON.parse((await get(s.port, "/odd")).body)).toEqual({ tidy: 2, later: 2, marked: false });
-    const out = await poll(async () => (s.stdout().includes("function hops:") ? s.stdout() : undefined));
-    expect(out).toContain("function hops: 5 fns in 1 file");
-    const refusals = out.split("\n").filter((l) => l.includes("function hops skipped"));
-    expect(refusals).toHaveLength(1);
-    expect(refusals[0]).toContain(
-      "function hops skipped for 1 TypeScript file whose compiled output (tsx?) Hoplens could not map back to the source (src/usvc.ts: later:",
-    );
-    expect(s.stderr()).toBe("");
-  });
+  // Node 20.9 / 20.10 run the CLI's `--import tsx` loader after `--import hoplens` (RAW): every file maps.
+  test.skipIf(!NODE.importOrdered)(
+    `a file COMPILED mode cannot map is refused in one line; it and the app run as without Hoplens${NODE.importOrdered ? "" : ` (skipped: Node ${NODE.version} does not keep --import order, so tsx's hooks run first and Hoplens is RAW)`}`,
+    async () => {
+      const s = await startTree([TSX_CLI!, "--import", REGISTER_URL, "src/server-odd.ts"]);
+      await expectTsHops(s, 6);
+      expect(JSON.parse((await get(s.port, "/odd")).body)).toEqual({ tidy: 2, later: 2, marked: false });
+      const out = await poll(async () => (s.stdout().includes("function hops:") ? s.stdout() : undefined));
+      expect(out).toContain("function hops: 5 fns in 1 file");
+      const refusals = out.split("\n").filter((l) => l.includes("function hops skipped"));
+      expect(refusals).toHaveLength(1);
+      expect(refusals[0]).toContain(
+        "function hops skipped for 1 TypeScript file whose compiled output (tsx?) Hoplens could not map back to the source (src/usvc.ts: later:",
+      );
+      expect(s.stderr()).toBe("");
+    },
+  );
 });
 
 // The transform cache across a watch restart: the second start of the same unchanged app (what node
@@ -412,11 +433,20 @@ describe("transform cache across restarts", () => {
     return { cold, warm };
   }
 
-  function expectWarm(cold: Started, warm: Started, file: string, mode: string) {
+  function expectWarm(
+    cold: Started,
+    warm: Started,
+    file: string,
+    mode: string,
+    hops = "function hops: 5 fns in 1 file",
+  ) {
     const c = parsed(debugLines(cold));
-    expect(c.find((l) => l.includes(` ${file} `))).toMatch(
-      new RegExp(`mode=${mode} wrapped=5 cache=miss ts=loaded\\(hooks\\)`),
-    );
+    expect(c.find((l) => l.includes(` ${file} `))).toMatch(new RegExp(`mode=${mode} wrapped=5 cache=miss`));
+    // TypeScript loads once per thread that parses: the hooks worker (async hook; legacy.cjs is not
+    // parsed), or the main thread for whichever file it parsed first (sync hook).
+    const tsLoads = debugLines(cold).flatMap((l) => /ts=loaded\((\w+)\)/.exec(l)?.[1] ?? []);
+    if (SYNC) expect(tsLoads).toEqual(["main"]);
+    else expect(c.find((l) => l.includes(` ${file} `))).toContain("ts=loaded(hooks)");
     const w = parsed(debugLines(warm));
     expect(w.length).toBe(c.length);
     for (const l of w) {
@@ -424,21 +454,24 @@ describe("transform cache across restarts", () => {
       expect(l).not.toContain("ts=loaded");
     }
     expect(warm.probe).toMatchObject({ wrapped: true, typescript: false });
-    expect(warm.stdout()).toContain(
-      `function hops: 5 fns in 1 file (cache: ${w.length} hit${w.length === 1 ? "" : "s"})`,
-    );
-    expect(cold.stdout()).toContain("function hops: 5 fns in 1 file (cache: 0 hits)");
+    expect(warm.stdout()).toContain(`${hops} (cache: ${w.length} hit${w.length === 1 ? "" : "s"})`);
+    expect(cold.stdout()).toContain(`${hops} (cache: 0 hits)`);
     // The debug log never goes to stdout.
     expect(warm.stdout()).not.toContain("hoplens:transform");
   }
 
   test("ESM JavaScript (RAW): a warm restart parses nothing", async () => {
     const { cold, warm } = await twice(["--import", REGISTER_URL, "src/server.js"], ".state-raw");
-    expectWarm(cold, warm, "src/svc.js", "raw");
-    // Not parsed either way, so never cached; its reason reads the same as in the banner.
-    expect(debugLines(warm)).toContain(
-      "hoplens:transform src/legacy.cjs mode=cjs refused=esm-loader (CommonJS Node read through its ESM loader)",
-    );
+    expectWarm(cold, warm, "src/svc.js", "raw", SERVER_JS_HOPS);
+    if (SYNC) {
+      // The sync hook got legacy.cjs's source from Node: parsed, cached, answered from the cache.
+      expect(debugLines(warm).find((l) => l.includes(" src/legacy.cjs "))).toMatch(/mode=cjs wrapped=1 cache=hit/);
+    } else {
+      // Not parsed either way, so never cached; its reason reads the same as in the banner.
+      expect(debugLines(warm)).toContain(
+        "hoplens:transform src/legacy.cjs mode=cjs refused=esm-loader (CommonJS Node read through its ESM loader)",
+      );
+    }
     await get(warm.port, "/thing/9");
     const t = await traceFor(warm.port, "/thing/9");
     expect(fnSpans(t).map((x: any) => x.name)).toEqual(["getThing", "label"]);
@@ -447,7 +480,7 @@ describe("transform cache across restarts", () => {
 
   test.skipIf(!TSX)("tsx first (COMPILED): a warm restart parses nothing, same hops and lines", async () => {
     const { cold, warm } = await twice(["--import", TSX!, "--import", REGISTER_URL, "src/server-ts.js"], ".state-ts");
-    expectWarm(cold, warm, "src/tsvc.ts", "compiled");
+    expectWarm(cold, warm, "src/tsvc.ts", TSX_FIRST_MODE);
     await expectTsHops(warm, 10);
   });
 
@@ -459,7 +492,7 @@ describe("transform cache across restarts", () => {
     };
     const s = await start(fx, ["--import", REGISTER_URL, "src/server.js"], env);
     await poll(async () => (s.stdout().includes("function hops:") ? true : undefined));
-    expect(s.stdout()).toContain("function hops: 5 fns in 1 file (cache: off)");
+    expect(s.stdout()).toContain(`${SERVER_JS_HOPS} (cache: off)`);
     for (const l of parsed(debugLines(s))) expect(l).not.toContain("cache=");
     expect(fs.existsSync(path.join(fx.root, ".state-off", "transform"))).toBe(false);
   });

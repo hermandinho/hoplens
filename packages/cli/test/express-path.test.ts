@@ -108,6 +108,7 @@ describe("init: the request path question", () => {
     await initIn([], again);
     expect(again.asked()).toBe("");
     expect(out.text()).toContain("Request path already enabled");
+    expect(out.text()).toContain("disable it in the Path view (press x on a request) or with hoplens init --no-path");
     await initIn(["--no-path"], tty("y"));
     expect(fx.exists(FLAG)).toBe(false);
     expect(out.text()).toContain(`✓ Disabled request path tracing (${FLAG})`);
@@ -187,6 +188,7 @@ describe("HOPLENS_OPTIONS in the dev script", () => {
     expect(fx.exists(".hoplens/path.json")).toBe(true);
     expect(fx.exists(FLAG)).toBe(false);
     await withCwd(fx.dir, () => doctor([]));
+    expect(out.text()).toContain("disable it in the Path view (press x on a request)");
     expect(out.text()).toContain("• request path: on (flag) — .hoplens/path.json");
     await withCwd(fx.dir, () => remove([]));
     expect(fx.exists(".hoplens/path.json")).toBe(false);

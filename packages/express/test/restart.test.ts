@@ -130,30 +130,91 @@ test("node --watch: a saved edit is a restart epoch naming the file and route, w
   expect(new Set(bannerPorts(child.stdout()))).toEqual(new Set([uiPort]));
 }, 90000);
 
+/**
+ * Preloaded before the register hook: reports each UI listen and each listen error on HOPLENS_PORT
+ * (and the 9 above it) as a JSON stdout line, written synchronously, and on the first EADDRINUSE
+ * freezes the process until the test creates PROBE_RELEASE. The UI's same-port window
+ * (samePortRetryMs, 1s of wall clock from its first try) is then not raced by the test's own
+ * scheduling: under a loaded CPU the test used to learn of the app's listen by HTTP polling, sleep
+ * 300ms and only then free the port, by when the window could have closed and the UI moved up a
+ * port. The freeze runs after core's error handler scheduled its retry (core adds its once("error")
+ * before listen, this one is added at listen), so what follows the release is core's own retry.
+ */
+const PORT_PROBE = `
+  const fs = require("fs");
+  const net = require("net");
+  const uiPort = Number(process.env.HOPLENS_PORT);
+  const say = (o) => fs.writeSync(1, JSON.stringify(o) + "\\n");
+  let frozen = false;
+  const listen = net.Server.prototype.listen;
+  net.Server.prototype.listen = function (...args) {
+    const port = typeof args[0] === "number" ? args[0] : args[0] && args[0].port;
+    if (port >= uiPort && port < uiPort + 10) {
+      say({ probeListen: port });
+      this.once("error", (err) => {
+        say({ probeError: port, code: err.code });
+        if (frozen || err.code !== "EADDRINUSE") return;
+        frozen = true;
+        const cell = new Int32Array(new SharedArrayBuffer(4));
+        const until = Date.now() + 60000;
+        while (!fs.existsSync(process.env.PROBE_RELEASE) && Date.now() < until) Atomics.wait(cell, 0, 0, 10);
+        say({ probeReleased: port });
+      });
+    }
+    return listen.apply(this, args);
+  };
+`;
+
+/** Every JSON stdout line of a child that has `key`. */
+const jsonLines = (out: string, key: string): any[] =>
+  out
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("{"))
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((v) => v && key in v);
+
 test("the UI waits for its port while the previous process still holds it", async () => {
+  fs.writeFileSync(path.join(fx.root, "port-probe.cjs"), PORT_PROBE);
+  const release = path.join(fx.root, "port-probe.release");
+  fs.rmSync(release, { force: true });
   const appPort = await freePort();
   const uiPort = await freePort();
   // Stands in for the old process of a restart, still closing the UI port.
   const holder = http.createServer();
   await new Promise<void>((r) => holder.listen(uiPort, "127.0.0.1", () => r()));
   const c = run(
-    ["-r", REGISTER, "app.cjs"],
+    ["-r", "./port-probe.cjs", "-r", REGISTER, "app.cjs"],
     fx.root,
-    childEnv({ APP_PORT: String(appPort), HOPLENS_PORT: String(uiPort) }),
+    childEnv({ APP_PORT: String(appPort), HOPLENS_PORT: String(uiPort), PROBE_RELEASE: release }),
   );
   try {
-    // The UI tried its port when the app started listening, just before this answers.
-    pids.add(await appPid(appPort));
-    await new Promise((r) => setTimeout(r, 300));
+    // The UI tried its port at the app's listen and found it held: no banner, nothing else tried.
+    const busy = await c.waitFor("probeError", 20000);
+    expect(busy).toEqual({ probeError: uiPort, code: "EADDRINUSE" });
     expect(bannerPorts(c.stdout())).toEqual([]);
-    holder.close();
+    expect(jsonLines(c.stdout(), "probeListen").map((l) => l.probeListen)).toEqual([uiPort]);
+    // The old process lets go; the UI's next try of the same port takes it.
+    await new Promise<void>((r) => holder.close(() => r()));
+    fs.writeFileSync(release, "");
     const ports = await poll(async () => {
       const p = bannerPorts(c.stdout());
       return p.length ? p : undefined;
-    }, 10000);
+    }, 20000);
     expect(ports).toEqual([uiPort]);
+    // It retried its own port after the busy try, never one further up.
+    const tried = jsonLines(c.stdout(), "probeListen").map((l) => l.probeListen);
+    expect(tried.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(tried)).toEqual(new Set([uiPort]));
+    expect((await get(uiPort, "/api/meta")).status).toBe(200);
+    pids.add(await appPid(appPort));
   } finally {
     await c.kill();
     holder.close();
   }
-}, 30000);
+}, 60000);

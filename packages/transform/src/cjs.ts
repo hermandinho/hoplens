@@ -28,6 +28,7 @@ import nodeModule from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { cached, openCache } from "./cache";
+import { claimTsLoaded, esmHandledCommonJS } from "./esmload";
 import { retainGenerated } from "./generated";
 import type { TransformOptions } from "./index";
 import type { HookReport, ReportMeta } from "./register";
@@ -134,7 +135,6 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
     }
     return cache;
   };
-  let tsSeen = false;
   /** Files whose handler is running now, by keyOf(filename). */
   const active = new Map<string, Entry>();
   /** Our wrappers, each with the handler it wraps. */
@@ -215,10 +215,7 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
       if (!opts.verbose) return {};
       const m: ReportMeta = { mode: "cjs", ms: performance.now() - t0 };
       if (hit !== undefined) m.cache = hit ? "hit" : "miss";
-      if (!tsSeen && tx?.typescriptLoaded()) {
-        tsSeen = true;
-        m.ts = "main";
-      }
+      if (claimTsLoaded(Boolean(tx?.typescriptLoaded()))) m.ts = "main";
       return m;
     };
     try {
@@ -287,7 +284,9 @@ export function installCommonJS(opts: CommonJSLayerOptions): () => void {
       return;
     }
     // Never read: Node already held the source (its ESM loader read it). Report it only when it looks
-    // like it has something to wrap; a regex, so no TypeScript loads for it.
+    // like it has something to wrap; a regex, so no TypeScript loads for it. The in-thread ESM step
+    // (register.ts, sync hooks) got that source and already reported the file.
+    if (esmHandledCommonJS(e.file)) return;
     try {
       const src = installRead.call(fs, e.file, "utf8") as string;
       const t = transform();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { FALLBACK_DIRS as EXPRESS_FALLBACK_DIRS } from "../../express/src/autotrace";
 import { doctor } from "../src/commands/doctor";
-import { FALLBACK_DIRS, runnerView } from "../src/express/hops";
+import { FALLBACK_DIRS, appNodeVersion, nodeLines, runnerView, specStripsTypes } from "../src/express/hops";
 import { captureConsole, installFake, seedExpress } from "./express-fixture";
 import { makeFixture, withCwd } from "./fixture";
 
@@ -221,6 +221,137 @@ describe("hoplens doctor: Function hops (express)", () => {
     });
     expect(runnerView("ts-node-esm app.ts")).toEqual({ kind: "ts-node-esm" });
     expect(runnerView("ts-node --esm app.ts")).toEqual({ kind: "ts-node-esm" });
+  });
+
+  test("nodeLines: plain node on a .ts entry is judged by the app's pinned Node, not the doctor's", () => {
+    const n20 = { version: "v20.9.0", stripsTypes: false, hookApi: "async" as const, importOrdered: false };
+    const n24 = { version: "v24.22.0", stripsTypes: true, hookApi: "sync" as const, importOrdered: true };
+    const plainTs = `node ${F} src/server.ts`;
+    const fix = "run it with tsx (tsx --import hoplens/express/register src/server.ts)";
+    // Pinned below type stripping: an error naming the pin, whatever Node runs the doctor.
+    for (const n of [n20, n24])
+      expect(nodeLines(plainTs, runnerView(plainTs), n, { spec: "20.9.0", from: ".nvmrc" })).toMatchObject({
+        nope: [
+          `src/server.ts is TypeScript and the app's Node (20.9.0, from .nvmrc) does not strip types (22.18+ does by default, 22.6+ with --experimental-strip-types) — ${fix} or a newer Node`,
+        ],
+        warn: [],
+      });
+    // Pinned at or above 22.18: nothing to say, even when the doctor runs on 20.9.
+    expect(
+      nodeLines(plainTs, runnerView(plainTs), n20, { spec: ">=22.18", from: "package.json engines.node" }),
+    ).toMatchObject({ nope: [], warn: [] });
+    // Not pinned: a warning naming 22.18+, never an error, on either doctor Node.
+    for (const n of [n20, n24])
+      expect(nodeLines(plainTs, runnerView(plainTs), n)).toMatchObject({
+        nope: [],
+        warn: [
+          `src/server.ts is TypeScript under plain node: that needs Node 22.18+ (22.6+ with --experimental-strip-types), and the project pins no Node version (engines.node, .nvmrc, .node-version) — on an older Node, ${fix}`,
+        ],
+      });
+    // A range that allows both: a warning quoting it.
+    expect(
+      nodeLines(plainTs, runnerView(plainTs), n24, { spec: ">=20.9", from: "package.json engines.node" }).warn[0],
+    ).toContain(", and package.json engines.node allows >=20.9 — on an older Node");
+    // Stripping turned off: an error on any Node.
+    const noStrip = `node --no-experimental-strip-types ${F} src/server.ts`;
+    expect(nodeLines(noStrip, runnerView(noStrip), n24, { spec: "24", from: ".nvmrc" }).nope[0]).toContain(
+      "runs node with --no-experimental-strip-types",
+    );
+    // A loader in the command or in NODE_OPTIONS: Node does not run the .ts itself.
+    for (const cmd of [
+      `node -r @swc-node/register ${F} src/server.ts`,
+      `node -r esbuild-register ${F} src/server.ts`,
+      `node --experimental-strip-types ${F} src/server.ts`,
+      `node --experimental-transform-types ${F} src/server.ts`,
+      `NODE_OPTIONS="--import tsx" node ${F} src/server.ts`,
+    ])
+      expect(nodeLines(cmd, runnerView(cmd), n20, { spec: "20.9.0", from: ".nvmrc" }), cmd).toMatchObject({
+        nope: [],
+        warn: [],
+      });
+    expect(
+      nodeLines(
+        plainTs,
+        runnerView(plainTs),
+        n20,
+        { spec: "20.9.0", from: ".nvmrc" },
+        { NODE_OPTIONS: "--import tsx" },
+      ),
+    ).toMatchObject({ nope: [], warn: [] });
+    // An unrecognised runner falls back to kind "node": an info line, never an error or a warning.
+    for (const cmd of [`bun ${F} src/server.ts`, `my-runner ${F} src/server.ts`]) {
+      expect(runnerView(cmd).kind).toBe("node");
+      const says = nodeLines(cmd, runnerView(cmd), n20, { spec: "20.9.0", from: ".nvmrc" });
+      expect(says.nope, cmd).toEqual([]);
+      expect(says.warn, cmd).toEqual([]);
+      expect(says.note[1], cmd).toContain(
+        "src/server.ts is TypeScript and the doctor does not recognise the dev script's runner",
+      );
+    }
+    // Plain JS on 20.9: nothing to say beyond the hook API.
+    const js = `node ${F} src/server.js`;
+    expect(nodeLines(js, runnerView(js), n20)).toEqual({
+      nope: [],
+      warn: [],
+      note: ["Node v20.9.0: the ESM hook runs in Node's hooks worker (module.register)"],
+    });
+    const tsxFirst = `node --import tsx ${F} src/server.ts`;
+    expect(nodeLines(tsxFirst, runnerView(tsxFirst), n20).note[1]).toContain(
+      "Node v20.9.0 runs `--import tsx` after Hoplens' hook (20.9 / 20.10 do not keep --import order; 20.11+ do)",
+    );
+    expect(nodeLines(tsxFirst, runnerView(tsxFirst), n24).note).toEqual([
+      "Node v24.22.0: the ESM hook runs in-thread (module.registerHooks, as tsx's does on this Node); a cold start parses on the main thread, a warm one answers from the transform cache",
+    ]);
+    // The tsx CLI runs the entry itself: no stripping needed.
+    const cli = `tsx ${F} src/server.ts`;
+    expect(nodeLines(cli, runnerView(cli), n20)).toMatchObject({ nope: [], warn: [] });
+  });
+
+  test("specStripsTypes reads exact pins, ranges and LTS names", () => {
+    for (const s of ["24", "v24.1.0", "22.18.0", "^22.18", ">=22.18", ">=23.6", "lts/krypton", "~22.19", "22.18.x"])
+      expect(specStripsTypes(s), s).toBe("yes");
+    for (const s of ["20.9.0", "v20", "20.x", "^20.9.0", "<22", "22.17", "23.3.0", "lts/iron", "lts/jod", "18 || 20"])
+      expect(specStripsTypes(s), s).toBe("no");
+    for (const s of [">=20.9", "22", "^22.0.0", "*", "node", "lts/*", "latest", "20 || 24", "garbage"])
+      expect(specStripsTypes(s), s).toBe("unknown");
+  });
+
+  test("appNodeVersion: volta, then .node-version, then .nvmrc, then engines.node", () => {
+    seedExpress(fx, { extra: { engines: { node: ">=20.9" } } });
+    expect(appNodeVersion(fx.dir)).toEqual({ spec: ">=20.9", from: "package.json engines.node" });
+    fx.write(".nvmrc", "# pinned\nv20.9.0\n");
+    expect(appNodeVersion(fx.dir)).toEqual({ spec: "v20.9.0", from: ".nvmrc" });
+    fx.write(".node-version", "24.22.0\n");
+    expect(appNodeVersion(fx.dir)).toEqual({ spec: "24.22.0", from: ".node-version" });
+    seedExpress(fx, { extra: { volta: { node: "22.18.0" } } });
+    expect(appNodeVersion(fx.dir)).toEqual({ spec: "22.18.0", from: "package.json volta.node" });
+  });
+
+  test("doctor: plain node on a .ts entry with a too-old pinned Node is critical; unpinned is a warning", async () => {
+    project(`node ${F} src/server.ts`);
+    fx.write(".nvmrc", "20.9.0\n");
+    await run();
+    expect(section()).toContain("✗ src/server.ts is TypeScript and the app's Node (20.9.0, from .nvmrc)");
+    expect(process.exitCode).toBe(1);
+
+    out.restore();
+    fx.cleanup();
+    fx = makeFixture();
+    out = captureConsole();
+    process.exitCode = 0;
+    project(`node ${F} src/server.ts`);
+    await run();
+    expect(section()).toContain("! src/server.ts is TypeScript under plain node: that needs Node 22.18+");
+    expect(section()).not.toContain("✗ src/server.ts");
+  });
+
+  test("doctor: an unrecognised runner on a .ts entry is an info line", async () => {
+    project(`my-runner ${F} src/server.ts`);
+    fx.write(".nvmrc", "20.9.0\n");
+    await run();
+    expect(section()).toContain("• src/server.ts is TypeScript and the doctor does not recognise");
+    expect(section()).not.toContain("! src/server.ts");
+    expect(section()).not.toContain("✗ src/server.ts");
   });
 
   test("FALLBACK_DIRS is the register hook's list", () => {

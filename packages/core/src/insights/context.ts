@@ -89,29 +89,45 @@ export function methodOf(s: SpanRecord): string {
   return String(s.attrs["http.method"] ?? s.attrs["http.request.method"] ?? "GET").toUpperCase();
 }
 
-// Spans don't change once a trace is finalized, so a span's shape is computed once and shared by
-// every rule that groups on it.
-const shapes = new WeakMap<SpanRecord, string | null>();
+// Shapes are memoized by the raw statement / url string, not per span: a per-span WeakMap entry
+// for every span of every trace was the most expensive thing in the analysis (ephemeron inserts
+// plus the GC work they cause), while a string-keyed hit costs one lookup on a hash V8 caches in
+// the string. The cached shape is also the same string object every time, so the rules' Maps
+// keyed on it hash it once. Bounded like facts.ts's normalizer caches.
+const SHAPE_MEMO_MAX = 1000;
+const dbShapes = new Map<string, string>();
+const redisShapes = new Map<string, string>();
+const prismaShapes = new Map<string, string>();
+const fetchShapes = new Map<string, Map<string, string>>(); // method -> url -> shape
+
+function remember(cache: Map<string, string>, key: string, v: string): string {
+  if (cache.size >= SHAPE_MEMO_MAX) cache.clear();
+  cache.set(key, v);
+  return v;
+}
 
 /** Normalized identity of an I/O span (query shape or method+url shape); undefined for other spans. */
 export function shapeOf(s: SpanRecord): string | undefined {
-  let v = shapes.get(s);
-  if (v === undefined) {
-    v = computeShape(s) ?? null;
-    shapes.set(s, v);
-  }
-  return v ?? undefined;
-}
-
-function computeShape(s: SpanRecord): string | undefined {
   if (s.kind === "db") {
     const q = statementOf(s);
-    if (q) return `${isRedis(s) ? "redis" : "db"}:${normalizeSql(q)}`;
-    return s.name.startsWith("prisma:") ? `db:${s.name}` : undefined;
+    if (q) {
+      const redis = isRedis(s);
+      const cache = redis ? redisShapes : dbShapes;
+      return cache.get(q) ?? remember(cache, q, `${redis ? "redis" : "db"}:${normalizeSql(q)}`);
+    }
+    if (!s.name.startsWith("prisma:")) return undefined;
+    return prismaShapes.get(s.name) ?? remember(prismaShapes, s.name, `db:${s.name}`);
   }
   if (s.kind === "fetch") {
     const u = urlOf(s);
-    return u ? `fetch:${methodOf(s)} ${normalizeUrl(u)}` : undefined;
+    if (!u) return undefined;
+    const method = methodOf(s);
+    let byUrl = fetchShapes.get(method);
+    if (!byUrl) {
+      if (fetchShapes.size >= 64) fetchShapes.clear();
+      fetchShapes.set(method, (byUrl = new Map()));
+    }
+    return byUrl.get(u) ?? remember(byUrl, u, `fetch:${method} ${normalizeUrl(u)}`);
   }
   return undefined;
 }

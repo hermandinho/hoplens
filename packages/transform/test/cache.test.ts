@@ -21,6 +21,7 @@ import {
   transformVersion,
 } from "../src/cache";
 import { debugLine, transformDebug } from "../src/register";
+import { TEST_NODE, testNodeFeatures, withTestNode } from "./test-node";
 
 const DIST = path.resolve(__dirname, "..", "dist");
 const REGISTER = path.join(DIST, "register.js");
@@ -357,11 +358,12 @@ console.log(JSON.stringify({
     for (const k of Object.keys(e)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete e[k];
     if (!("HOPLENS_DEBUG" in env)) e.HOPLENS_DEBUG = "transform";
     if (!("HOPLENS_TRANSFORM_CACHE" in env)) Reflect.deleteProperty(e, "HOPLENS_TRANSFORM_CACHE");
-    const r = spawnSync(
-      process.execPath,
-      ["--import", pathToFileURL(path.join(root, "preload.cjs")).href, "src/main.mjs"],
-      { cwd: root, env: e, encoding: "utf8", timeout: 30000 },
-    );
+    const r = spawnSync(TEST_NODE, ["--import", pathToFileURL(path.join(root, "preload.cjs")).href, "src/main.mjs"], {
+      cwd: root,
+      env: withTestNode(e),
+      encoding: "utf8",
+      timeout: 30000,
+    });
     const lines = r.stderr.split(/\r?\n/).filter((l) => l.startsWith("hoplens:transform "));
     const line = (file: string) => lines.find((l) => l.startsWith(`hoplens:transform ${file} `)) ?? "";
     return { r, out: JSON.parse(r.stdout.trim().split(/\r?\n/).pop()!), lines, line };
@@ -385,12 +387,19 @@ console.log(JSON.stringify({
     expect(cold.out.mainTs).toBe(true);
     // The debug log is on stderr only, one line per file.
     expect(cold.r.stdout).not.toContain("hoplens:transform");
+    // Each thread loads TypeScript once: the hooks worker and the main thread with the async hook,
+    // only the main thread (first for the ES module) with the in-thread sync hook.
+    const sync = testNodeFeatures().hookApi === "sync";
     expect(cold.line("src/esm.mjs")).toMatch(
-      /^hoplens:transform src\/esm\.mjs mode=raw wrapped=2 cache=miss ts=loaded\(hooks\) \d+\.\dms$/,
+      sync
+        ? /^hoplens:transform src\/esm\.mjs mode=raw wrapped=2 cache=miss ts=loaded\(main\) \d+\.\dms$/
+        : /^hoplens:transform src\/esm\.mjs mode=raw wrapped=2 cache=miss ts=loaded\(hooks\) \d+\.\dms$/,
     );
     expect(cold.line("src/none.mjs")).toMatch(/^hoplens:transform src\/none\.mjs mode=raw none cache=miss \d+\.\dms$/);
     expect(cold.line("src/old.cjs")).toMatch(
-      /^hoplens:transform src\/old\.cjs mode=cjs wrapped=1 cache=miss ts=loaded\(main\) \d+\.\dms$/,
+      sync
+        ? /^hoplens:transform src\/old\.cjs mode=cjs wrapped=1 cache=miss \d+\.\dms$/
+        : /^hoplens:transform src\/old\.cjs mode=cjs wrapped=1 cache=miss ts=loaded\(main\) \d+\.\dms$/,
     );
     // No `export` token at all: ruled out by the prescan, never hashed, parsed or logged.
     expect(cold.line("src/main.mjs")).toBe("");
@@ -444,11 +453,11 @@ globalThis.__hoplens = { wrap(fn) { const w = function (...a) { return fn.apply(
 register({ root: process.env.FX_ROOT, include: ["src/**"], preset: "node", cacheDir: process.env.FX_CACHE, onReport: (r) => globalThis.__seen.push(r.file) });
 `,
     );
-    const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: root, FX_CACHE: cacheDir() };
+    const env: NodeJS.ProcessEnv = withTestNode({ ...process.env, FX_ROOT: root, FX_CACHE: cacheDir() });
     for (const k of Object.keys(env))
       if (k.startsWith("VITEST") || k.startsWith("HOPLENS") || k === "NODE_OPTIONS") delete env[k];
     for (let i = 0; i < 2; i++) {
-      const r = spawnSync(process.execPath, ["-r", pre, "flush.mjs"], {
+      const r = spawnSync(TEST_NODE, ["-r", pre, "flush.mjs"], {
         cwd: root,
         env,
         encoding: "utf8",
@@ -461,7 +470,7 @@ register({ root: process.env.FX_ROOT, include: ["src/**"], preset: "node", cache
     }
     // No hook registered: right away.
     const r = spawnSync(
-      process.execPath,
+      TEST_NODE,
       ["-e", `require(${JSON.stringify(REGISTER)}).flushReports(() => console.log("now"))`],
       { cwd: root, env, encoding: "utf8", timeout: 30000 },
     );

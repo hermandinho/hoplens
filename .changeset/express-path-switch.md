@@ -12,7 +12,7 @@ Request path: a sticky one-click switch. The path stays off by default; turning 
   (`{"enabled":true,"since":ISO,"by":"ui"|"init"}`; `node_modules/.cache/hoplens` by default,
   honouring `HOPLENS_OPTIONS` `stateDir` / `root`) before coverage would start. `HOPLENS_PATH=1` / `0`
   always wins, then the flag, else off; the dev gate is unchanged. With the path off the hook only
-  reads that one small file. The banner says `request path: on (flag; disable in the Path tab)` or
+  reads that one small file. The banner says `request path: on (flag; disable in the Path view, press x on a request)` or
   `request path: on (HOPLENS_PATH)`.
 - `@hoplens/core`: `RuntimeConfig.path.control` (`PathControl`) is an adapter's switch.
   `POST /api/path/enable` and `/api/path/disable` write / remove the flag atomically and answer the
@@ -20,7 +20,7 @@ Request path: a sticky one-click switch. The path stays off by default; turning 
   403; 409 `env` when `HOPLENS_PATH` decided, 409 `unsupported` without a control (Next.js: Express
   only), 500 `write-failed`. `meta.path` gains `source` (`env` | `flag` | `default`) and `pending`
   (`on` | `off`) until the restart applies a toggle.
-- `@hoplens/ui`: the Path off state has an **Enable request path** button (block coverage from
+- `@hoplens/ui`: the Path view's off state has an **Enable request path** button (block coverage from
   start; CPU-heavy code runs slower), then "Restart your dev server to apply (saving a file restarts
   node --watch)" with an `on at next start` badge and Undo. On via the flag, the pane's footer has a
   Disable link (`off at next start` and Keep it on after). Set by `HOPLENS_PATH`, it says so and

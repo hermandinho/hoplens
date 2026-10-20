@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { TEST_NODE, withTestNode } from "./test-node";
 
 const DIST = path.resolve(__dirname, "..", "dist");
 const REGISTER = path.join(DIST, "register.js");
@@ -85,7 +86,7 @@ function node(
 ): { stdout: string; stderr: string; status: number | null } {
   const e: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: root, ...env };
   for (const k of Object.keys(e)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete e[k];
-  const r = spawnSync(process.execPath, args, { cwd: root, env: e, encoding: "utf8", timeout: 30000 });
+  const r = spawnSync(TEST_NODE, args, { cwd: root, env: withTestNode(e), encoding: "utf8", timeout: 30000 });
   return { stdout: r.stdout, stderr: r.stderr, status: r.status };
 }
 

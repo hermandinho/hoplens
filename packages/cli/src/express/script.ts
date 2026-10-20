@@ -367,3 +367,16 @@ export function entryFiles(cmd: string): string[] {
       if (/^[^-][^=]*\.(c|m)?(j|t)s$/.test(w.text) && !REGISTER_RE.test(w.text)) out.push(w.text);
   return out;
 }
+
+/**
+ * The commands in `cmd` that run plain `node` (past env assignments, cross-env, npx / pnpm exec):
+ * the words after `node`, quotes removed. Exported for the doctor.
+ */
+export function nodeCommands(cmd: string): string[][] {
+  const out: string[][] = [];
+  for (const seg of tokenize(cmd)) {
+    const cls = classify(seg);
+    if (cls.kind === "node") out.push(cls.words.slice(cls.runnerIdx + 1).map((w) => w.text));
+  }
+  return out;
+}

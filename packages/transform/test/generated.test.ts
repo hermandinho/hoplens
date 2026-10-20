@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { generatedKey } from "../../core/src/path/generated";
 import { GeneratedRegistry, keyOf, retainable } from "../src/generated";
+import { TEST_NODE, testNodeFeatures, withTestNode } from "./test-node";
 
 const DIST = path.resolve(__dirname, "..", "dist");
 const REGISTER = path.join(DIST, "register.js");
@@ -97,7 +98,7 @@ function node(
 ): { out: any; stderr: string; status: number | null } {
   const env: NodeJS.ProcessEnv = { ...process.env, FX_ROOT: cwd, ...extra };
   for (const k of Object.keys(env)) if (k.startsWith("VITEST") || k === "NODE_OPTIONS") delete env[k];
-  const r = spawnSync(process.execPath, args, { cwd, env, encoding: "utf8", timeout: 30000 });
+  const r = spawnSync(TEST_NODE, args, { cwd, env: withTestNode(env), encoding: "utf8", timeout: 30000 });
   const line = r.stdout.split(/\r?\n/).find((l) => l.startsWith("{"));
   return { out: line ? JSON.parse(line) : undefined, stderr: r.stderr, status: r.status };
 }
@@ -150,6 +151,11 @@ afterAll(() => {
   }
 });
 
+// The target Node's features (HOPLENS_TEST_NODE): rows it cannot run are skipped, the reason in the title.
+const NODE = testNodeFeatures();
+const NO_STRIP = `skipped: Node ${NODE.version} cannot strip types itself (22.18+ does by default)`;
+const NO_ORDER = `skipped: Node ${NODE.version} does not keep --import order (20.11+ does), tsx's hooks run first`;
+
 describe("what register()'s loaders keep", () => {
   test("with the transform cache: a warm start keeps the same text (the loader's output, not the cache)", () => {
     for (const [dir, args] of [
@@ -166,21 +172,28 @@ describe("what register()'s loaders keep", () => {
       expect(warm.stderr).toContain("cache=hit");
       expect(warm.stderr).not.toContain("cache=miss");
       expect(warm.out).toEqual(cold.out);
-      expect(Object.values(warm.out).filter((v: any) => v?.map)).toHaveLength(dir === esm ? 2 : 1);
+      // ESM: COMPILED mode keeps a.ts and v.tsx; where Node runs `--import tsx` late (20.9 / 20.10) the
+      // hook sees each file as on disk (RAW) and keeps nothing.
+      expect(Object.values(warm.out).filter((v: any) => v?.map)).toHaveLength(
+        dir === esm ? (NODE.importOrdered ? 2 : 0) : 1,
+      );
     }
   });
 
-  test("ESM hook, COMPILED mode (tsx first): tsx's output with its inline map; plain JS is not kept", () => {
-    const r = node(["--import", TSX_ESM, "--import", "./on.mjs", "src/main.ts"], esm);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.out).toEqual({
-      "a.ts": { map: true, raw: false },
-      "plain.js": null,
-      "c.ts": null,
-      "v.tsx": { map: true, raw: false },
-      registry: true,
-    });
-  });
+  test.skipIf(!NODE.importOrdered)(
+    `ESM hook, COMPILED mode (tsx first): tsx's output with its inline map; plain JS is not kept${NODE.importOrdered ? "" : ` (${NO_ORDER})`}`,
+    () => {
+      const r = node(["--import", TSX_ESM, "--import", "./on.mjs", "src/main.ts"], esm);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.out).toEqual({
+        "a.ts": { map: true, raw: false },
+        "plain.js": null,
+        "c.ts": null,
+        "v.tsx": { map: true, raw: false },
+        registry: true,
+      });
+    },
+  );
 
   test("tsx registered after Hoplens (RAW: the hook sees the file, tsx compiles later): nothing kept", () => {
     const r = node(["--import", "./on.mjs", "--import", TSX_ESM, "src/main.ts"], esm);
@@ -188,11 +201,14 @@ describe("what register()'s loaders keep", () => {
     expect(r.out).toEqual({ "a.ts": null, "plain.js": null, "c.ts": null, "v.tsx": null, registry: true });
   });
 
-  test("Node's own type stripping: offsets are the file's, nothing kept", () => {
-    const r = node(["--import", "./on.mjs", "src/main.ts"], esm);
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.out).toEqual({ "a.ts": null, "plain.js": null, "c.ts": null, "v.tsx": null, registry: true });
-  });
+  test.skipIf(!NODE.typescript)(
+    `Node's own type stripping: offsets are the file's, nothing kept${NODE.typescript ? "" : ` (${NO_STRIP})`}`,
+    () => {
+      const r = node(["--import", "./on.mjs", "src/main.ts"], esm);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.out).toEqual({ "a.ts": null, "plain.js": null, "c.ts": null, "v.tsx": null, registry: true });
+    },
+  );
 
   test("CommonJS layer under tsx's require hook: what module._compile got; plain JS is not kept", () => {
     const r = node(["-r", TSX_CJS, "-r", "./on.cjs", "src/main.ts"], cjs);

@@ -113,9 +113,9 @@ function printBanner(rt: Runtime) {
 function requestPathLine(rt: Runtime): string | undefined {
   const m = pathMeta(undefined, process.env, rt.pathControl);
   if (m.state === "on")
-    return `Request path: on${m.source === "flag" ? " (enabled in the Path tab)" : " (HOPLENS_PATH)"}; block coverage runs, so CPU-heavy code runs slower.`;
+    return `Request path: on${m.source === "flag" ? " (enabled in the Path view)" : " (HOPLENS_PATH)"}; block coverage runs, so CPU-heavy code runs slower.`;
   if (m.state === "disabled-c8" || m.state === "error")
-    return `Request path: ${m.state} (${m.reason ?? "see the Path tab"}).`;
+    return `Request path: ${m.state} (${m.reason ?? "see the Path view: press x on a request"}).`;
   return undefined;
 }
 

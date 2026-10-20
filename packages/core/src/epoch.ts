@@ -444,8 +444,16 @@ export class EpochTracker {
     if (newCompile || t - this.lastProbeAt >= this.minProbeMs) {
       this.lastProbeAt = t;
       const m = this.probe();
-      if (this.lastMtime < 0) this.lastMtime = m;
-      else if (m > this.lastMtime) {
+      if (this.lastMtime < 0) {
+        this.lastMtime = m;
+        // Baseline the chunk index. Next 16 creates the tracker inside the first request, which then
+        // compiles its route before any probe ran (the output watcher is armed by the first probe), so
+        // those chunks were never read: an edit to that route rewrote its chunk in place, every module
+        // read as "added" and the trusted diff saw no edit (no epoch). The update reads the route entries
+        // written since the prime and the chunks they load, as an absorbed (non-bumping) rebuild.
+        this.probe.drainNames?.();
+        this.chunkDiff(true);
+      } else if (m > this.lastMtime) {
         this.lastMtime = m;
         // An on-demand compile of a brand-new route isn't an edit, nor are the chunk writes that
         // trail it and get noticed by the next (unrelated) request.

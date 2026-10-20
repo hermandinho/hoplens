@@ -6,6 +6,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { TEST_NODE, withTestNode } from "./test-node";
 
 export const PKG = path.resolve(__dirname, "..");
 export const REGISTER = path.join(PKG, "dist", "register.js");
@@ -93,6 +94,7 @@ export function childEnv(extra: Record<string, string | undefined> = {}): NodeJS
       continue;
     env[k] = v;
   }
+  withTestNode(env);
   for (const [k, v] of Object.entries(extra)) {
     if (v === undefined) delete env[k];
     else env[k] = v;
@@ -112,7 +114,7 @@ export interface Child {
 
 /** `stdin`: pipe the child's stdin (for a test that signals it), else ignored. */
 export function run(args: string[], cwd: string, env: NodeJS.ProcessEnv, stdin = false): Child {
-  const proc = spawn(process.execPath, args, { cwd, env, stdio: [stdin ? "pipe" : "ignore", "pipe", "pipe"] });
+  const proc = spawn(TEST_NODE, args, { cwd, env, stdio: [stdin ? "pipe" : "ignore", "pipe", "pipe"] });
   let out = "";
   let err = "";
   const waiters: Array<() => void> = [];

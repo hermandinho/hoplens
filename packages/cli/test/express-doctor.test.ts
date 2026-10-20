@@ -231,7 +231,9 @@ describe("hoplens doctor (express)", () => {
   test("request path: an info line when HOPLENS_PATH=1 is in the dev script, a warning with NODE_V8_COVERAGE", async () => {
     healthy();
     await run();
-    expect(out.text()).toContain("• request path: off — enable it in the Path tab or with hoplens init --path");
+    expect(out.text()).toContain(
+      "• request path: off — enable it in the Path view (press x on a request) or with hoplens init --path",
+    );
 
     out.restore();
     out = captureConsole();

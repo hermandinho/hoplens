@@ -48,7 +48,7 @@ export function JourneyPane() {
       register(
         "trace",
         "x",
-        "Toggle Path mode: which side of each decision this request took",
+        "Toggle the Path view: which side of each decision this request took",
         () => {
           togglePathMode();
           // On a path trace, move focus to its trail so j / k reach the lanes (not the request list).

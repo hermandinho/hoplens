@@ -7,19 +7,24 @@ packages (`cli`, `core`, `express`, `next`, `schema`, `transform`, `ui`). Versio
 
 The packages are **linked**, not fixed (`.changeset/config.json`: `"linked": [["@hoplens/*", "hoplens"]]`).
 A package only gets a new version when a changeset names it (or a dependency of it was bumped);
-the packages bumped in the same release share the highest version among them. So versions differ
-between packages. On `develop` today:
+the packages bumped in the same release share the highest version among them. So versions can
+differ between packages. After the 0.4.0 release (2026-10-20) every package changed, so all eight
+are at the same version for now:
 
 | package              | version | last tag on the repo |
 |----------------------|--------:|---------------------:|
-| `hoplens`            |   0.3.1 |                0.3.1 |
-| `@hoplens/core`      |   0.3.1 |                0.3.1 |
-| `@hoplens/next`      |   0.3.1 |                0.3.1 |
-| `@hoplens/ui`        |   0.3.1 |                0.3.1 |
-| `@hoplens/cli`       |   0.2.0 |                0.2.0 |
-| `@hoplens/schema`    |   0.1.0 |                0.1.0 |
-| `@hoplens/transform` |   0.1.0 |                0.1.0 |
-| `@hoplens/express`   |   0.3.0 |  none (never published) |
+| `hoplens`            |   0.4.0 |                0.4.0 |
+| `@hoplens/core`      |   0.4.0 |                0.4.0 |
+| `@hoplens/next`      |   0.4.0 |                0.4.0 |
+| `@hoplens/express`   |   0.4.0 |                0.4.0 |
+| `@hoplens/ui`        |   0.4.0 |                0.4.0 |
+| `@hoplens/cli`       |   0.4.0 |                0.4.0 |
+| `@hoplens/schema`    |   0.4.0 |                0.4.0 |
+| `@hoplens/transform` |   0.4.0 |                0.4.0 |
+
+The Version Packages PR is opened by the release workflow with `GITHUB_TOKEN`, so GitHub does not
+run the `ci` workflow on it. Its code already passed CI on `main`; before merging it, run
+`pnpm lint` on the release branch (the version step's formatting is what broke lint before).
 
 ## Preflight: one-time setup
 
@@ -103,31 +108,27 @@ These steps are manual and only need to happen once (or when a token expires).
      (cd packages/$p && npm pack --dry-run)
    done
    ```
-   Sizes from the working tree on 2026-10-20 (`develop` at dda80a9 plus
-   uncommitted work), for comparison. A large jump in one package usually means
-   a build started shipping something it should not:
+   Sizes at the 0.4.0 release (2026-10-20), for comparison. A large jump in one
+   package usually means a build started shipping something it should not:
 
    | package              | version | tarball | unpacked | files |
    |----------------------|--------:|--------:|---------:|------:|
-   | `hoplens`            |   0.3.1 |  6.6 kB |  22.1 kB |    41 |
-   | `@hoplens/cli`       |   0.2.0 | 71.2 kB | 268.8 kB |     4 |
-   | `@hoplens/next`      |   0.3.1 | 41.9 kB | 185.8 kB |    16 |
-   | `@hoplens/express`   |   0.3.0 | 169.4 kB | 612.3 kB |   10 |
-   | `@hoplens/core`      |   0.3.1 | 908.9 kB | 3334.9 kB |  26 |
-   | `@hoplens/schema`    |   0.1.0 | 62.7 kB | 269.2 kB |     8 |
-   | `@hoplens/transform` |   0.1.0 | 131.6 kB | 500.8 kB |   18 |
-   | `@hoplens/ui`        |   0.3.1 | 151.2 kB | 492.6 kB |     3 |
+   | `hoplens`            |   0.4.0 |  6.6 kB |  22.2 kB |    41 |
+   | `@hoplens/cli`       |   0.4.0 | 79.8 kB | 297.1 kB |     4 |
+   | `@hoplens/next`      |   0.4.0 | 44.1 kB | 191.9 kB |    16 |
+   | `@hoplens/express`   |   0.4.0 | 169.5 kB | 612.6 kB |   10 |
+   | `@hoplens/core`      |   0.4.0 | 912.2 kB | 3347.1 kB |  26 |
+   | `@hoplens/schema`    |   0.4.0 | 62.7 kB | 269.2 kB |     8 |
+   | `@hoplens/transform` |   0.4.0 | 131.6 kB | 500.8 kB |   18 |
+   | `@hoplens/ui`        |   0.4.0 | 151.2 kB | 492.6 kB |     3 |
 
 2. **Run the install-flow smoke** locally:
    ```bash
    pnpm --filter hoplens-e2e verify:install
    ```
-   Known gap: `e2e/scripts/verify-install.mjs` packs `meta cli next core
-   schema transform ui` but not `express`, while `hoplens` depends on
-   `@hoplens/express`. Until `@hoplens/express` is on the registry the scratch
-   install cannot resolve it from the tarballs (inferred from the script, not
-   run), so add `express` to its `WORKSPACE_DIRS` before the first release that
-   publishes it.
+   It packs every workspace package the `hoplens` meta package depends on
+   (followed from its `workspace:` dependencies), installs them into a scratch
+   Next app from the tarballs, then runs `init` and `doctor`.
 3. **Verify the dev-only guarantee**:
    ```bash
    pnpm --filter hoplens-e2e verify:build

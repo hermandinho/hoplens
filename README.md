@@ -36,9 +36,6 @@ npm run dev
 # open http://localhost:<your port>/__hoplens   (also served standalone on http://127.0.0.1:4983)
 ```
 
-Express support lands in the next release: `hoplens@0.3.1` on npm has no `hoplens/express`
-entries yet (unreleased on npm).
-
 Requires Express `>=4.18 <6` and Node 20.9+. `init` edits only one script: `scripts.dev`, else
 `start:dev`, else `watch`. It handles `node [--watch]`, `tsx [watch]` and `nodemon`, keeps env
 prefixes and `&&` chains as written, and in a terminal asks whether to turn on the request path

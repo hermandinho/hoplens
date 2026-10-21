@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/cli",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "Hoplens CLI — bin `hoplens`. init / doctor / remove.",
   "keywords": ["hoplens", "cli", "nextjs", "devtools", "init"],
   "license": "MIT",

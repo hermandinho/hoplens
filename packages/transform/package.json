@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/transform",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Hoplens source transform — rewrites exported functions as traced wrappers without moving a single line.",
   "keywords": ["hoplens", "typescript", "ast", "source-maps", "transform"],
   "license": "MIT",
@@ -10,7 +10,9 @@
     "url": "git+https://github.com/hermandinho/hoplens.git",
     "directory": "packages/transform"
   },
-  "bugs": { "url": "https://github.com/hermandinho/hoplens/issues" },
+  "bugs": {
+    "url": "https://github.com/hermandinho/hoplens/issues"
+  },
   "homepage": "https://github.com/hermandinho/hoplens/tree/main/packages/transform#readme",
   "type": "commonjs",
   "main": "./dist/index.js",
@@ -43,7 +45,9 @@
     "test": "vitest run",
     "test:runners": "vitest run test/hooks.test.ts test/cjs-layer.test.ts test/generated.test.ts test/cache.test.ts"
   },
-  "engines": { "node": ">=20.9" },
+  "engines": {
+    "node": ">=20.9"
+  },
   "dependencies": {
     "typescript": ">=5.6.0 <7"
   },

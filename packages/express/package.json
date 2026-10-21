@@ -1,6 +1,6 @@
 {
   "name": "@hoplens/express",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Hoplens adapter for Express 4 and 5 — a register hook and hoplens(app).",
   "keywords": ["hoplens", "express", "adapter", "instrumentation", "devtools"],
   "license": "MIT",
